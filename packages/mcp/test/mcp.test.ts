@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
@@ -37,8 +38,10 @@ async function withServer(fn: (call: (method: string, params?: unknown, id?: num
   try {
     await fn(call, notify);
   } finally {
+    const closed = once(child, 'close');
     child.kill();
-    await fsp.rm(dir, { recursive: true, force: true });
+    await closed;
+    await fsp.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

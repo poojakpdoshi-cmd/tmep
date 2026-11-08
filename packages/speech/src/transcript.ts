@@ -17,6 +17,8 @@ export interface Transcript {
 }
 
 export function makeTranscript(engine: string, lang: string, words: Word[], extra: { model?: string; approx?: boolean } = {}): Transcript {
+  if (words.some(w => !Number.isFinite(w.s) || !Number.isFinite(w.e) || w.s < 0 || w.e <= w.s))
+    throw new TmepError('E_INPUT', 'transcript contains invalid word timestamps');
   const clean = words
     .map((w) => ({ ...w, w: w.w.trim(), s: r2(w.s, 3), e: r2(Math.max(w.e, w.s + 0.01), 3) }))
     .filter((w) => w.w.length > 0)
@@ -24,7 +26,8 @@ export function makeTranscript(engine: string, lang: string, words: Word[], extr
   // Enforce monotonic, non-overlapping word times (engines occasionally overlap).
   for (let i = 1; i < clean.length; i++) {
     const prev = clean[i - 1]!;
-    if (clean[i]!.s < prev.e) prev.e = Math.max(prev.s + 0.01, clean[i]!.s);
+    if (clean[i]!.s <= prev.s) throw new TmepError('E_INPUT', 'transcript contains simultaneous word starts; realignment required');
+    if (clean[i]!.s < prev.e) prev.e = clean[i]!.s;
   }
   return { v: 1, engine, model: extra.model, lang, approx: extra.approx ?? false, words: clean, createdAt: new Date().toISOString() };
 }
@@ -155,7 +158,7 @@ export function parseTranscriptJson(text: string): { words: Word[]; lang?: strin
     s: Number(o.s ?? o.start),
     e: Number(o.e ?? o.end),
   });
-  if (Array.isArray(j.words)) return { words: (j.words as Record<string, unknown>[]).map(pick), lang: j.language as string | undefined, approx: false };
+  if (Array.isArray(j.words)) return { words: (j.words as Record<string, unknown>[]).map(pick), lang: (j.language ?? j.lang) as string | undefined, approx: j.approx === true };
   if (Array.isArray(j.segments)) {
     const words: Word[] = [];
     let approx = false;

@@ -1,5 +1,13 @@
 # TMEP: video editing engine for AI agents
 
+## New: focused text-to-image explainer
+
+[Download the 1080×1920, 60 fps silent preview](preview/trial-visual-only.mp4) · [View the contact sheet](preview/contact-sheet.png)
+
+The preview has no narration. Voiceover synchronization and real presenter footage still need validation; see the quality report for verified results and limitations.
+
+The rescued 60 fps workflow and its limitations are documented in [RENDER_GUIDE.md](RENDER_GUIDE.md), [AUDIT.md](AUDIT.md), [ARCHITECTURE.md](ARCHITECTURE.md) and [QUALITY_REPORT.md](QUALITY_REPORT.md). Start with `node examples/explainer/render.mjs examples/explainer/preview.json`. Without narration, this produces a clearly labeled silent design preview. The existing editing engine described below remains available.
+
 **Turn raw footage into a finished reel with a handful of tool calls, not thousands of tokens of code.**
 
 TMEP is a local-first video editing engine built for AI coding agents (Claude Code,

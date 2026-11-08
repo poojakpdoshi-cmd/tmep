@@ -1,0 +1,63 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": "60/1",
+  "frames": "1200",
+  "duration": "20.000000",
+  "audioStreams": 0,
+  "decoded": true,
+  "minMeanLuma": 15.283580043859649,
+  "maxMeanLuma": 42.488623903508774,
+  "largestFrameDeltas": [
+    {
+      "frame": 453,
+      "delta": 2.7454769736842106
+    },
+    {
+      "frame": 456,
+      "delta": 2.596217105263158
+    },
+    {
+      "frame": 457,
+      "delta": 2.547286184210526
+    },
+    {
+      "frame": 454,
+      "delta": 2.457510964912281
+    },
+    {
+      "frame": 452,
+      "delta": 2.3578673245614037
+    },
+    {
+      "frame": 455,
+      "delta": 2.2175164473684212
+    },
+    {
+      "frame": 451,
+      "delta": 2.215734649122807
+    },
+    {
+      "frame": 458,
+      "delta": 2.2124451754385963
+    },
+    {
+      "frame": 450,
+      "delta": 2.076343201754386
+    },
+    {
+      "frame": 207,
+      "delta": 0.9328399122807017
+    },
+    {
+      "frame": 753,
+      "delta": 0.8744517543859649
+    },
+    {
+      "frame": 447,
+      "delta": 0.7793311403508771
+    }
+  ],
+  "captionQuantizationToleranceMs": 16.666666666666668,
+  "realSpeechSyncMeasured": false
+}

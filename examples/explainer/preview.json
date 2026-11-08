@@ -1,0 +1,6 @@
+{
+  "output": "../../../trial-final",
+  "duration": 20,
+  "font": "Segoe UI",
+  "captions": {"fontSize": 48, "highlight": true, "accent": "#5a9dff"}
+}
