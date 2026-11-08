@@ -9,6 +9,7 @@
  * is derived automatically from the word timestamps.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -19,7 +20,8 @@ const arg = (k: string, d?: string) => { const i = process.argv.indexOf('--' + k
 const W = 1080, H = 1920, FPS = Number(arg('fps', '60'));
 const CAPS = arg('captions', '1') !== '0';
 const work = join(here, 'output', 'work'); mkdirSync(work, { recursive: true });
-const out = resolve(arg('out', join(here, 'output', CAPS ? 'voiceover-reel.mp4' : 'voiceover-reel-nocaps.mp4')));
+const out = resolve(arg('out') ?? join(here, 'output', CAPS ? 'voiceover-reel.mp4' : 'voiceover-reel-nocaps.mp4'));
+if (!Number.isInteger(FPS) || FPS < 1 || FPS > 120) throw new Error('FPS must be a whole number between 1 and 120.');
 const ff = (args: string[]) => { const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]); if (r.status) throw new Error(r.stderr.toString()); };
 
 interface Word { w: string; s: number; e: number }
@@ -53,43 +55,77 @@ const a = arg('audio'), wj = arg('words');
 if ((!a || !wj) && !process.argv.includes('--synthetic')) throw new Error('Supply --audio and --words. Synthetic speech requires explicit --synthetic opt-in.');
 const src = a && wj ? { audio: resolve(a), words: JSON.parse(readFileSync(wj, 'utf8')) as Word[], synthetic: false } : synth();
 const { audio, words } = src;
-if (!Array.isArray(words) || !words.length || words.some((w,i)=>!Number.isFinite(w.s)||!Number.isFinite(w.e)||w.s<0||w.e<=w.s||(i>0&&w.s<words[i-1].e))) throw new Error('Word timestamps must be finite, positive-duration and non-overlapping.');
-const dur = Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio]).stdout.toString());
+if (!Array.isArray(words) || !words.length || words.some((w, i) =>
+  typeof w?.w !== 'string' || !w.w.trim() || !Number.isFinite(w.s) || !Number.isFinite(w.e) ||
+  w.s < 0 || w.e <= w.s || (i > 0 && w.s < words[i - 1]!.e)
+)) throw new Error('Words must have nonempty text and finite, non-overlapping, positive-duration timestamps.');
+const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio]);
+if (probe.error || probe.status !== 0) throw new Error(`ffprobe failed: ${probe.error?.message ?? probe.stderr.toString()}`);
+const dur = Number(probe.stdout.toString());
+if (!Number.isFinite(dur) || dur <= 0) throw new Error('Voiceover has invalid duration.');
+if (words.at(-1)!.e > dur + 0.05) throw new Error(`Word timestamps extend past audio duration (${dur.toFixed(2)}s).`);
 
 // waveform peaks (100/s) from raw PCM
 const PPS = 100;
-const pcm = spawnSync('ffmpeg', ['-v', 'error', '-i', audio, '-f', 's16le', '-ac', '1', '-ar', '8000', '-'], { maxBuffer: 1 << 28 }).stdout;
+const decoded = spawnSync('ffmpeg', ['-v', 'error', '-i', audio, '-f', 's16le', '-ac', '1', '-ar', '8000', '-'], { maxBuffer: 1 << 28 });
+if (decoded.error || decoded.status !== 0) throw new Error(`Audio decode failed: ${decoded.error?.message ?? decoded.stderr.toString()}`);
+const pcm = decoded.stdout;
 const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1), per = 8000 / PPS, peaks: number[] = [];
-for (let i = 0; i < samples.length; i += per) { let m = 0; for (let j = i; j < Math.min(i + per, samples.length); j++) m = Math.max(m, Math.abs(samples[j])); peaks.push(m / 32768); }
-const pmax = Math.max(...peaks) || 1; const peaksN = peaks.map(p => +(p / pmax).toFixed(3));
+for (let i = 0; i < samples.length; i += per) { let m = 0; for (let j = i; j < Math.min(i + per, samples.length); j++) m = Math.max(m, Math.abs(samples[j] ?? 0)); peaks.push(m / 32768); }
+const pmax = peaks.reduce((max, peak) => Math.max(max, peak), 0) || 1; const peaksN = peaks.map(p => +(p / pmax).toFixed(3));
 
 // scene plan: one scene per sentence (sentence ends found from punctuation in the transcript)
 const ends = words.map((w, i) => /[.!?]$/.test(w.w) ? i : -1).filter(i => i >= 0);
 if (ends.length < 4) throw new Error('need >=4 sentences in the transcript for the 4-scene template');
-const scenes = [0, 1, 2, 3].map(k => ({ from: k ? ends[k - 1] + 1 : 0, to: k < 3 ? ends[k] : words.length - 1 }));
-const sIdx = (k: number) => Array.from({ length: scenes[k].to - scenes[k].from + 1 }, (_, i) => scenes[k].from + i);
+const scenes = [0, 1, 2, 3].map(k => ({ from: k ? ends[k - 1]! + 1 : 0, to: k < 3 ? ends[k]! : words.length - 1 }));
+const sIdx = (k: number) => { const scene = scenes[k]; if (!scene) throw new Error(`Missing scene ${k}`); return Array.from({ length: scene.to - scene.from + 1 }, (_, i) => scene.from + i); };
 const split = (ids: number[]) => { const h = Math.ceil(ids.length / 2); return [ids.slice(0, h), ids.slice(h)]; };
 const s2 = sIdx(2);
 const data = {
   words, peaks: peaksN, pps: PPS, dur, captions: CAPS, scenes,
   heroLines1: split(sIdx(0)), heroLines4: split(sIdx(3)),
-  cuts: [words[s2[Math.floor(s2.length * 0.4)]].s, words[s2[Math.floor(s2.length * 0.65)]].s],
+  cuts: [words[s2[Math.floor(s2.length * 0.4)]!]!.s, words[s2[Math.floor(s2.length * 0.65)]!]!.s],
 };
 writeFileSync(join(here, 'output', 'plan.json'), JSON.stringify({ synthetic: src.synthetic, dur, scenes, cuts: data.cuts, words }, null, 1));
 const html = readFileSync(join(here, 'scene.html'), 'utf8').replace('<script>', `<script>window.DATA=${JSON.stringify(data)};</script><script>`);
 const page = join(work, 'scene.html'); writeFileSync(page, html);
 
 const chrome = await ChromePage.launch();
+try {
 await chrome.open(pathToFileURL(page).href, W, H);
 const enc = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-i', audio,
   '-filter_complex', '[1:a]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]', '-map', '0:v', '-map', '[a]',
-  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', out], { stdio: ['pipe', 'inherit', 'inherit'] });
+  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', out], { stdio: ['pipe', 'inherit', 'pipe'] });
+let encoderError: Error | undefined;
+let encoderStderr = '';
+enc.on('error', (err) => { encoderError = err; });
+enc.stdin.on('error', (err) => { encoderError = err; });
+enc.stderr.on('data', (data: Buffer) => { encoderStderr = (encoderStderr + data.toString()).slice(-8192); });
+const encoderClosed = new Promise<number | null>((resolve) => enc.once('close', resolve));
 const frames = Math.round(dur * FPS), t0 = Date.now();
-for (let f = 0; f < frames; f++) {
-  await chrome.eval(`window.TMEP.seek(${(f / FPS).toFixed(5)})`);
-  const buf = await chrome.screenshot(W, H, 1, 'jpeg');
-  if (!enc.stdin.write(buf)) await new Promise(r => enc.stdin.once('drain', r));
+try {
+  for (let f = 0; f < frames; f++) {
+    if (encoderError) throw encoderError;
+    await chrome.eval(`window.TMEP.seek(${(f / FPS).toFixed(5)})`);
+    const buf = await chrome.screenshot(W, H, 1, 'jpeg');
+    if (!enc.stdin.write(buf)) {
+      await Promise.race([
+        once(enc.stdin, 'drain'),
+        encoderClosed.then(() => { throw new Error(`FFmpeg ended before frame ${f + 1}: ${encoderStderr}`); }),
+      ]);
+    }
+  }
+  enc.stdin.end();
+  const exitCode = await encoderClosed;
+  if (encoderError || exitCode !== 0) throw new Error(`FFmpeg encode failed (${exitCode}): ${encoderError?.message ?? encoderStderr}`);
+  if (!existsSync(out)) throw new Error(`FFmpeg completed but output file is missing: ${out}`);
+} catch (error) {
+  enc.stdin.destroy();
+  enc.kill();
+  await encoderClosed;
+  throw error;
 }
-enc.stdin.end(); await new Promise(r => enc.on('close', r)); await chrome.close();
 console.log(JSON.stringify({ out, frames, fps: FPS, dur: +dur.toFixed(2), synthetic: src.synthetic, captions: CAPS, renderSec: +((Date.now() - t0) / 1000).toFixed(1) }));
-if (!existsSync(out)) process.exit(1);
+} finally {
+  chrome.close();
+}
