@@ -33,6 +33,26 @@ On a measured benchmark task (raw clip -> 20 s captioned, animated reel + one re
 the model wrote **217 tokens with TMEP vs 17,937** for a conventional shell-and-files
 workflow, and cumulative context was **~6x lower** ([details and caveats](docs/BENCHMARKS.md)).
 
+## Reference-reel cut/pacing analysis (Phase 2: initial module)
+
+Import a reference reel and inspect **candidate hard cuts** and shot pacing:
+
+```bash
+tmep import reference.mp4
+tmep reference v1 --maxSeconds 120
+```
+
+Agents can call `video_import` and then `video_reference {"asset":"v1"}`. Results are cached by video content hash
+and scan settings, with compact output (at most 24 cut timestamps in standard
+mode). Full results stay in the local cache and are accessible in debug mode.
+
+This is **not** full reference-style understanding. Hard-cut detection can mistake
+flashes for cuts and miss crossfades or very short edits. It does not detect
+typography, animation style, grade, camera movement or music beats. Analysis
+samples at 15 fps and 320 pixels wide by default; scanning is bounded to 120
+seconds by default (300 maximum). Use its pacing statistics as guidance, not
+as proof that TMEP can automatically reproduce another creator's editing style.
+
 ## Status
 
 | Area | Status |
