@@ -1,0 +1,15 @@
+{
+  "title": "TMEP — Building in public",
+  "timingSource": "Editorial reading pace; no speech alignment or synthesized voice",
+  "scenes": [
+    {"kind":"hook","label":"THE POSSIBILITY","title":["Your voice.","A complete reel?"],"captions":["What if I told you that you could create a professional reel","using just your voice, without spending hours editing?"]},
+    {"kind":"intro","label":"MEET THE PROJECT","title":["Meet TMEP.","Built in the open."],"captions":["That's exactly what I'm building with my new open-source project called TMEP."]},
+    {"kind":"problem","label":"THE PROBLEM","title":["One reel.","So many moving parts."],"captions":["Creating a professional reel takes a lot of time.","You need to add captions, design motion graphics,","synchronize animations, and create smooth transitions."]},
+    {"kind":"solution","label":"THE QUESTION","title":["What if it all","worked together?"],"captions":["But what if all of this could be automated?","That's the goal of TMEP."]},
+    {"kind":"workflow","label":"THE WORKFLOW WE'RE BUILDING","title":["From your voice","to your next reel."],"captions":["Simply upload your voiceover,","and TMEP is being designed to analyze your speech,","generate synchronized captions, create relevant motion graphics,","and combine everything into a complete video."]},
+    {"kind":"modes","label":"YOUR FORMAT. YOUR CHOICE.","title":["On camera.","Or entirely animated."],"captions":["You can even add your own facecam","or create an entire animated reel without showing your face."]},
+    {"kind":"open","label":"OPEN SOURCE","title":["Explore the code.","Build with us."],"captions":["And because it's open-source, anyone can explore the code,","contribute, and help improve it."]},
+    {"kind":"progress","label":"BUILDING IN PUBLIC","title":["Real work.","Real progress."],"captions":["TMEP is still under development,","and I'll be sharing its real progress, challenges, and results."]},
+    {"kind":"close","label":"THIS IS JUST THE BEGINNING","title":["Follow the build.","Shape what comes next."],"captions":["Follow along to see what we build!"]}
+  ]
+}

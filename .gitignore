@@ -6,3 +6,4 @@ transcripts/
 *.log
 .DS_Store
 Thumbs.db
+examples/voiceover-reel/output/work/

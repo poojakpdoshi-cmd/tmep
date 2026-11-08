@@ -1,0 +1,19 @@
+What if I told you that you could create a professional reel using just your voice, without spending hours editing?
+
+That's exactly what I'm building with my new open-source project called TMEP.
+
+Creating a professional reel takes a lot of time. You need to add captions, design motion graphics, synchronize animations, and create smooth transitions.
+
+But what if all of this could be automated?
+
+That's the goal of TMEP.
+
+Simply upload your voiceover, and TMEP is being designed to analyze your speech, generate synchronized captions, create relevant motion graphics, and combine everything into a complete video.
+
+You can even add your own facecam or create an entire animated reel without showing your face.
+
+And because it's open-source, anyone can explore the code, contribute, and help improve it.
+
+TMEP is still under development, and I'll be sharing its real progress, challenges, and results.
+
+Follow along to see what we build!
