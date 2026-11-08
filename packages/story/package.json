@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/story",
+  "version": "0.1.0",
+  "description": "Deterministic storytelling rules, templates, planner",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/planner.ts"
+}

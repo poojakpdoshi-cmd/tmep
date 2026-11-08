@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/motion",
+  "version": "0.1.0",
+  "description": "ASS/libass motion-graphics compiler: captions, presets, icons, fonts",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/compile.ts"
+}

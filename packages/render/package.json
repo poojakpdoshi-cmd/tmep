@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/render",
+  "version": "0.1.0",
+  "description": "Segment renderer, audio mix, SFX synthesis, background jobs",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/render.ts"
+}

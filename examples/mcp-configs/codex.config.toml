@@ -1,0 +1,6 @@
+[mcp_servers.tmep]
+command = "node"
+args = ["/abs/path/tmep/bin/tmep-mcp.js"]
+env = { TMEP_PROJECT = "/abs/path/my-reel" }
+startup_timeout_sec = 20
+tool_timeout_sec = 120

@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/mcp",
+  "version": "0.1.0",
+  "description": "Dependency-free dual-era MCP stdio server",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/server.ts"
+}

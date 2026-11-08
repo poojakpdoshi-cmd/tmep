@@ -1,0 +1,10 @@
+[
+  "delete fillers=true",
+  "tighten max=0.25",
+  "captions boxed accent=#22D3EE",
+  "zoom @generative ai to=1.18",
+  "gfx keyword @secret props.text=secret d=1.4",
+  "sfx ding @secret",
+  { "op": "gfx", "preset": "lower_third", "at": 0.5, "d": 3.5, "props": { "name": "Your Name", "role": "Creator" } },
+  { "op": "transition", "type": "fade", "d": 0.3, "all": true }
+]

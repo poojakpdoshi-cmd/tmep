@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/speech",
+  "version": "0.1.0",
+  "description": "whisper.cpp / faster-whisper / import adapters, transcript analysis, Hinglish",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/engines.ts"
+}

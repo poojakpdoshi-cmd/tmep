@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tmep": {
+      "command": "node",
+      "args": ["C:/Users/you/tmep/bin/tmep-mcp.js"],
+      "env": { "TMEP_PROJECT": "C:/Users/you/Videos/my-reel" }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/media",
+  "version": "0.1.0",
+  "description": "Safe subprocess + FFmpeg/ffprobe probing and analysis",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/ffmpeg.ts"
+}

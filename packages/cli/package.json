@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/cli",
+  "version": "0.1.0",
+  "description": "tmep command-line interface",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/main.ts"
+}

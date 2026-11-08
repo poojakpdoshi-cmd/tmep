@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "tmep": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/abs/path/tmep/bin/tmep-mcp.js"],
+      "env": { "TMEP_PROJECT": "/abs/path/my-reel" }
+    }
+  }
+}

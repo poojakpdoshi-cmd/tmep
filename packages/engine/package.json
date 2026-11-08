@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/engine",
+  "version": "0.1.0",
+  "description": "High-level engine API shared by MCP and CLI",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/api.ts"
+}

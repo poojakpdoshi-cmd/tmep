@@ -1,0 +1,9 @@
+{
+  "name": "@tmep/core",
+  "version": "0.1.0",
+  "description": "Timeline model, TMEP ops, schema validation, project state",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": "./src/index.ts"
+}

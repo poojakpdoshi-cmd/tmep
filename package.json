@@ -1,0 +1,32 @@
+{
+  "name": "tmep",
+  "version": "0.1.0",
+  "description": "AI-agent-native video editing engine with the Token-Minimal Editing Protocol (TMEP): local transcription, deterministic editing, motion graphics and FFmpeg rendering behind compact MCP/CLI tools.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "tmep": "bin/tmep.js",
+    "tmep-mcp": "bin/tmep-mcp.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"packages/*/test/*.test.ts\"",
+    "test:e2e": "node --test --test-concurrency=1 \"tests/*.test.ts\"",
+    "test:all": "npm test && npm run test:e2e",
+    "typecheck": "tsc -p tsconfig.json",
+    "bench": "node bench/token-bench.ts",
+    "tmep": "node bin/tmep.js",
+    "mcp": "node bin/tmep-mcp.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "keywords": ["video-editing", "mcp", "ffmpeg", "whisper", "ai-agents", "motion-graphics", "captions", "token-efficiency"]
+}
