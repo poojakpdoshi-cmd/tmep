@@ -4,7 +4,7 @@
  *   node examples/voiceover-reel/render.ts [--audio vo.wav --words words.json] [--out file.mp4] [--captions 0] [--fps 60]
  *
  * With --audio/--words (words.json = [{w,s,e}] in seconds, e.g. from Whisper) the real voiceover drives everything.
- * Without them, a SYNTHETIC flite voiceover is generated word by word so timings are exact (labelled as such).
+ * Only with explicit --synthetic, a SYNTHETIC flite voiceover is generated word by word so timings are exact (labelled as such).
  * Scene choreography is a designed template; all timing (word reveals, caption pills, cuts, scene changes)
  * is derived automatically from the word timestamps.
  */
@@ -50,8 +50,10 @@ function synth(): { audio: string; words: Word[]; synthetic: true } {
 }
 
 const a = arg('audio'), wj = arg('words');
+if ((!a || !wj) && !process.argv.includes('--synthetic')) throw new Error('Supply --audio and --words. Synthetic speech requires explicit --synthetic opt-in.');
 const src = a && wj ? { audio: resolve(a), words: JSON.parse(readFileSync(wj, 'utf8')) as Word[], synthetic: false } : synth();
 const { audio, words } = src;
+if (!Array.isArray(words) || !words.length || words.some((w,i)=>!Number.isFinite(w.s)||!Number.isFinite(w.e)||w.s<0||w.e<=w.s||(i>0&&w.s<words[i-1].e))) throw new Error('Word timestamps must be finite, positive-duration and non-overlapping.');
 const dur = Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audio]).stdout.toString());
 
 // waveform peaks (100/s) from raw PCM

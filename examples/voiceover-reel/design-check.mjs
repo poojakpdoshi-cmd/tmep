@@ -1,0 +1,7 @@
+import fs from 'node:fs';import {spawnSync} from 'node:child_process';import path from 'node:path';
+const dir=path.resolve('../quality-prototype'),v=process.argv[2]||'v1',file=path.join(dir,`TMEP-quality-prototype-${v}.mp4`);
+function run(args){const r=spawnSync('ffmpeg',args,{maxBuffer:40*1024*1024});if(r.status)throw Error(r.stderr.toString());return r.stdout;}
+const info=JSON.parse(spawnSync('ffprobe',['-v','error','-show_streams','-show_format','-of','json',file]).stdout);if(info.streams[0].nb_frames!=='900'||info.streams[0].r_frame_rate!=='60/1')throw Error('format');
+run(['-v','error','-i',file,'-f','null','-']);run(['-v','error','-y','-i',file,'-vf','fps=1,scale=216:384,tile=5x3','-frames:v','1',path.join(dir,`${v}-contact-sheet.png`)]);
+const b=run(['-v','error','-i',file,'-vf','scale=64:114,format=gray','-f','rawvideo','pipe:1']);let duplicate=0;const diffs=[];for(let f=1;f<900;f++){let d=0;for(let j=0;j<7296;j++)d+=Math.abs(b[f*7296+j]-b[(f-1)*7296+j]);if(!d)duplicate++;diffs.push({f,delta:d/7296});}fs.writeFileSync(path.join(dir,`${v}-checks.json`),JSON.stringify({frames:900,fps:60,duration:info.format.duration,duplicateDownsampledFrames:duplicate,largestChanges:diffs.sort((a,b)=>b.delta-a.delta).slice(0,8),audio:'absent',speechSync:'not verified'},null,2));
+for(const t of [0,2.6,3.7,8.4,9.4,11.9,14.98])run(['-v','error','-y','-ss',String(t),'-i',file,'-vf','scale=216:384,tile=6x1','-frames:v','1',path.join(dir,`${v}-motion-${t}.png`)]);

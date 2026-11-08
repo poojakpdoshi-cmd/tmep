@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><style>*{margin:0}body{background:#101010;overflow:hidden}canvas{display:block}</style><canvas id="c" width="1080" height="1920"></canvas><script>
+const V=VERSION,c=document.querySelector('canvas'),x=c.getContext('2d'),img=new Image();img.src='data:image/png;base64,ASSET';
+const ease=p=>{p=Math.max(0,Math.min(1,p));return p*p*p*(10+p*(-15+6*p))},mix=(a,b,p)=>a+(b-a)*p;
+const rect=(a,b,w,h,col)=>{x.fillStyle=col;x.fillRect(a,b,w,h)},txt=(s,a,b,z=45,col='#f2eee5',font='Arial')=>{x.fillStyle=col;x.font=`${font==='Georgia'?'italic':'600'} ${z}px ${font}`;x.fillText(s,a,b)};
+function photo(a,b,w,h,t){x.save();x.beginPath();x.rect(a,b,w,h);x.clip();const scale=Math.max(w/img.width,h/img.height)*(1+.045*ease(t/14));x.drawImage(img,a+(w-img.width*scale)/2,b+(h-img.height*scale)/2,img.width*scale,img.height*scale);x.restore()}
+function wave(y,h,t,alpha=1){x.save();x.globalAlpha=alpha;for(let i=0;i<230;i++){const k=(Math.sin(i*91.7)*43758.5)%1;const envelope=Math.pow(Math.sin(i*.056),4)*.7+.1;const hh=(.2+Math.abs(k))*(envelope)*h;rect(80+i*4,y-hh/2,2,hh,i/230<t/14?'#fb683f':'#6f716d');}x.restore()}
+function draw(t){rect(0,0,1080,1920,'#111310');
+const morph=ease((t-2.6)/1.3),zoom=ease((t-8.4)/(V===2?1.8:1));
+if(t<4){x.save();x.globalAlpha=1-ease((t-2.7)/.8);rect(0,0,1080,1920,'#eee9df');txt('TMEP / A DIFFERENT WAY TO EDIT',80,180,27,'#44483e');
+const q=ease(t/.85);x.save();x.beginPath();x.rect(70,390,950,420);x.clip();txt('One voice.',75,560+(1-q)*170,146,'#151a16');if(V===1||t>.5)txt('A whole reel.',75,740+(1-ease((t-.5)/.8))*170,V===2?125:140,'#151a16','Georgia');x.restore();txt('Start with the story.',80,1380,42,'#343b32');x.restore();}
+if(t>=2.6&&t<10.2){x.save();x.globalAlpha=morph*(1-zoom);txt('THE EDIT / DESIGN TARGET',80,190,28);txt(t<4.5?'01  Analyze':t<6?'02  Align typography':t<7.5?'03  Compose':'04  Preview',80,280,45);
+for(let i=0;i<11;i++){rect(80+i*84,1210,1,420,'#353a35');txt(String(i),80+i*84,1190,20,'#8b958a');}
+const q=ease((t-4)/1);for(let k=0;k<3;k++){x.save();x.globalAlpha=q;photo(80+k*280,1240,270,130,t+k);x.restore();}
+const words=['One voice.','A whole','new perspective.'];for(let i=0;i<3;i++){const a=ease((t-4.6-i*.25)/.6);rect(80+i*280,1400,270*a,64,'#d9dfb2');if(a>.95)txt(words[i],92+i*280,1443,25,'#182019');}
+const play=80+840*ease((t-3)/5.5);rect(play,1210,3,430,'#f26842');x.restore();}
+if(t<9.5)wave(mix(1080,1580,morph),mix(330,80,morph),t,1-zoom);
+if(t>(V===2?3.1:3.7)){const appear=ease((t-(V===2?3.1:3.7))/.7);const a=mix(V===2?280:320,0,zoom),b=mix(380,0,zoom),w=mix(V===2?520:440,1080,zoom),h=mix(V===2?780:660,1920,zoom);x.save();x.globalAlpha=appear;photo(a,b,w,h,t);const g=x.createLinearGradient(0,b,0,b+h);g.addColorStop(0,'#00000055');g.addColorStop(.55,'#00000000');g.addColorStop(1,'#000000bb');x.fillStyle=g;x.fillRect(a,b,w,h);
+x.save();x.beginPath();x.rect(a,b,w,h);x.clip();const u=ease((t-6)/.8);x.globalAlpha*=u*(V===2?1-ease((t-11.5)/.7):1);txt('A new',a+w*.075,b+h*.70,w*.13);txt('perspective.',a+w*.075,b+h*.81,w*(V===2?.115:.14),'#f2eee5','Georgia');x.restore();x.restore();}
+if(t>11.9){const q=ease((t-11.9)/1.3);rect(0,0,1080,1920,`rgba(12,19,16,${q*.88})`);x.save();x.globalAlpha=q;txt('TMEP',V===2?280:220,930,V===2?160:200);txt('Your story. Carefully composed.',150,1040,45);x.restore();}
+rect(0,1710,1080,210,'#101510');txt('DESIGN TARGET / NOT AN AUTOMATION DEMO',80,1780,V===2?26:22,'#d7ded1');txt('Silent study · illustrative waveform · AI-generated image',80,1830,V===2?24:20,'#9fa99a');
+}
+window.TMEP={ready:true,seek:draw};</script>
+
+
