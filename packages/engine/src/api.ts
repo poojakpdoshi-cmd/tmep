@@ -36,6 +36,7 @@ import {
   PROTOCOL,
 } from '../../core/src/index.ts';
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
+import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
 import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, transcriptText } from '../../speech/src/transcript.ts';
 import { transcribeWhisperCpp, transcribeFasterWhisper, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
@@ -83,6 +84,42 @@ export async function importMedia(ctx: Ctx, inp: { paths: string[] }): Promise<R
     );
   }
   return { ok: 1, assets: out };
+}
+
+// ---------------------------------------------------------------- reference-reel analysis
+/** Compact, cached cut/pacing metrics; no external API or AI tokens required. */
+export async function reference(ctx: Ctx, inp: { asset: string } & ReferenceOptions): Promise<Record<string, unknown>> {
+  const p = await openProject(ctx.project);
+  const a = await p.asset(inp.asset);
+  if (a.kind !== 'video') throw new TmepError('E_INPUT', 'reference analysis requires an imported video asset');
+  const options: ReferenceOptions = {
+    threshold: inp.threshold ?? 0.3,
+    sampleFps: inp.sampleFps ?? 15,
+    maxSeconds: inp.maxSeconds ?? 120,
+    minGapSec: inp.minGapSec ?? 0.2,
+  };
+  if (!Object.values(options).every((n) => typeof n === 'number' && Number.isFinite(n)) ||
+      options.threshold! < 0.05 || options.threshold! > 0.8 ||
+      options.sampleFps! < 2 || options.sampleFps! > 30 ||
+      options.maxSeconds! < 1 || options.maxSeconds! > 300 ||
+      options.minGapSec! < 0.1 || options.minGapSec! > 2) {
+    throw new TmepError('E_INPUT', 'invalid reference analysis settings');
+  }
+  const key = hashOf({ kind: 'reference-pacing-v1', media: a.hash, options });
+  const file = p.cachePath('ref', key + '.json');
+  let result = await readJsonOr<ReferencePacing | undefined>(file, undefined);
+  const cached = !!result;
+  if (!result) {
+    result = await analyzeReferenceReel(a.path, options);
+    await writeJson(file, result, false);
+  }
+  return shape(ctx.detail,
+    { ok: 1, asset: a.id, cuts: result.cutCount, pacing: result.pacing, analyzedSeconds: result.analyzedSeconds, ...(cached ? { cached: true } : {}) },
+    { meanShotSec: result.meanShotSec, medianShotSec: result.medianShotSec, cutsPerMinute: result.cutsPerMinute,
+      cutTimes: result.cuts.slice(0, 24), ...(result.cuts.length > 24 ? { remainingCuts: result.cuts.length - 24 } : {}),
+      truncated: result.truncated, method: result.method },
+    { file: path.relative(ctx.project, file), width: result.width, height: result.height,
+      fps: result.fps, threshold: result.threshold, sampleFps: result.sampleFps });
 }
 
 // ---------------------------------------------------------------- transcripts
