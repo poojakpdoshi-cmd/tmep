@@ -74,6 +74,9 @@ test('legacy era: initialize -> tools/list -> tools/call (+ input errors are too
     const bad = await call('tools/call', { name: 'video_import', arguments: { pathz: ['x'] } });
     assert.equal(bad.result.isError, true);
     assert.match(bad.result.content[0].text, /did you mean 'paths'/);
+    const referencePlan = await call('tools/call', { name: 'video_plan', arguments: { reference: 'v2' } });
+    assert.equal(referencePlan.result.isError, true);
+    assert.match(referencePlan.result.content[0].text, /no video assets imported/, 'reference option reaches the planner');
     const unknown = await call('tools/call', { name: 'nope', arguments: {} });
     assert.equal(unknown.error.code, -32602);
     const st = await call('tools/call', { name: 'video_inspect', arguments: {} });
