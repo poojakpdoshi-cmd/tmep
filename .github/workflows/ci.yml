@@ -27,7 +27,10 @@ jobs:
 
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: |
+          # The minimal ffmpeg formula omits libass. ffmpeg-full is keg-only.
+          brew install ffmpeg-full
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
@@ -44,6 +47,20 @@ jobs:
 
       - name: Doctor
         run: node bin/tmep.js doctor
+
+      - name: Verify FFmpeg E2E capabilities
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { ffmpegInfo, requireFilters } from './packages/media/src/ffmpeg.ts';
+          const info = await ffmpegInfo(); // Also verifies ffprobe is available.
+          console.log('FFmpeg', info.version, 'via', info.ffmpeg);
+          requireFilters(info, ['subtitles', 'ass']);
+          for (const encoder of ['libx264', 'aac', 'mpeg4']) {
+            if (!info.encoders.has(encoder)) throw new Error('FFmpeg lacks required encoder: ' + encoder);
+          }
+          console.log('E2E capabilities verified: libass subtitles/ass, libx264, aac, mpeg4, ffprobe');
+          NODE
 
       - name: End-to-end render tests
         run: npm run test:e2e
