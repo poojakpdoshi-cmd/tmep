@@ -76,7 +76,7 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 
 ### Effects (`fx`)
 
-Effects attach to main clips (`cN`) or b-roll overlays (`bN`), use **clip-local seconds**
+Effects attach to main clips (`cN`), b-roll overlays (`bN`) or graphics presets (`gN`), use **clip-local seconds**
 (0 = the element's first frame) and compose in
 order: transforms (scales/opacities multiply, offsets/rotations add) → opacity → masks (intersected).
 
@@ -91,13 +91,18 @@ order: transforms (scales/opacities multiply, offsets/rotations add) → opacity
 | `fx mask c1 shape=rect reveal=0.6 from=left at=0.2 e=out` | animated reveal: grow from `center` or wipe from left/right/top/bottom |
 | `fx mask b2 shape=ellipse w=.5 feather=.03` | mask a b-roll video/image, revealing the main video underneath |
 | `fx zoomin b2 d=1` / `fx kf b2 keys="0:o=0;1:o=1"` | keyframe b-roll zoom or opacity; transparent pixels stay transparent |
-| `fx clear c1` / `fx clear b2` | remove effects from the target |
+| `fx zoomin g3 d=1` / `fx kf g3 keys="0:o=0;1:o=1"` | group animation for a motion-graphics preset (text, cards, icons) |
+| `fx mask g3 shape=ellipse reveal=0.5` | mask the entire graphics preset as one transparent layer |
+| `fx clear c1` / `fx clear b2` / `fx clear g3` | remove effects from the target |
 
 Limitations: masks are rendered at half resolution then upscaled (fine for feathered edges,
 ≈1 px soft for hard edges); polygons must be convex; push/pull are 2D scale moves, not parallax;
-effects apply to main clips and explicit b-roll ids (graphics `gN` are not yet supported).
+effects apply to main clips, explicit b-roll ids and graphics `gN` ids.
 B-roll effect time stays continuous if the overlay spans cached render units; transparency
-is preserved rather than flattened onto a solid colour. Untargeted `fx` continues to
+is preserved rather than flattened onto a solid colour. Effected graphics presets are rendered as independent transparent ASS overlays above b-roll,
+below the shared caption/plain-graphics layer. The effect acts on the whole preset,
+not independently on each word/card. Alpha-only export with effected graphics currently
+returns an explicit error rather than silently dropping the effects. Untargeted `fx` continues to
 affect only main clips. When `cut`/`delete` splits a main clip, each
 part gets its own copy of the effects, re-timed so they continue from the original clip's state at
 the cut point (speed-aware); a removed range is skipped in effect time, like source-anchored zooms.

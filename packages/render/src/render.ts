@@ -135,10 +135,13 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
   const progress = hooks.onProgress ?? (() => {});
 
   // job working dir (ASS + fonts referenced by relative names: avoids filtergraph path escaping on Windows)
-  const assHash = sha256(compiled.ass).slice(0, 16);
+  const assHash = sha256(compiled.ass + compiled.layers.map((g) => g.ass + JSON.stringify(g.fx)).join('')).slice(0, 16);
   const work = project.workPath(`ass-${assHash}`);
   await fsp.mkdir(work, { recursive: true });
   await fsp.writeFile(path.join(work, 'gfx.ass'), compiled.ass);
+  // The separate ASS overlays use stable generated filenames, not user-provided ids.
+  const overlays = compiled.layers.map((g, i) => ({ file: `gfx-fx-${i}.ass`, at: g.at, d: g.d, fx: g.fx }));
+  await Promise.all(compiled.layers.map((g, i) => fsp.writeFile(path.join(work, overlays[i]!.file), g.ass)));
   const hasFonts = compiled.fonts.some((f) => f.file);
   if (hasFonts) stageFonts(compiled.fonts, work);
   const fontKey = compiled.fonts.map((f) => (f.file ? path.basename(f.file) : f.name)).join('|');
@@ -147,6 +150,9 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
 
   // ---- alpha graphics-only export ----
   if (opts.alpha) {
+    if (compiled.layers.length) {
+      throw new TmepError('E_INPUT', 'alpha-only export of effects on graphics is not supported yet', 'render normally, or remove fx from graphics before --alpha');
+    }
     const prores = info.encoders.has('prores_ks');
     const ext = prores ? 'mov' : 'webm';
     const out = opts.out ? path.resolve(opts.out) : project.rendersPath(`${baseName}-overlay.${ext}`);
@@ -194,6 +200,11 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
         .filter((x) => x.T !== undefined && x.T < (u.startFrame + u.frames) / fps && x.T + x.b.d > u.startFrame / fps)
         .map((x) => ({ ...x, T: r2(x.T! - u.startFrame / fps, 4) })),
       ass: sha256(assWindow(compiled.ass, u.startFrame / fps, (u.startFrame + u.frames) / fps)),
+      ...(compiled.layers.length ? {
+        gfxFx: compiled.layers
+          .filter((g) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps)
+          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx })),
+      } : {}),
       fonts: fontKey,
     });
   const hashes = units.map(unitHash);
@@ -252,7 +263,7 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
   await pool(todo, par, async (i) => {
     const u = units[i]!;
     const tmp = `${unitFiles[i]!}.${process.pid}.tmp.mp4`;
-    const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined);
+    const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, overlays);
     await ffmpeg({
       args: await maybeScript(args, work),
       cwd: work,

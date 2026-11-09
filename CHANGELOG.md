@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Phase 2.4B graphics-layer effects
+
+- `fx` accepts graphics preset ids (`gN`), reusing keyframes, pan/zoom, opacity and mask reveals on a whole graphic group.
+- Effected presets compile into separate local-time ASS documents, which are alpha-composited above b-roll without altering legacy graphics or captions.
+- Supports graphics spanning multiple render units with continuous animation timing and effect-aware cache keys.
+- Alpha-only graphics export with effected presets currently produces an explicit unsupported-operation error (not a silently incomplete render).
+
+
 ## Unreleased — Phase 2.4A b-roll overlay effects
 
 - The existing `fx` op now accepts explicit b-roll ids (`bN`) for keyframes, zoom/pan, opacity, and shape masks. Untargeted operations still affect only main clips.

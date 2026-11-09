@@ -369,12 +369,14 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `frame ${targets.length} clips`;
     }
     case 'fx': {
-      // Explicit ids may address either a main-track clip (cN) or a b-roll overlay (bN).
-      // Omitting the id retains legacy behavior: apply only to main-track clips.
+      // Explicit ids can address main clips (cN), b-roll (bN), and graphics (gN).
+      // With no id, preserve legacy main-track-only behavior.
       const target = op.clip
-        ? tl.clips.find((c) => c.id === op.clip) ?? tl.broll.find((b) => b.id === op.clip)
+        ? tl.clips.find((c) => c.id === op.clip)
+          ?? tl.broll.find((b) => b.id === op.clip)
+          ?? tl.gfx.find((g) => g.id === op.clip)
         : undefined;
-      if (op.clip && !target) throw new TmepError('E_NOT_FOUND', `no clip or b-roll "${op.clip}"`);
+      if (op.clip && !target) throw new TmepError('E_NOT_FOUND', `no clip or b-roll or graphic "${op.clip}"`);
       const targets = op.clip ? [target!] : tl.clips;
       if (!targets.length) throw new TmepError('E_RANGE', 'no clips to apply fx to');
       const kind = op.kind as string;
