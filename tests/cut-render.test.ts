@@ -31,24 +31,32 @@ before(async () => {
 
 test('cut on the second copy of reused footage: decoded frames show the first copy intact', { timeout: 300_000 }, async (t) => {
   if (skip) return t.skip(skip);
-  const ctx: api.Ctx = { project: mkdtempSync(path.join(os.tmpdir(), 'tmep-cut-')), detail: 'standard' };
-  await api.importMedia(ctx, { paths: [SRC] });
-  const ed = (await api.edit(ctx, { ops: [{ op: 'format', ratio: '1:1' }, { op: 'keep', src: 'v1', ranges: [[0, 4], [0, 4]] }, { op: 'cut', from: 5, to: 6 }] })) as Record<string, unknown>;
-  assert.ok(JSON.stringify(ed).includes('cut 1s'), JSON.stringify(ed));
-  const r = (await api.render(ctx, { preview: true, wait: 300 })) as Record<string, unknown>;
-  assert.equal(r.state, 'done', JSON.stringify(r.err));
-  const out = path.resolve(ctx.project, r.out as string);
-  // raw yuv420p planes (no range conversion): centre Y and Cb of every decoded frame
-  const S = 32;
-  const raw = spawnSync('ffmpeg', ['-v', 'error', '-i', out, '-vf', `scale=${S}:${S}:flags=area`, '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 26 }).stdout;
-  const fsz = S * S * 1.5;
-  const frames = raw.length / fsz;
-  assert.equal(frames, 210, '7 s at 30 fps (6 s would mean the first copy was cut too)');
-  const at = (f: number) => ({ y: raw[f * fsz + (S / 2) * S + S / 2]!, u: raw[f * fsz + S * S + (S / 4) * (S / 2) + S / 4]! });
-  const code = (n: number) => ({ y: 20 + 6 * (n % 32), u: 48 + 40 * Math.floor(n / 32) });
-  const expected = (f: number) => (f < 120 ? f : f < 150 ? f - 120 : f - 150 + 60);
-  const wrong = Array.from({ length: frames }, (_, f) => ({ f, got: at(f), want: code(expected(f)) })).filter((x) => Math.abs(x.got.y - x.want.y) > 2 || Math.abs(x.got.u - x.want.u) > 4);
-  assert.deepEqual(wrong.slice(0, 5), [], `${wrong.length} frames show the wrong source frame`);
-  const a = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=duration', '-of', 'csv=p=0', out], { encoding: 'utf8' });
+  const project = async (ops: unknown[]) => {
+    const ctx: api.Ctx = { project: mkdtempSync(path.join(os.tmpdir(), 'tmep-cut-')), detail: 'standard' };
+    await api.importMedia(ctx, { paths: [SRC] });
+    const ed = await api.edit(ctx, { ops: [{ op: 'format', ratio: '1:1' }, ...ops] });
+    const r = (await api.render(ctx, { preview: true, wait: 300 })) as Record<string, unknown>;
+    assert.equal(r.state, 'done', JSON.stringify(r.err));
+    return { ed: JSON.stringify(ed), out: path.resolve(ctx.project, r.out as string) };
+  };
+  // A: two copies of the same 4 s source, then a timeline cut inside the second copy
+  const A = await project([{ op: 'keep', src: 'v1', ranges: [[0, 4], [0, 4]] }, { op: 'cut', from: 5, to: 6 }]);
+  // B: the expected result, built explicitly (first copy intact, second copy minus source 1-2)
+  const B = await project([{ op: 'keep', src: 'v1', ranges: [[0, 4], [0, 1], [2, 4]] }]);
+  assert.ok(A.ed.includes('cut 1s'), A.ed);
+  const frames = (f: string) =>
+    spawnSync('ffmpeg', ['-v', 'error', '-i', f, '-map', '0:v', '-f', 'framemd5', '-'], { encoding: 'utf8' })
+      .stdout.split('\n')
+      .filter((l) => l && !l.startsWith('#'))
+      .map((l) => l.split(',').pop()!.trim());
+  const fa = frames(A.out);
+  const fb = frames(B.out);
+  assert.equal(fa.length, 210, '7 s at 30 fps (6 s would mean the first copy was cut too)');
+  assert.equal(fb.length, 210);
+  // the source changes every frame, so equal hashes mean the same source frame is shown
+  assert.notEqual(fa[0], fa[60], 'fixture frames differ');
+  const wrong = fa.map((h, i) => (h === fb[i] ? -1 : i)).filter((i) => i >= 0);
+  assert.deepEqual(wrong.slice(0, 10), [], `${wrong.length} decoded frames differ from the explicit expected timeline`);
+  const a = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=duration', '-of', 'csv=p=0', A.out], { encoding: 'utf8' });
   assert.ok(Math.abs(Number(a.stdout) - 7) < 0.05, `audio duration ${a.stdout}`);
 });
