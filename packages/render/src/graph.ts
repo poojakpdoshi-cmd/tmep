@@ -38,6 +38,8 @@ export interface GfxOverlay {
   at: number;
   d: number;
   fx: Effect[];
+  /** Explicit compositing order. Defaults to 10 for graphics. */
+  z?: number;
 }
 
 const n3 = (x: number) => String(Math.round(x * 1000) / 1000);
@@ -148,8 +150,9 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     g.push(`[${cur}][v${j}]xfade=transition=${p.clip.trans?.type ?? 'fade'}:duration=${n3(d)}:offset=${n3(off)}[x${j}]`);
     cur = `x${j}`;
   }
-  // cutaways (b-roll) overlapping this unit
-  tl.broll.forEach((b: BRoll, bi) => {
+  // Render in explicit z-order (low to high). Legacy defaults: b-roll 0,
+  // independent graphics 10, then shared ASS captions and plain graphics above all.
+  const drawBroll = (b: BRoll, bi: number) => {
     const T = resolveRef(placed, b.ref);
     if (T === undefined) return;
     const s = Math.max(T, U0);
@@ -183,11 +186,11 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     g.push(`[${cur}][b${bi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
     cur = `o${bi}`;
     k++;
-  });
-  // Independently rendered ASS graphics groups sit above b-roll but below captions.
+  };
+  // Independent ASS graphics preserve their own local animation time.
   // Each preset has local ASS timestamps, so a graphic spanning multiple video units
   // starts the next unit partway into its original animation instead of restarting.
-  gfxOverlays.forEach((layer, gi) => {
+  const drawGfx = (layer: GfxOverlay, gi: number) => {
     const s = Math.max(layer.at, U0);
     const e = Math.min(layer.at + layer.d, U1);
     if (e - s < 1 / fps) return;
@@ -212,7 +215,15 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     g.push(`${chain}[gfx${gi}]`);
     g.push(`[${cur}][gfx${gi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[gc${gi}]`);
     cur = `gc${gi}`;
-  });
+  };
+  const layers = [
+    ...tl.broll.map((b, bi) => ({ kind: 'broll' as const, z: b.z ?? 0, order: bi, b, bi })),
+    ...gfxOverlays.map((layer, gi) => ({ kind: 'gfx' as const, z: layer.z ?? 10, order: tl.broll.length + gi, layer, gi })),
+  ].sort((a, b) => a.z - b.z || a.order - b.order);
+  for (const layer of layers) {
+    if (layer.kind === 'broll') drawBroll(layer.b, layer.bi);
+    else drawGfx(layer.layer, layer.gi);
+  }
   if (assName) {
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
     g.push(`[${cur}]setpts=PTS-STARTPTS+${n3(U0)}/TB,subtitles=filename=${assName}${fd},setpts=PTS-STARTPTS,format=yuv420p[vout]`);
