@@ -63,9 +63,9 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 | `frame` | clip?, fit, cx, cy, base, push | framing: cover/contain/blur, crop centre, static scale, push-in |
 | `zoom` | at, to=1.15, d=0.9, mode=punch\|smooth | anchored zoom envelope |
 | `transition` | type, d, clip\|at\|all | xfade between clips; silence handles are added automatically and transitions that would overlap speech are refused |
-| `broll` | src, at, d, in, fit | cutaway over the main video; main audio continues |
-| `gfx` | preset, at, d, props | motion-graphics preset (see `video_help presets`) |
-| `set` | id, at, d, props, vol | modify a gfx/sfx/b-roll item |
+| `broll` | src, at, d, in, fit, z? | cutaway over main video; main audio continues; optional stack order |
+| `gfx` | preset, at, d, props, z? | motion-graphics preset (see `video_help presets`); optional stack order |
+| `set` | id, at, d, props, vol, z? | modify a gfx/sfx/b-roll item; z for b-roll and gfx only |
 | `captions` | style, pos, maxWords, upper, color, accent, size, font, emphasis, script | caption styling |
 | `fix` | find, replace | correct a transcript word in captions |
 | `music` | src, vol=-18, duck=true, fade / off=true | music bed with speech ducking |
@@ -73,6 +73,18 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 | `format` | ratio, fps | 9:16, 16:9, 1:1, 4:5 |
 | `loudness` | lufs | integrated loudness target (0 = off) |
 | `fx` | kind, clip?, ... | clip effects (below); omitting `clip` applies to every clip |
+
+### Overlay layer order (`z`)
+
+B-roll and graphics can be stacked explicitly with an integer `z` in -100..100:
+`broll v2 1.2 2.5 z=20`, `gfx title 1.2 2.5 z=-10`,
+`set b2 z=5`, `set g3 z=10`. Higher z is drawn later (in front); ties preserve
+the original per-type layer order (b-roll first, then graphics). Backward-compatible defaults: b-roll z=0 and
+fx-enabled graphics z=10. **Plain graphics without explicit z** stay in the
+shared ASS layer with captions, above all independent overlays, so set z on
+graphics that need precise stacking. Captions always remain on top.
+Explicitly z-layered graphics are isolated even without `fx`; alpha-only
+export with isolated graphics remains unsupported.
 
 ### Effects (`fx`)
 

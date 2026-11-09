@@ -16,6 +16,7 @@ export interface GraphicLayer {
   /** Local-time ASS document containing only this preset's events. */
   ass: string;
   fx: Effect[];
+  z?: number;
 }
 
 export interface CompiledAss {
@@ -57,13 +58,13 @@ export function compileAss(tl: Timeline, words: TlWord[], placed: Placed[] = lay
     const d = Math.min(g.d, dur - t0);
     // An fx-enabled preset becomes its own alpha graphics overlay. Its animation
     // time is local to the preset so it can resume across cached video units.
-    const isolated = !!g.fx?.length;
+    const isolated = !!g.fx?.length || g.z !== undefined;
     const target = isolated ? newDoc() : doc;
     const before = target.events.length;
     renderPreset(g.preset, { doc: target, t0: isolated ? 0 : t0, d, props: g.props, accent: (g.props.accent as string) ?? tl.captions.accent, heavy: 'GfxH', bold: 'GfxB', draw: 'Draw' });
     const count = target.events.length - before;
     gfx += count;
-    if (isolated && count) layers.push({ id: g.id, at: t0, d, ass: target.toString(), fx: g.fx! });
+    if (isolated && count) layers.push({ id: g.id, at: t0, d, ass: target.toString(), fx: g.fx ?? [], ...(g.z !== undefined ? { z: g.z } : {}) });
   }
   return { ass: doc.toString(), fonts, events: doc.events.length, captions, gfx, skipped, layers };
 }
