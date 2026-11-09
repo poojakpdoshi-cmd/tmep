@@ -16,6 +16,7 @@ export const ERROR_CODES = {
   E_ENGINE_FAILED: 'Speech engine failed',
   E_MEDIA: 'Media file is unreadable or has no usable streams',
   E_CANCELLED: 'Job was cancelled',
+  E_INTERRUPTED: 'Job stopped because its process exited or stopped responding',
   E_IO: 'File system error',
   E_INTERNAL: 'Unexpected internal error',
 } as const;

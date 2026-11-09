@@ -151,7 +151,8 @@ Compact JSON in a single text content block. Examples (`detail=standard`):
 
 `E_INPUT`, `E_STATE`, `E_NOT_FOUND`, `E_ANCHOR`, `E_RANGE`, `E_NO_TRANSCRIPT`,
 `E_FFMPEG_MISSING`, `E_FFMPEG_FAILED`, `E_ENGINE_MISSING`, `E_ENGINE_FAILED`, `E_MEDIA`,
-`E_CANCELLED`, `E_IO`, `E_INTERNAL` (`packages/core/src/errors.ts`). Over MCP, input and
+`E_CANCELLED`, `E_INTERRUPTED`, `E_IO`, `E_INTERNAL` (`packages/core/src/errors.ts`). A job whose
+process died (or stopped heartbeating) is reported as `state:"error"` with `E_INTERRUPTED`. Over MCP, input and
 business errors are returned as tool results with `isError: true` (so the model can
 self-correct); unknown tools and malformed requests are JSON-RPC errors.
 
@@ -167,6 +168,14 @@ self-correct); unknown tools and malformed requests are JSON-RPC errors.
 | SFX | effect name + synth version |
 
 Same inputs give the same plan and the same render commands; renders are reused instead of repeated.
+
+Cache entries are written to a per-attempt temporary file (`<entry>.<pid>.<random>.tmp.*`) and
+published with an atomic rename, so a reader never sees a partial entry. Renders in separate
+processes may publish the same key: on POSIX the rename replaces the entry with an equivalent,
+complete file (readers holding the old file keep reading it); where the rename fails instead
+(e.g. Windows while the entry is open), the existing entry is accepted only after `ffprobe`
+validates it.
+Failed or cancelled renders remove their temporary files; completed entries are kept.
 
 ## Versioning
 

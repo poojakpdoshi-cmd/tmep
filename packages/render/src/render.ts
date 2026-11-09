@@ -5,6 +5,7 @@
  */
 import path from 'node:path';
 import os from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import {
   type Timeline,
@@ -105,18 +106,96 @@ function assWindow(ass: string, s: number, e: number): string {
   return head + lines.join('\n');
 }
 
-async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>): Promise<void> {
+/**
+ * Run `fn` over items with at most `n` in flight. Never rejects: errors go to `fail`, and
+ * no new item starts once `stop()` is true, so callers can wait for every running worker
+ * (and its ffmpeg child) to finish before cleaning up.
+ */
+async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>, stop: () => boolean, fail: (e: unknown) => void): Promise<void> {
   let i = 0;
   const workers = Array.from({ length: Math.max(1, Math.min(n, items.length)) }, async () => {
-    while (i < items.length) {
+    while (i < items.length && !stop()) {
       const x = items[i++]!;
-      await fn(x);
+      try {
+        await fn(x);
+      } catch (e) {
+        fail(e);
+      }
     }
   });
   await Promise.all(workers);
 }
 
+/** Collision-resistant temporary path for one write attempt (unique per process AND attempt). */
+function tmpFor(file: string, ext: string): string {
+  return `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp${ext}`;
+}
+
+/**
+ * Publish a finished, complete temporary file to a content-addressed cache path with one
+ * atomic rename, so readers only ever see a missing entry or a complete one.
+ *
+ * Concurrent publishers of the same key (renders in separate processes) produce entries from
+ * identical inputs. On POSIX the rename atomically REPLACES an existing entry: no error, no
+ * validation, and that is safe because both files are complete and equivalent, and a reader
+ * that already opened the old file keeps reading the old inode. On Windows the rename can
+ * fail instead (e.g. EPERM/EBUSY while another process has the entry open); only then is the
+ * existing entry checked with `validate` and accepted. A failed rename is never treated as
+ * success without that check; otherwise the original error is thrown.
+ */
+export async function publish(tmp: string, dest: string, validate: (file: string) => Promise<boolean>): Promise<void> {
+  try {
+    await fsp.rename(tmp, dest);
+  } catch (e) {
+    if ((await exists(dest)) && (await validate(dest).catch(() => false))) {
+      await fsp.rm(tmp, { force: true });
+      return;
+    }
+    throw e;
+  }
+}
+
+const validVideo = async (f: string) => {
+  const v = await probe(f);
+  return v.dur > 0 && (v.w ?? 0) > 0;
+};
+const validAudio = async (f: string) => {
+  const v = await probe(f);
+  return v.dur > 0 && v.audio;
+};
+
+/**
+ * Per-project render queue (in-process). Renders of the same project run one at a time:
+ * they share content-addressed unit/audio cache entries, so a second render simply reuses
+ * what the first produced instead of racing it. Different projects are not serialized.
+ * Across processes, safety comes from per-attempt temp names + atomic publish (see publish()).
+ */
+const projectQueues = new Map<string, Promise<void>>();
+
+async function exclusive<T>(key: string, signal: AbortSignal | undefined, onQueued: () => void, fn: () => Promise<T>): Promise<T> {
+  const prev = projectQueues.get(key);
+  let release!: () => void;
+  const mine = new Promise<void>((r) => (release = r));
+  const tail = (prev ?? Promise.resolve()).then(() => mine);
+  projectQueues.set(key, tail);
+  try {
+    if (prev) {
+      onQueued();
+      await prev;
+    }
+    if (signal?.aborted) throw new TmepError('E_CANCELLED', 'render cancelled while queued');
+    return await fn();
+  } finally {
+    release();
+    if (projectQueues.get(key) === tail) projectQueues.delete(key);
+  }
+}
+
 export async function renderTimeline(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions = {}, hooks: RenderHooks = {}): Promise<RenderResult> {
+  return exclusive(path.resolve(project.dir), hooks.signal, () => hooks.onProgress?.(0, 'queued'), () => renderUnlocked(project, tl, transcripts, opts, hooks));
+}
+
+async function renderUnlocked(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions, hooks: RenderHooks): Promise<RenderResult> {
   const t0 = Date.now();
   if (!tl.clips.length) throw new TmepError('E_STATE', 'timeline has no clips');
   const info = await ffmpegInfo();
@@ -251,44 +330,81 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
   const report = () => progress(Math.min(0.95, ([...done.values()].reduce((a, b) => a + b, 0) / totalWork) * 0.92), 'video');
   const par = opts.parallel ?? (os.cpus().length >= 8 ? 3 : os.cpus().length >= 4 ? 2 : 1);
 
-  const audioTask = (async () => {
-    if (audioCached) return;
-    await fsp.mkdir(path.dirname(audioFile), { recursive: true });
-    const tmp = `${audioFile}.${process.pid}.tmp.m4a`;
-    const { args } = audioArgs(tl, placed, media, sfxList, frames, tmp, audioRange);
-    await ffmpeg({ args: await maybeScript(args, work), cwd: work, signal: hooks.signal });
-    await fsp.rename(tmp, audioFile);
-  })();
+  // One controller for every ffmpeg child of this render: the first failure (or a caller
+  // cancel) aborts the siblings. Temporary files are tracked and removed in `finally`.
+  const ctrl = new AbortController();
+  const onCallerAbort = () => ctrl.abort();
+  if (hooks.signal?.aborted) ctrl.abort();
+  hooks.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  const temps = new Set<string>();
+  let failure: unknown;
+  const isCancel = (e: unknown) => e instanceof TmepError && e.code === 'E_CANCELLED';
+  const fail = (e: unknown) => {
+    // keep the root cause: sibling processes killed by our own abort report E_CANCELLED
+    if (failure === undefined || (isCancel(failure) && !isCancel(e))) failure = e;
+    ctrl.abort();
+  };
 
-  await pool(todo, par, async (i) => {
-    const u = units[i]!;
-    const tmp = `${unitFiles[i]!}.${process.pid}.tmp.mp4`;
-    const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, overlays);
-    await ffmpeg({
-      args: await maybeScript(args, work),
-      cwd: work,
-      frames: u.frames,
-      signal: hooks.signal,
-      onProgress: (p) => {
-        done.set(i, p * u.frames);
+  try {
+    // started first and handled immediately: a failed audio mix can never become an
+    // unhandled rejection while video units are still rendering
+    const audioTask = (async () => {
+      if (audioCached) return;
+      await fsp.mkdir(path.dirname(audioFile), { recursive: true });
+      const tmp = tmpFor(audioFile, '.m4a');
+      temps.add(tmp);
+      const { args } = audioArgs(tl, placed, media, sfxList, frames, tmp, audioRange);
+      await ffmpeg({ args: await maybeScript(args, work), cwd: work, signal: ctrl.signal });
+      await publish(tmp, audioFile, validAudio);
+      temps.delete(tmp);
+    })().catch(fail);
+
+    await pool(
+      todo,
+      par,
+      async (i) => {
+        const u = units[i]!;
+        const tmp = tmpFor(unitFiles[i]!, '.mp4');
+        temps.add(tmp);
+        const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, overlays);
+        await ffmpeg({
+          args: await maybeScript(args, work),
+          cwd: work,
+          frames: u.frames,
+          signal: ctrl.signal,
+          onProgress: (p) => {
+            done.set(i, p * u.frames);
+            report();
+          },
+        });
+        await publish(tmp, unitFiles[i]!, validVideo);
+        temps.delete(tmp);
+        done.set(i, u.frames);
         report();
       },
-    });
-    await fsp.rename(tmp, unitFiles[i]!);
-    done.set(i, u.frames);
-    report();
-  });
-  await audioTask;
+      () => ctrl.signal.aborted,
+      fail,
+    );
+    await audioTask;
+    if (failure === undefined && ctrl.signal.aborted) failure = new TmepError('E_CANCELLED', 'render cancelled');
+    if (failure !== undefined) throw failure;
 
-  // ---- concat + mux (stream copy) ----
-  progress(0.96, 'mux');
-  await fsp.mkdir(path.dirname(outPath), { recursive: true });
-  const list = path.join(work, `concat-${finalKey}.txt`);
-  await fsp.writeFile(list, unitFiles.map((f) => `file '${toPosix(f).replace(/'/g, "'\\''")}'`).join('\n') + '\n');
-  const tmpOut = `${outPath}.${process.pid}.tmp.mp4`;
-  await ffmpeg({ args: ['-f', 'concat', '-safe', '0', '-i', list, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-movflags', '+faststart', tmpOut], signal: hooks.signal });
-  await fsp.rename(tmpOut, outPath);
-  await fsp.writeFile(markerFile, finalKey);
+    // ---- concat + mux (stream copy) ----
+    progress(0.96, 'mux');
+    await fsp.mkdir(path.dirname(outPath), { recursive: true });
+    const list = tmpFor(path.join(work, `concat-${finalKey}`), '.txt');
+    temps.add(list);
+    await fsp.writeFile(list, unitFiles.map((f) => `file '${toPosix(f).replace(/'/g, "'\\''")}'`).join('\n') + '\n');
+    const tmpOut = tmpFor(outPath, '.mp4');
+    temps.add(tmpOut);
+    await ffmpeg({ args: ['-f', 'concat', '-safe', '0', '-i', list, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-movflags', '+faststart', tmpOut], signal: ctrl.signal });
+    await fsp.rename(tmpOut, outPath);
+    temps.delete(tmpOut);
+    await fsp.writeFile(markerFile, finalKey);
+  } finally {
+    hooks.signal?.removeEventListener('abort', onCallerAbort);
+    await Promise.all([...temps].map((f) => fsp.rm(f, { force: true }).catch(() => {})));
+  }
 
   // ---- verify ----
   const v = await probe(outPath);
