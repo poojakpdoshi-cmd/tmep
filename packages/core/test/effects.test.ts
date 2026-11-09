@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ease, EASES, sampleKeys, parseKeys, parsePoints, presetKeys, fxSummary, type FxMask } from '../src/effects.ts';
-import { emptyTimeline, newClip } from '../src/timeline.ts';
+import { ease, EASES, sampleKeys, parseKeys, parsePoints, presetKeys, fxSummary, shiftFx, type FxMask, type FxTransform, type Effect } from '../src/effects.ts';
+import { emptyTimeline, newClip, type Clip } from '../src/timeline.ts';
 import { applyOps } from '../src/ops.ts';
 import { TmepError } from '../src/errors.ts';
 
@@ -75,4 +75,48 @@ test('fx op: compact strings add, compose and clear effects; older clips have no
   assert.equal(cleared.tl.clips[0]!.fx, undefined);
   assert.throws(() => applyOps(tl, ['fx kf c1'], ctx()));
   assert.throws(() => applyOps(tl, ['fx mask c1 shape=poly pts="0,0 1,0 0.5,0.2 1,1 0,1"'], ctx()));
+});
+
+test('split continuity: cuts re-time effects per part (speed-aware) without shared references', () => {
+  const tl = emptyTimeline();
+  tl.clips.push(newClip(tl, 'v1', 0, 8));
+  tl.clips[0]!.speed = 2; // 4 s on the timeline
+  const r = applyOps(tl, ['fx kf c1 keys="0:s=1,o=0;3:s=1.4,o=1,e=io"', 'fx mask c1 shape=ellipse reveal=2 at=0.5 e=out'], ctx());
+  const orig = r.tl.clips[0]!;
+  // remove source 3..4 (timeline 1.5..2.0): right part starts at source 4 = original clip time 2.0
+  const cut = applyOps(r.tl, ['cut 1.5 2'], ctx()).tl;
+  assert.equal(cut.clips.length, 2);
+  const [L, R] = cut.clips as [Clip, Clip];
+  const kf = (c: Clip) => (c.fx![0] as FxTransform).keys;
+  const dt = 2;
+  for (const t of [0, 0.3, 0.75, 1.2, 1.49]) for (const p of ['s', 'o'] as const) assert.equal(sampleKeys(kf(L), p, t), sampleKeys(kf(orig), p, t), `left ${p}@${t}`);
+  for (const t of [0, 0.2, 0.5, 0.99, 1.5, 3]) for (const p of ['s', 'o'] as const) assert.ok(Math.abs(sampleKeys(kf(R), p, t) - sampleKeys(kf(orig), p, t + dt)) < 1e-9, `right ${p}@${t}`);
+  // an in-progress eased segment continues mid-curve (not restarted, not jumped to the end)
+  const s0 = sampleKeys(kf(R), 's', 0);
+  assert.ok(s0 > 1 && s0 < 1.4);
+  assert.equal((R.fx![1] as FxMask).reveal!.at, -1.5);
+  assert.equal((L.fx![1] as FxMask).reveal!.at, 0.5);
+  // independent copies
+  assert.notEqual(L.fx, R.fx);
+  assert.notEqual(L.fx![0], orig.fx![0]);
+  kf(L)[0]!.s = 9;
+  assert.equal(kf(R)[0]!.s, 1);
+  assert.equal(kf(orig)[0]!.s, 1);
+});
+
+test('split continuity: pure re-timing via shiftFx and trimming the head', () => {
+  const fx: Effect[] = [{ type: 'kf', keys: presetKeys('zoomin', 0, 2, 0.2, 'linear') }];
+  const sh = shiftFx(fx, 0.5)!;
+  assert.ok(Math.abs(sampleKeys((sh[0] as FxTransform).keys, 's', 0) - 1.05) < 1e-9);
+  assert.equal((fx[0] as FxTransform).keys[0]!.t, 0, 'input untouched');
+  assert.equal(shiftFx(undefined, 1), undefined);
+  // cutting the start of a clip keeps the remaining part's effect state
+  const tl = emptyTimeline();
+  tl.clips.push(newClip(tl, 'v1', 0, 4));
+  const r = applyOps(tl, ['fx zoomin c1 d=4 amt=0.4 e=linear', 'cut 0 1'], ctx()).tl;
+  assert.equal(r.clips.length, 1);
+  assert.ok(Math.abs(sampleKeys((r.clips[0]!.fx![0] as FxTransform).keys, 's', 0) - 1.1) < 1e-9);
+  // clips without fx stay without fx
+  const plain = applyOps(tl, ['cut 1 2'], ctx()).tl;
+  assert.ok(plain.clips.every((c) => c.fx === undefined));
 });

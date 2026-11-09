@@ -9,7 +9,7 @@
  *  - Timeline math is frame-quantized (all starts/durations are integer frame counts).
  */
 import { TmepError } from './errors.ts';
-import type { Effect } from './effects.ts';
+import { type Effect, shiftFx } from './effects.ts';
 
 export type Ratio = '9:16' | '16:9' | '1:1' | '4:5';
 export type Fit = 'cover' | 'contain' | 'blur';
@@ -378,9 +378,14 @@ export function removeSrcRange(tl: Timeline, src: string, s: number, e: number):
     removed += Math.min(e, c.out) - Math.max(s, c.in);
     const keepLeft = s - c.in > 0.04;
     const keepRight = c.out - e > 0.04;
-    if (keepLeft) next.push({ ...c, out: s, zoom: c.zoom.filter((z) => z.s < s) });
+    // effects use clip-local output time: the right part continues where the original was at `e`
+    const withFx = (x: Clip, dt: number): Clip => {
+      if (c.fx) x.fx = shiftFx(c.fx, dt);
+      return x;
+    };
+    if (keepLeft) next.push(withFx({ ...c, out: s, zoom: c.zoom.filter((z) => z.s < s) }, 0));
     if (keepRight) {
-      const right: Clip = { ...c, in: e, zoom: c.zoom.filter((z) => z.s >= e), trans: keepLeft ? undefined : c.trans };
+      const right: Clip = withFx({ ...c, in: e, zoom: c.zoom.filter((z) => z.s >= e), trans: keepLeft ? undefined : c.trans }, (e - c.in) / c.speed);
       if (keepLeft) right.id = nextId(tl, 'c');
       next.push(right);
     }

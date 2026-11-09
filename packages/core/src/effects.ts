@@ -195,6 +195,24 @@ export function validateMask(m: FxMask): FxMask {
   return m;
 }
 
+/**
+ * Deep-copy effects for a clip whose first frame now sits `dt` clip-seconds later in the original
+ * effect timeline (e.g. the right half of a split). Key times and reveal starts move by -dt, so the
+ * visual state and remaining timing are identical across the cut. Times may become negative; the
+ * curves before 0 are kept so an in-progress eased segment continues exactly.
+ */
+export function shiftFx(fx: Effect[] | undefined, dt: number): Effect[] | undefined {
+  if (!fx) return undefined;
+  const out = structuredClone(fx);
+  if (Math.abs(dt) < 1e-9) return out;
+  const r = (x: number) => Math.round((x - dt) * 1e6) / 1e6;
+  for (const f of out) {
+    if (f.type === 'kf') for (const k of f.keys) k.t = r(k.t);
+    else if (f.reveal) f.reveal.at = r(f.reveal.at);
+  }
+  return out;
+}
+
 /** One-line summary for compact tool output, e.g. "kf3 mask:ellipse". */
 export function fxSummary(fx: Effect[] | undefined): string {
   return (fx ?? []).map((f) => (f.type === 'kf' ? `kf${f.keys.length}` : `mask:${f.shape}${f.invert ? '!' : ''}${f.reveal ? '+rv' : ''}`)).join(' ');

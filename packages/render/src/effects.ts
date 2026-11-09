@@ -48,7 +48,7 @@ export function keyExpr(keys: Key[], prop: KeyProp, T: string): string | undefin
     const b = ks[i]!;
     const va = a[prop]!;
     const vb = b[prop]!;
-    const seg = va === vb ? n(va) : `(${n(va)}+${n(vb - va)}*${easeExpr(b.e ?? 'io', `clip((${T}-${n(a.t)})/${n(b.t - a.t)},0,1)`)})`;
+    const seg = va === vb ? n(va) : `(${n(va)}+${n(vb - va)}*${easeExpr(b.e ?? 'io', `clip((${T}-(${n(a.t)}))/${n(b.t - a.t)},0,1)`)})`;
     expr = `if(lt(${T},${n(b.t)}),${seg},${expr})`;
   }
   return expr;
@@ -113,7 +113,7 @@ export function opacitySchedule(fx: Effect[], frames: number, fps: number): { t:
 export function maskExpr(m: FxMask, MW: number, MH: number): string {
   const Tp = 'T';
   let prog: string | undefined;
-  if (m.reveal) prog = easeExpr(m.reveal.e, `clip((${Tp}-${n(m.reveal.at)})/${n(m.reveal.d)},0,1)`);
+  if (m.reveal) prog = easeExpr(m.reveal.e, `clip((${Tp}-(${n(m.reveal.at)}))/${n(m.reveal.d)},0,1)`);
   const grow = m.reveal && m.reveal.from === 'center' ? `max(${prog},0.001)` : undefined;
   // shape centre and bbox in mask pixels
   let cxp: number, cyp: number, bx0: number, bx1: number, by0: number, by1: number;

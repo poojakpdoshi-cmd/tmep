@@ -92,8 +92,9 @@ order: transforms (scales/opacities multiply, offsets/rotations add) → opacity
 
 Limitations: masks are rendered at half resolution then upscaled (fine for feathered edges,
 ≈1 px soft for hard edges); polygons must be convex; push/pull are 2D scale moves, not parallax;
-effects apply to main-track clips (not b-roll or graphics); if a clip is split by `cut`, both halves
-keep its effects and restart them at their own clip time.
+effects apply to main-track clips (not b-roll or graphics). When `cut`/`delete` splits a clip, each
+part gets its own copy of the effects, re-timed so they continue from the original clip's state at
+the cut point (speed-aware); a removed range is skipped in effect time, like source-anchored zooms.
 
 A batch is atomic: if any op fails, nothing is committed.
 

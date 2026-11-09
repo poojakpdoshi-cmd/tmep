@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { emptyTimeline, newClip, parseKeys, presetKeys, sampleKeys, validateMask, type Effect, type Clip, type FxMask } from '../../core/src/index.ts';
+import { emptyTimeline, newClip, parseKeys, presetKeys, sampleKeys, validateMask, shiftFx, type Effect, type Clip, type FxMask } from '../../core/src/index.ts';
 import { compileFx, keyExpr, opacitySchedule } from '../src/effects.ts';
 import { unitArgs, planUnits } from '../src/graph.ts';
 import { layout } from '../../core/src/index.ts';
@@ -56,7 +56,7 @@ test('keyExpr mirrors sampleKeys structure; opacity schedule is deduplicated', (
   const keys = parseKeys('0:s=1;1:s=2,e=linear;2:s=2');
   const e = keyExpr(keys, 's', 'T')!;
   assert.equal((e.match(/if\(/g) ?? []).length, 2);
-  assert.ok(e.includes('(1+1*clip((T-0)/1,0,1))'));
+  assert.ok(e.includes('(1+1*clip((T-(0))/1,0,1))'));
   assert.equal(keyExpr(keys, 'o', 'T'), undefined);
   const sched = opacitySchedule([{ type: 'kf', keys: parseKeys('0:o=0;0.5:o=1,e=linear') }], 10, 10)!;
   assert.equal(sched[0]!.o, 0);
@@ -143,4 +143,12 @@ test('ffmpeg: full unit graph with fit + zoom + fx renders the exact frame count
   const n = spawnSync('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v', '-show_entries', 'stream=nb_read_frames,width,height', '-of', 'csv=p=0', out]).stdout.toString().trim();
   assert.equal(n, `270,480,${units[0]!.frames}`);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('ffmpeg: split-shifted effects (negative key/reveal times) render mid-animation at frame 0', { skip: !hasFfmpeg }, () => {
+  const base: Effect[] = [{ type: 'kf', keys: parseKeys('0:o=0;1:o=1,e=linear') }, { type: 'mask', shape: 'rect', x: 0.5, y: 0.5, w: 1, h: 1, feather: 0, invert: false, reveal: { at: 0, d: 1, e: 'linear', from: 'left' } }];
+  const f = render(shiftFx(base, 0.5)!)[0]!;
+  const left = px(f, 12, 32);
+  assert.ok(left[1]! > 90 && left[1]! < 165, `opacity ~0.5 continues: ${left}`);
+  assert.ok(isBg(px(f, 52, 32)), 'wipe is half-way, right side still hidden');
 });
