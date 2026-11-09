@@ -97,6 +97,19 @@ with throttled progress. Any process can read them; cancellation works in-proces
 (AbortController kills FFmpeg) or across processes (a `cancel` flag polled every second).
 Tools wait up to `wait` seconds, then return the job id.
 
+**Concurrency.** Renders of the same project are queued in-process (phase `queued`) and run one
+at a time; they share content-addressed cache entries, so a queued preview or a repeated final
+reuses what the previous render produced. Different projects render in parallel. Across
+processes, per-attempt temp names plus validated atomic publish keep the cache consistent.
+Within a render, the first failure (video unit, audio mix or mux) aborts all sibling FFmpeg
+processes, temp files are removed, and the root-cause error is returned on the job; a failing
+audio mix can no longer take down the host process.
+
+**Stale jobs.** A running job refreshes `.tmep/jobs/<id>.alive` every 2 s and records its `pid`
+and `host`. A job file that says `running` but belongs to a dead process on this host (or whose
+heartbeat is older than 60 s) is reported, and persisted, as `error` / `E_INTERRUPTED`. Older
+job records without `host` are checked by pid.
+
 ## Design decisions (ADR summary)
 
 | # | Decision | Why | Trade-off |

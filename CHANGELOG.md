@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Stabilization A: render reliability
+
+- Fix: concurrent renders of one project (e.g. preview + final) no longer collide on temporary
+  files or crash the process; same-project renders are queued in-process, cache entries are
+  published atomically with validation.
+- Fix: a failing audio mix (or any unit failure) during rendering is returned as a job error;
+  sibling FFmpeg processes are aborted and temporary files removed. No unhandled rejections.
+- Fix: jobs whose process died are reported as `error` / `E_INTERRUPTED` instead of `running` forever
+  (pid liveness + heartbeat; backward compatible with existing job records).
+- Tests: subprocess-isolated regression tests in `tests/render-reliability.test.ts`.
+
 ## Unreleased — Phase 2.5A deterministic overlay stacking
 
 - Optional integer z (-100..100) on b-roll and graphics, editable by `set <id> z=N` or at creation.

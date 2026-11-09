@@ -4,6 +4,8 @@
  * cancellation through the job file. A job interrupted by a crash can be re-run:
  * already-rendered units are reused from the content-addressed cache.
  */
+import os from 'node:os';
+import { promises as fsp } from 'node:fs';
 import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, shortId, r2 } from '../../core/src/index.ts';
 
 export type JobState = 'running' | 'done' | 'error' | 'cancelled';
@@ -22,6 +24,43 @@ export interface Job {
   error?: Record<string, unknown>;
   cancel?: boolean;
   pid: number;
+  /** Host that runs the job (absent on records written before stale-job detection). */
+  host?: string;
+}
+
+/** A running job refreshes `<job>.alive` (mtime) this often ... */
+export const HEARTBEAT_MS = 2000;
+/** ... and is considered dead when the heartbeat is older than this, even if its pid looks alive. */
+export const STALE_MS = 60_000;
+
+const heartbeatPath = (project: Project, id: string) => project.jobPath(id).replace(/\.json$/, '.alive');
+
+/** Jobs owned by this process, registered synchronously before the job file is written. */
+const owned = new Set<string>();
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM'; // exists, owned by another user
+  }
+}
+
+/**
+ * Decide whether a job file that says `running` belongs to a process that is gone.
+ * Conservative: a job is only declared interrupted when that is certain (same host and
+ * the pid is dead, or this very process does not own it) or its heartbeat is long stale.
+ * Legacy records (no host / no heartbeat) are checked by pid on the assumption they are local.
+ */
+async function interrupted(project: Project, j: Job): Promise<string | undefined> {
+  if (owned.has(j.id)) return undefined;
+  const sameHost = j.host === undefined || j.host === os.hostname();
+  if (sameHost && j.pid === process.pid) return 'its process restarted';
+  if (sameHost && !pidAlive(j.pid)) return `process ${j.pid} is no longer running`;
+  const hb = await fsp.stat(heartbeatPath(project, j.id)).then((s) => s.mtimeMs, () => undefined);
+  if (hb !== undefined && Date.now() - hb > STALE_MS) return `no heartbeat for ${Math.round((Date.now() - hb) / 1000)} s`;
+  return undefined;
 }
 
 interface Live {
@@ -34,12 +73,27 @@ const live = new Map<string, Live>();
 export async function readJob(project: Project, id: string): Promise<Job> {
   const j = await readJsonOr<Job | null>(project.jobPath(id), null);
   if (!j) throw new TmepError('E_NOT_FOUND', `job ${id} not found`);
+  if (j.state === 'running') {
+    const why = await interrupted(project, j);
+    if (why) {
+      j.state = 'error';
+      j.ended = new Date().toISOString();
+      j.error = new TmepError('E_INTERRUPTED', `job was interrupted: ${why}`, 're-run the render; completed units are reused from the cache').toJSON(true);
+      await writeJson(project.jobPath(id), j).catch(() => {});
+      await fsp.rm(heartbeatPath(project, id), { force: true }).catch(() => {});
+    }
+  }
   return j;
 }
 
 export async function startJob(project: Project, kind: string, rev: number, opts: Record<string, unknown>, work: (signal: AbortSignal, progress: (p: number, phase: string) => void) => Promise<Record<string, unknown>>): Promise<Job> {
-  const job: Job = { id: `j${shortId()}`, kind, state: 'running', progress: 0, phase: 'start', rev, opts, started: new Date().toISOString(), pid: process.pid };
+  const job: Job = { id: `j${shortId()}`, kind, state: 'running', progress: 0, phase: 'start', rev, opts, started: new Date().toISOString(), pid: process.pid, host: os.hostname() };
+  owned.add(job.id);
+  const beat = () => fsp.writeFile(heartbeatPath(project, job.id), String(Date.now())).catch(() => {});
   await writeJson(project.jobPath(job.id), job);
+  await beat();
+  const heartbeat = setInterval(beat, HEARTBEAT_MS);
+  heartbeat.unref?.();
   const ctrl = new AbortController();
   let lastWrite = 0;
   let writing: Promise<void> = Promise.resolve();
@@ -72,10 +126,13 @@ export async function startJob(project: Project, kind: string, rev: number, opts
       job.error = err.toJSON(true);
     } finally {
       clearInterval(poll);
+      clearInterval(heartbeat);
       job.ended = new Date().toISOString();
       live.delete(job.id);
       persist(true);
       await writing;
+      await fsp.rm(heartbeatPath(project, job.id), { force: true }).catch(() => {});
+      owned.delete(job.id);
     }
     return job;
   })();
