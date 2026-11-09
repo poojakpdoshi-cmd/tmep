@@ -140,7 +140,7 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
   await fsp.mkdir(work, { recursive: true });
   await fsp.writeFile(path.join(work, 'gfx.ass'), compiled.ass);
   // The separate ASS overlays use stable generated filenames, not user-provided ids.
-  const overlays = compiled.layers.map((g, i) => ({ file: `gfx-fx-${i}.ass`, at: g.at, d: g.d, fx: g.fx }));
+  const overlays = compiled.layers.map((g, i) => ({ file: `gfx-fx-${i}.ass`, at: g.at, d: g.d, fx: g.fx, ...(g.z !== undefined ? { z: g.z } : {}) }));
   await Promise.all(compiled.layers.map((g, i) => fsp.writeFile(path.join(work, overlays[i]!.file), g.ass)));
   const hasFonts = compiled.fonts.some((f) => f.file);
   if (hasFonts) stageFonts(compiled.fonts, work);
@@ -203,7 +203,7 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
       ...(compiled.layers.length ? {
         gfxFx: compiled.layers
           .filter((g) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps)
-          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx })),
+          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx, z: g.z ?? 10 })),
       } : {}),
       fonts: fontKey,
     });
