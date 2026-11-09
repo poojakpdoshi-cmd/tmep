@@ -108,6 +108,16 @@ switch (scenario) {
     process.kill(process.pid, 'SIGKILL');
     break;
   }
+  case 'render-shared': {
+    // render an EXISTING project from a separate process; rest = [projectDir, out, barrierFile]
+    // All children block on the barrier file so they start publishing at the same moment.
+    const ctx: api.Ctx = { project: rest[0]!, detail: 'standard' };
+    const { existsSync } = await import('node:fs');
+    while (!existsSync(rest[2]!)) await new Promise((res) => setTimeout(res, 5));
+    const r = (await api.render(ctx, { wait: 600, out: rest[1]! })) as Record<string, unknown>;
+    emit({ job: view(ctx, r), cachedUnits: r.cached });
+    break;
+  }
   case 'status': {
     // inspect a job of another process: rest = [projectDir, jobId]
     const ctx: api.Ctx = { project: rest[0]!, detail: 'standard' };

@@ -132,12 +132,18 @@ function tmpFor(file: string, ext: string): string {
 }
 
 /**
- * Atomically publish a finished temporary file to a content-addressed cache path.
- * If the rename fails because another render published the same entry first (e.g. Windows
- * refuses to replace an existing file), the existing entry is accepted only after it has
- * been validated; otherwise the original error is thrown.
+ * Publish a finished, complete temporary file to a content-addressed cache path with one
+ * atomic rename, so readers only ever see a missing entry or a complete one.
+ *
+ * Concurrent publishers of the same key (renders in separate processes) produce entries from
+ * identical inputs. On POSIX the rename atomically REPLACES an existing entry: no error, no
+ * validation, and that is safe because both files are complete and equivalent, and a reader
+ * that already opened the old file keeps reading the old inode. On Windows the rename can
+ * fail instead (e.g. EPERM/EBUSY while another process has the entry open); only then is the
+ * existing entry checked with `validate` and accepted. A failed rename is never treated as
+ * success without that check; otherwise the original error is thrown.
  */
-async function publish(tmp: string, dest: string, validate: (file: string) => Promise<boolean>): Promise<void> {
+export async function publish(tmp: string, dest: string, validate: (file: string) => Promise<boolean>): Promise<void> {
   try {
     await fsp.rename(tmp, dest);
   } catch (e) {
@@ -162,7 +168,7 @@ const validAudio = async (f: string) => {
  * Per-project render queue (in-process). Renders of the same project run one at a time:
  * they share content-addressed unit/audio cache entries, so a second render simply reuses
  * what the first produced instead of racing it. Different projects are not serialized.
- * Across processes, safety comes from per-attempt temp names + validated atomic publish.
+ * Across processes, safety comes from per-attempt temp names + atomic publish (see publish()).
  */
 const projectQueues = new Map<string, Promise<void>>();
 

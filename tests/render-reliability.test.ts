@@ -145,6 +145,54 @@ test('an active job seen from another process is still running', { timeout: 600_
   assert.equal(final.state, 'done');
 });
 
+test('renders in separate processes publish the same cache keys safely; readers never see a bad entry', { timeout: 600_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  const fs = await import('node:fs');
+  const ctx: api.Ctx = { project: fs.mkdtempSync(path.join(os.tmpdir(), 'tmep-rel-xproc-')), detail: 'standard' };
+  await api.importMedia(ctx, { paths: [path.join(FIX, 'clip.mp4')] });
+  await api.edit(ctx, { ops: [{ op: 'format', ratio: '9:16' }, { op: 'keep', src: 'v1', ranges: Array.from({ length: 6 }, (_, i) => [i * 0.5, i * 0.5 + 0.4]) }] });
+  const barrier = path.join(ctx.project, 'go');
+  const N = 3;
+  const kids = Array.from({ length: N }, (_, k) => child(['render-shared', FIX, ctx.project, `renders/x${k}.mp4`, barrier]));
+  // Reader: while the processes race, every visible (non-temporary) cache entry must be complete.
+  const cache = path.join(ctx.project, '.tmep', 'cache');
+  const seen = new Map<string, boolean>();
+  let reading = true;
+  const reader = (async () => {
+    // keep scanning while the renders run, then one complete pass after they have all exited
+    for (let last = false; !last; ) {
+      last = !reading;
+      for (const sub of ['units', 'audio']) {
+        for (const f of fs.existsSync(path.join(cache, sub)) ? fs.readdirSync(path.join(cache, sub)) : []) {
+          if (f.includes('.tmp')) continue;
+          const file = path.join(cache, sub, f);
+          const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' });
+          const ok = r.status === 0 && Number(r.stdout) > 0;
+          seen.set(`${sub}/${f}`, (seen.get(`${sub}/${f}`) ?? true) && ok);
+        }
+      }
+      await new Promise((res) => setTimeout(res, 20));
+    }
+  })();
+  await new Promise((res) => setTimeout(res, 1500)); // let all children load and block on the barrier
+  fs.writeFileSync(barrier, '');
+  const runs = await Promise.all(kids);
+  reading = false;
+  await reader;
+  for (const r of runs) {
+    const res = assertSurvived(r);
+    assertGoodRender(res.job as JobView, FRAMES);
+  }
+  assert.equal(seen.size, 7, `reader observed all 6 unit entries + 1 audio entry: ${[...seen.keys()].join(' ')}`);
+  assert.deepEqual([...seen].filter(([, ok]) => !ok), [], 'every observed cache entry was complete');
+  const left = (fs.readdirSync(ctx.project, { recursive: true }) as string[]).filter((f) => String(f).includes('.tmp'));
+  assert.deepEqual(left, [], 'no temporary files left');
+  // the three outputs are interchangeable: identical decoded video
+  const md5 = (f: string) => spawnSync('ffmpeg', ['-v', 'error', '-i', f, '-map', '0:v', '-f', 'md5', '-'], { encoding: 'utf8' }).stdout.trim();
+  const sums = runs.map((r) => md5((r.result!.job as JobView).out!));
+  assert.equal(new Set(sums).size, 1, `decoded outputs differ: ${sums.join(' ')}`);
+});
+
 test('normal single render is unchanged (output, audio, cache hit)', { timeout: 600_000 }, async (t) => {
   if (skip) return t.skip(skip);
   const res = assertSurvived(await child(['single', FIX]));

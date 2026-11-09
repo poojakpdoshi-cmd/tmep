@@ -170,8 +170,11 @@ self-correct); unknown tools and malformed requests are JSON-RPC errors.
 Same inputs give the same plan and the same render commands; renders are reused instead of repeated.
 
 Cache entries are written to a per-attempt temporary file (`<entry>.<pid>.<random>.tmp.*`) and
-published with an atomic rename, so a reader never sees a partial entry. If another render
-published the same entry first, the existing file is accepted only after `ffprobe` validates it.
+published with an atomic rename, so a reader never sees a partial entry. Renders in separate
+processes may publish the same key: on POSIX the rename replaces the entry with an equivalent,
+complete file (readers holding the old file keep reading it); where the rename fails instead
+(e.g. Windows while the entry is open), the existing entry is accepted only after `ffprobe`
+validates it.
 Failed or cancelled renders remove their temporary files; completed entries are kept.
 
 ## Versioning
