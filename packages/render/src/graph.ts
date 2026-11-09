@@ -161,7 +161,9 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const chain = [
       'setpts=PTS-STARTPTS',
       `fps=${fps}`,
-      fitChain(b.fit, W, H, 0.5, 0.5, tl.settings.bg, `b${bi}`),
+      // Preserve original PNG alpha and transparent letterboxing for effected overlays.
+      ...(b.fx?.length ? ['format=yuva420p'] : []),
+      fitChain(b.fit, W, H, 0.5, 0.5, b.fx?.length ? 'black@0' : tl.settings.bg, `b${bi}`),
       ...(overlayFx ? [overlayFx] : []),
       'format=yuva420p',
       'tpad=stop_mode=clone:stop_duration=1',
