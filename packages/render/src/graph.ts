@@ -7,7 +7,7 @@
  * re-encode the units they touch, previews can render a subset, and interrupted renders
  * resume. Audio is mixed in one continuous pass (no AAC priming gaps at joins).
  */
-import { type Timeline, type Placed, type Clip, type BRoll, resolveRef } from '../../core/src/index.ts';
+import { type Timeline, type Placed, type Clip, type BRoll, type Effect, resolveRef } from '../../core/src/index.ts';
 import { compileFx, compileOverlayFx } from './effects.ts';
 
 export interface MediaRef {
@@ -30,6 +30,14 @@ export interface Unit {
   clips: Placed[];
   startFrame: number;
   frames: number;
+}
+
+/** Compiled standalone ASS preset with independent compositing effects. */
+export interface GfxOverlay {
+  file: string;
+  at: number;
+  d: number;
+  fx: Effect[];
 }
 
 const n3 = (x: number) => String(Math.round(x * 1000) / 1000);
@@ -104,7 +112,7 @@ export interface UnitArgs {
 }
 
 /** Build ffmpeg args for one video unit. `assName` is relative to cwd (job dir). */
-export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRef>, enc: EncParams, placed: Placed[], out: string, assName: string | undefined, fontsDir: string | undefined): UnitArgs {
+export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRef>, enc: EncParams, placed: Placed[], out: string, assName: string | undefined, fontsDir: string | undefined, gfxOverlays: GfxOverlay[] = []): UnitArgs {
   const fps = tl.settings.fps;
   const { W, H } = outSize(tl, enc.scale);
   const inputs: string[] = [];
@@ -175,6 +183,35 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     g.push(`[${cur}][b${bi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
     cur = `o${bi}`;
     k++;
+  });
+  // Independently rendered ASS graphics groups sit above b-roll but below captions.
+  // Each preset has local ASS timestamps, so a graphic spanning multiple video units
+  // starts the next unit partway into its original animation instead of restarting.
+  gfxOverlays.forEach((layer, gi) => {
+    const s = Math.max(layer.at, U0);
+    const e = Math.min(layer.at + layer.d, U1);
+    if (e - s < 1 / fps) return;
+    const ls = s - U0;
+    const len = e - s;
+    const frames = Math.round(len * fps);
+    const offset = s - layer.at;
+    const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
+    const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset);
+    const chain = [
+      `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${n3(len + 0.5)}`,
+      'format=rgba',
+      `setpts=PTS-STARTPTS+${n3(offset)}/TB`,
+      `subtitles=filename=${layer.file}${fd}:alpha=1`,
+      'setpts=PTS-STARTPTS',
+      ...(fx ? [fx] : []),
+      'format=yuva420p',
+      'tpad=stop_mode=clone:stop_duration=1',
+      `trim=end_frame=${frames}`,
+      `setpts=PTS-STARTPTS+${n3(ls)}/TB`,
+    ].join(',');
+    g.push(`${chain}[gfx${gi}]`);
+    g.push(`[${cur}][gfx${gi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[gc${gi}]`);
+    cur = `gc${gi}`;
   });
   if (assName) {
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
