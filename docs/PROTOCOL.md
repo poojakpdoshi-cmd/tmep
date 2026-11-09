@@ -74,6 +74,18 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 | `loudness` | lufs | integrated loudness target (0 = off) |
 | `fx` | kind, clip?, ... | clip effects (below); omitting `clip` applies to every clip |
 
+### Overlay layer order (`z`)
+
+B-roll and graphics can be stacked explicitly with an integer `z` in -100..100:
+`broll v2 1.2 2.5 z=20`, `gfx title 1.2 2.5 z=-10`,
+`set b2 z=5`, `set g3 z=10`. Higher z is drawn later (in front); ties preserve
+the original creation order. Backward-compatible defaults: b-roll z=0 and
+fx-enabled graphics z=10. **Plain graphics without explicit z** stay in the
+shared ASS layer with captions, above all independent overlays, so set z on
+graphics that need precise stacking. Captions always remain on top.
+Explicitly z-layered graphics are isolated even without `fx`; alpha-only
+export with isolated graphics remains unsupported.
+
 ### Effects (`fx`)
 
 Effects attach to main clips (`cN`), b-roll overlays (`bN`) or graphics presets (`gN`), use **clip-local seconds**
