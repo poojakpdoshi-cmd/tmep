@@ -24,10 +24,12 @@ import {
 import { roughCut, keywords } from '../../speech/src/analyze.ts';
 import { getTemplate, TEMPLATES } from './templates.ts';
 import { storyboard } from './rules.ts';
+import { referenceRanges } from './reference.ts';
 import { SFX_KINDS } from '../../render/src/sfx.ts';
 
 export interface PlanInput {
   template: string;
+  referenceShotSec?: number;
   sources: { id: string; dur: number; kind: string; w?: number; h?: number; words?: Word[] }[];
   target?: number;
   ratio?: Ratio;
@@ -69,6 +71,14 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
   // 1) rough cut every source (target split by source speech share)
   const speechTotal = inp.sources.reduce((a, s) => a + (s.words?.length ? s.words[s.words.length - 1]!.e - s.words[0]!.s : 0), 0) || 1;
   for (const src of inp.sources) {
+    if (inp.referenceShotSec !== undefined && src.kind !== 'image') {
+      totalSentences += countSentences(src.words ?? []);
+      keptSentences += countSentences(src.words ?? []);
+      for (const [s, e] of referenceRanges(src.words ?? [], src.dur, inp.referenceShotSec, tl.settings.fps)) {
+        tl.clips.push(newClip(tl, src.id, s, e, { fit: tpl.fit }));
+      }
+      continue;
+    }
     if (src.kind === 'image') {
       tl.clips.push(newClip(tl, src.id, 0, 3, { fit: tpl.fit }));
       continue;
@@ -92,12 +102,12 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
   // 2) framing: crop centre, jump-cut alternation, push-ins
   let alt = false;
   tl.clips.forEach((c, i) => {
-    c.push = tpl.push;
+    c.push = inp.referenceShotSec === undefined ? tpl.push : 0;
     const prev = tl.clips[i - 1];
     const isJump = prev && prev.src === c.src && c.in - prev.out > 0.05;
     if (tpl.jumpZoom && isJump) alt = !alt;
     else if (!isJump) alt = false;
-    c.base = alt ? 1.08 : 1;
+    c.base = inp.referenceShotSec !== undefined ? (i % 2 ? 1.06 : 1) : alt ? 1.08 : 1;
   });
 
   // 3) captions
@@ -141,7 +151,7 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
 
   // 5) transitions at topic changes (skipped content or long source gaps), never on jump cuts
   let trans = 0;
-  if (tpl.transition && inp.transitions !== false) {
+  if (inp.referenceShotSec === undefined && tpl.transition && inp.transitions !== false) {
     tl.clips.forEach((c, i) => {
       const prev = tl.clips[i - 1];
       if (!prev) return;

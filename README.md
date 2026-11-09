@@ -196,3 +196,15 @@ MIT for all code in this repository (see [LICENSE](LICENSE)). Icons and sound ef
 original (icons are vector paths in `packages/motion/src/icons.ts`; SFX are synthesized by
 FFmpeg at runtime). FFmpeg, whisper.cpp and faster-whisper are external tools under their
 own licenses and are not bundled.
+
+## Reference-aware planning (Phase 2.2)
+
+Supply an imported reference asset to the existing planner:
+
+```bash
+tmep import narration.mp4 reference.mp4
+tmep transcribe v1 --file measured-words.json
+tmep plan --src v1 --reference v2
+```
+
+MCP: `video_plan {"src":"v1","reference":"v2"}`. No extra planning tool or timestamp payload is needed. The engine reuses cached reference analysis. See [reference planning rules and limitations](docs/REFERENCE_PLANNING.md).

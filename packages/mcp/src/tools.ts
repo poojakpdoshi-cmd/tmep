@@ -40,8 +40,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_plan',
-    description: 'Build a full edit from transcript+template: cuts, captions, graphics, zooms, SFX. template reel|short|talking_head|tutorial|product_demo|cinematic_explainer|youtube. off: features to skip (sfx,graphics,zooms,transitions).',
-    schema: obj({ src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), ...project }),
+    description: 'Optional reference asset guides safe sentence/pause cuts, preserving narration. Build a full edit from transcript+template: cuts, captions, graphics, zooms, SFX. template reel|short|talking_head|tutorial|product_demo|cinematic_explainer|youtube. off: features to skip (sfx,graphics,zooms,transitions).',
+    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), ...project }),
   },
   {
     name: 'video_edit',

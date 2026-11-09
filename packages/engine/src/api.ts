@@ -189,28 +189,32 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
 }
 
 // ---------------------------------------------------------------- plan
-export async function plan(ctx: Ctx, inp: { src?: string | string[]; template?: string; target?: number; ratio?: Ratio; captions?: Record<string, unknown>; title?: string; sub?: string; music?: string; sfx?: boolean; graphics?: boolean; zooms?: boolean; transitions?: boolean }): Promise<Record<string, unknown>> {
+export async function plan(ctx: Ctx, inp: { reference?: string; src?: string | string[]; template?: string; target?: number; ratio?: Ratio; captions?: Record<string, unknown>; title?: string; sub?: string; music?: string; sfx?: boolean; graphics?: boolean; zooms?: boolean; transitions?: boolean }): Promise<Record<string, unknown>> {
   if (inp.ratio && !(inp.ratio in RATIOS)) throw new TmepError('E_INPUT', `ratio must be one of ${Object.keys(RATIOS).join('|')}`);
   const p = await openProject(ctx.project);
   const all = await p.assets();
   let ids = typeof inp.src === 'string' ? [inp.src] : inp.src;
-  if (!ids?.length) ids = all.filter((a) => a.kind === 'video').map((a) => a.id).slice(0, 1);
+  if (!ids?.length) ids = all.filter((a) => a.kind === 'video' && a.id !== inp.reference).map((a) => a.id).slice(0, 1);
   if (!ids.length) throw new TmepError('E_STATE', 'no video assets imported', 'call video_import first');
   const sources = [];
   const warn: string[] = [];
   for (const id of ids) {
     const a = await p.asset(id);
     const tr = await loadTranscript(p, a);
+    if (inp.reference && (!tr?.words.length || tr.approx)) throw new TmepError('E_INPUT', 'reference planning requires measured word timestamps for each source');
     if (!tr && a.kind !== 'image') warn.push(`${id}: no transcript (kept raw footage; run transcribe for smart cuts/captions)`);
     if (tr?.approx) warn.push(`${id}: word timing is approximate (imported subtitles)`);
     sources.push({ id, dur: a.dur, kind: a.kind, w: a.w, h: a.h, words: tr?.words });
   }
+  const ref = inp.reference ? await reference({ ...ctx, detail: 'standard' }, { asset: inp.reference }) : undefined;
+  if (ref?.truncated) warn.push('reference analysis limited to the first 120 seconds');
+  if (ref) warn.push('reference pace is advisory; narration is preserved, target duration ignored; no style replication');
   if (inp.music) await p.asset(inp.music);
-  const { tl, summary } = planTimeline({ template: inp.template ?? 'reel', sources, target: inp.target, ratio: inp.ratio, captions: inp.captions as never, title: inp.title, sub: inp.sub, music: inp.music, sfx: inp.sfx, graphics: inp.graphics, zooms: inp.zooms, transitions: inp.transitions });
+  const { tl, summary } = planTimeline({ referenceShotSec: ref ? Number(ref.medianShotSec) : undefined, template: inp.template ?? 'reel', sources, target: inp.target, ratio: inp.ratio, captions: inp.captions as never, title: inp.title, sub: inp.sub, music: inp.music, sfx: inp.sfx, graphics: inp.graphics, zooms: inp.zooms, transitions: inp.transitions });
   const rev = await p.commit(tl, [{ op: 'plan', ...inp }], `plan ${inp.template ?? 'reel'}`);
   return shape(
     ctx.detail,
-    { ok: 1, rev, dur: summary.dur, ...(warn.length ? { warn } : {}) },
+    { ok: 1, rev, dur: summary.dur, ...(ref ? { reference: inp.reference, shot: ref.medianShotSec } : {}), ...(warn.length ? { warn } : {}) },
     { clips: summary.clips, gfx: summary.gfx, zooms: summary.zooms, sfx: summary.sfx, trans: summary.trans, cap: tl.captions.style, ratio: tl.settings.ratio },
     { kept: summary.kept, sentences: summary.sentences, rejected: summary.rejected },
   );

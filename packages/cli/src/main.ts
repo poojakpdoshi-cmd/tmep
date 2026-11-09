@@ -52,7 +52,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   import <files...>                  register media -> asset ids (v1, a1, i1)
   reference <asset> [--threshold 0.3] [--sampleFps 15] [--maxSeconds 120]  analyze reference cuts
   transcribe <asset> [--engine auto|whisper.cpp|faster-whisper|import] [--lang auto|en|hi|hinglish] [--model base] [--file subs.srt] [--force]
-  plan [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
+  plan [--reference v2] [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
   edit <op> [<op>...]                ops as strings, e.g. "cut 3.2 4.0" "zoom @phrase to=1.2"  (or --json '[...]')
   undo [n] | redo [n] | checkout <rev>
   inspect [project|assets|timeline|transcript|silence|diff|log|jobs] [--asset v1] [--from s] [--to s] [--find q] [--words]
@@ -111,6 +111,7 @@ export async function main(argv: string[]): Promise<number> {
       case 'plan':
         print(
           await api.plan(ctx, {
+            reference: args.reference as string,
             template: args.template as string,
             src: typeof args.src === 'string' ? args.src.split(',') : undefined,
             target: args.target as number,
