@@ -81,6 +81,8 @@ export interface Gfx {
   props: Record<string, unknown>;
   /** Optional group effects for an independently composited graphics preset. */
   fx?: Effect[];
+  /** Explicit compositing order. Higher is in front; captions always on top. */
+  z?: number;
 }
 
 export interface BRoll {
@@ -92,6 +94,8 @@ export interface BRoll {
   fit: Fit;
   /** Clip-local effects, including keyframes and masks. Optional for older timelines. */
   fx?: Effect[];
+  /** Explicit compositing order. Default 0; higher is in front. */
+  z?: number;
 }
 
 export interface Sfx {
