@@ -8,7 +8,7 @@
  * resume. Audio is mixed in one continuous pass (no AAC priming gaps at joins).
  */
 import { type Timeline, type Placed, type Clip, type BRoll, resolveRef } from '../../core/src/index.ts';
-import { compileFx } from './effects.ts';
+import { compileFx, compileOverlayFx } from './effects.ts';
 
 export interface MediaRef {
   path: string;
@@ -157,7 +157,19 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const fades: string[] = [];
     if (T >= U0 - 1e-6) fades.push(`fade=t=in:st=0:d=0.12:alpha=1`);
     if (T + b.d <= U1 + 1e-6) fades.push(`fade=t=out:st=${n3(Math.max(0, len - 0.12))}:d=0.12:alpha=1`);
-    g.push(`[${k}:v]setpts=PTS-STARTPTS,fps=${fps},${fitChain(b.fit, W, H, 0.5, 0.5, tl.settings.bg, `b${bi}`)},format=yuva420p,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${frames}${fades.length ? `,${fades.join(',')}` : ''},setpts=PTS-STARTPTS+${n3(ls)}/TB[b${bi}]`);
+    const overlayFx = compileOverlayFx(b.fx, W, H, fps, frames, `b${bi}`, s - T);
+    const chain = [
+      'setpts=PTS-STARTPTS',
+      `fps=${fps}`,
+      fitChain(b.fit, W, H, 0.5, 0.5, tl.settings.bg, `b${bi}`),
+      ...(overlayFx ? [overlayFx] : []),
+      'format=yuva420p',
+      'tpad=stop_mode=clone:stop_duration=1',
+      `trim=end_frame=${frames}`,
+      ...fades,
+      `setpts=PTS-STARTPTS+${n3(ls)}/TB`,
+    ].join(',');
+    g.push(`[${k}:v]${chain}[b${bi}]`);
     g.push(`[${cur}][b${bi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
     cur = `o${bi}`;
     k++;
