@@ -120,7 +120,8 @@ test('audio mix failure during video rendering is a job error, not a process cra
 test('a job whose process died is reported as interrupted, not running', { timeout: 600_000 }, async (t) => {
   if (skip) return t.skip(skip);
   const died = await child(['start-and-die', FIX]);
-  assert.equal(died.signal, 'SIGKILL');
+  // POSIX reports the signal; Windows reports a non-zero exit code for a self-kill
+  assert.ok(died.signal === 'SIGKILL' || (process.platform === 'win32' && died.code !== 0), `child did not die abruptly: ${died.code}/${died.signal}`);
   const { project, job } = died.result as { project: string; job: string };
   // from this (different) process, and again from a fresh process
   const s1 = (await api.status({ project, detail: 'standard' }, { job })) as Record<string, unknown>;
