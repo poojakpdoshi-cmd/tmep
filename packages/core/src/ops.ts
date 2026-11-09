@@ -376,7 +376,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
           ?? tl.broll.find((b) => b.id === op.clip)
           ?? tl.gfx.find((g) => g.id === op.clip)
         : undefined;
-      if (op.clip && !target) throw new TmepError('E_NOT_FOUND', `no clip, b-roll or graphic "${op.clip}"`);
+      if (op.clip && !target) throw new TmepError('E_NOT_FOUND', `no clip or b-roll or graphic "${op.clip}"`);
       const targets = op.clip ? [target!] : tl.clips;
       if (!targets.length) throw new TmepError('E_RANGE', 'no clips to apply fx to');
       const kind = op.kind as string;
