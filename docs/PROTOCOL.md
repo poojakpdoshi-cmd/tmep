@@ -79,7 +79,7 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 B-roll and graphics can be stacked explicitly with an integer `z` in -100..100:
 `broll v2 1.2 2.5 z=20`, `gfx title 1.2 2.5 z=-10`,
 `set b2 z=5`, `set g3 z=10`. Higher z is drawn later (in front); ties preserve
-the original creation order. Backward-compatible defaults: b-roll z=0 and
+the original per-type layer order (b-roll first, then graphics). Backward-compatible defaults: b-roll z=0 and
 fx-enabled graphics z=10. **Plain graphics without explicit z** stay in the
 shared ASS layer with captions, above all independent overlays, so set z on
 graphics that need precise stacking. Captions always remain on top.
