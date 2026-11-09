@@ -55,6 +55,9 @@ test('b-roll fx omitted leaves legacy graph unchanged; present fx routes through
   assert.ok(newGraph.includes('alphaextract') && newGraph.includes('fxorigb0'));
   assert.ok(newGraph.includes('blend=all_mode=multiply') && newGraph.includes('alphamerge'));
   assert.ok(newGraph.includes('overlay=eof_action=pass'));
+  tl.broll[0]!.fit = 'contain';
+  const contained = unitArgs(tl, u, media, settings, placed, 'out.mp4', undefined, undefined).graph;
+  assert.ok(contained.includes('color=black@0'), 'effected contain overlays use transparent padding');
 });
 
 test('ffmpeg: b-roll rectangle mask reveals underlying blue layer, not black', { skip: !hasFFmpeg }, () => {
