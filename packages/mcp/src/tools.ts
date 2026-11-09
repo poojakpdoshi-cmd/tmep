@@ -1,6 +1,6 @@
 /**
  * MCP tool definitions. Designed for token economy and interoperability:
- *  - 8 tools; names match ^[a-zA-Z0-9_-]{1,64}$ (Claude, Antigravity, OpenAI reject dots)
+ *  - 9 tools; names match ^[a-zA-Z0-9_-]{1,64}$ (Claude, Antigravity, OpenAI reject dots)
  *    and stay short so "server + tool" fits Cursor's 60-char limit.
  *  - Short descriptions; detailed references are fetched on demand via video_help.
  *  - Every tool accepts optional `project` (path; defaults to TMEP_PROJECT or the
@@ -25,6 +25,13 @@ export const TOOLS: ToolDef[] = [
     name: 'video_import',
     description: 'Register media files. Returns asset ids (v1 video, a1 audio, i1 image); same content keeps its id.',
     schema: obj({ paths: arr(str({ min: 1 }), { min: 1, max: 50 }), ...project }),
+  },
+  {
+    name: 'video_reference',
+    description: 'Analyze imported reference video for hard-cut timestamps and pacing. Cached, compact output; not full visual style analysis.',
+    schema: obj({ asset: str({ min: 1 }), threshold: num({ min: 0.05, max: 0.8 }).optional(), sampleFps: num({ min: 2, max: 30 }).optional(),
+      maxSeconds: num({ min: 1, max: 300 }).optional(), minGapSec: num({ min: 0.1, max: 2 }).optional(), ...project, ...detail }),
+    annotations: { readOnlyHint: true },
   },
   {
     name: 'video_transcribe',

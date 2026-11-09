@@ -50,6 +50,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
 
   init [dir]                         create a project (default: current dir)
   import <files...>                  register media -> asset ids (v1, a1, i1)
+  reference <asset> [--threshold 0.3] [--sampleFps 15] [--maxSeconds 120]  analyze reference cuts
   transcribe <asset> [--engine auto|whisper.cpp|faster-whisper|import] [--lang auto|en|hi|hinglish] [--model base] [--file subs.srt] [--force]
   plan [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
   edit <op> [<op>...]                ops as strings, e.g. "cut 3.2 4.0" "zoom @phrase to=1.2"  (or --json '[...]')
@@ -98,6 +99,11 @@ export async function main(argv: string[]): Promise<number> {
       }
       case 'import':
         print(await api.importMedia(ctx, { paths: args._ }), pretty);
+        return 0;
+      case 'reference':
+        print(await api.reference(ctx, { asset: String(args._[0] ?? ''),
+          threshold: args.threshold as number, sampleFps: args.sampleFps as number,
+          maxSeconds: args.maxSeconds as number, minGapSec: args.minGapSec as number }), pretty);
         return 0;
       case 'transcribe':
         print(await api.transcribe(ctx, { asset: String(args._[0] ?? ''), engine: args.engine as string, lang: args.lang as string, model: args.model as string, file: args.file as string, prompt: args.prompt as string, force: !!args.force }), pretty);

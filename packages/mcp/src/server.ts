@@ -133,6 +133,8 @@ export class McpServer {
     switch (name) {
       case 'video_import':
         return api.importMedia(ctx, { paths: a.paths as string[] });
+      case 'video_reference':
+        return api.reference(ctx, a as never);
       case 'video_transcribe': {
         // speech recognition can exceed client tool timeouts: run as a job, wait briefly
         const p = await api.openProject(ctx.project);
