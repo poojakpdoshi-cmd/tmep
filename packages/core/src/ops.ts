@@ -110,6 +110,7 @@ const POSITIONAL: Record<string, string[]> = {
   speed: ['x'],
   captions: ['style'],
   remove: ['id'],
+  set: ['id'],
   broll: ['src', 'at', 'd'],
   music: ['src', 'vol'],
   format: ['ratio'],
