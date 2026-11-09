@@ -64,9 +64,9 @@ function combine(parts: (string | undefined)[], op: '*' | '+'): string | undefin
 }
 
 /** Perspective filter implementing scale `S`, translation (X,Y as frame fractions), rotation R (deg) about the centre. */
-export function transformFilter(fx: Effect[], W: number, H: number, fps: number, bg: string): string | undefined {
+export function transformFilter(fx: Effect[], W: number, H: number, fps: number, bg: string, timeOffset = 0, transparent = false): string | undefined {
   const kfs = transforms(fx);
-  const T = `(in/${fps})`;
+  const T = timeOffset ? `(in/${fps}+${n(timeOffset)})` : `(in/${fps})`;
   const S = combine(kfs.map((k) => keyExpr(k.keys, 's', T)), '*');
   const X = combine(kfs.map((k) => keyExpr(k.keys, 'x', T)), '+');
   const Y = combine(kfs.map((k) => keyExpr(k.keys, 'y', T)), '+');
@@ -90,7 +90,7 @@ export function transformFilter(fx: Effect[], W: number, H: number, fps: number,
   const [x2, y2] = corner(0, Hp);
   const [x3, y3] = corner(Wp, Hp);
   const col = bg.replace('#', '0x');
-  return `pad=${Wp}:${Hp}:${P}:${P}:color=${col},perspective=x0='${x0}':y0='${y0}':x1='${x1}':y1='${y1}':x2='${x2}':y2='${y2}':x3='${x3}':y3='${y3}':interpolation=cubic:eval=frame,crop=${W}:${H}:${P}:${P}`;
+  return `${transparent ? 'format=yuva420p,' : ''}pad=${Wp}:${Hp}:${P}:${P}:color=${transparent ? 'black@0' : col},perspective=x0='${x0}':y0='${y0}':x1='${x1}':y1='${y1}':x2='${x2}':y2='${y2}':x3='${x3}':y3='${y3}':interpolation=cubic:eval=frame,crop=${W}:${H}:${P}:${P}`;
 }
 
 /** Per-frame opacity commands; undefined when opacity is constant 1. */
@@ -110,8 +110,8 @@ export function opacitySchedule(fx: Effect[], frames: number, fps: number): { t:
 }
 
 /** Signed distance (px, positive inside) of a mask shape at mask resolution MW x MH, as a geq expression of X,Y. */
-export function maskExpr(m: FxMask, MW: number, MH: number): string {
-  const Tp = 'T';
+export function maskExpr(m: FxMask, MW: number, MH: number, timeOffset = 0): string {
+  const Tp = timeOffset ? `(T+${n(timeOffset)})` : 'T';
   let prog: string | undefined;
   if (m.reveal) prog = easeExpr(m.reveal.e, `clip((${Tp}-(${n(m.reveal.at)}))/${n(m.reveal.d)},0,1)`);
   const grow = m.reveal && m.reveal.from === 'center' ? `max(${prog},0.001)` : undefined;
@@ -209,4 +209,41 @@ export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string
     frag = `${head}format=yuva420p[fxc${id}];${src},scale=${W}:${H}:flags=bicubic,format=gray[fxm${id}];[fxc${id}][fxm${id}]alphamerge[fxk${id}];color=c=${col}:s=${W}x${H}:r=${fps}:d=${D}[fxb${id}];[fxb${id}][fxk${id}]overlay=shortest=1:format=auto`;
   }
   return frag || undefined;
+}
+
+/**
+ * B-roll variant of clip effects. Produces an ALPHA-PRESERVING overlay (unlike the
+ * main-track compiler, which intentionally flattens into the timeline background).
+ * Existing source alpha, transformed empty areas, opacity and all masks multiply.
+ * timeOffset is the elapsed overlay time when a b-roll spans multiple render units.
+ */
+export function compileOverlayFx(
+  fx: Effect[] | undefined, W: number, H: number, fps: number,
+  frames: number, id: string, timeOffset = 0,
+): string | undefined {
+  if (!fx?.length) return undefined;
+  const tf = transformFilter(fx, W, H, fps, 'black', timeOffset, true);
+  const opacity = combine(
+    transforms(fx).map((k) => keyExpr(k.keys, 'o', timeOffset ? `(T+${n(timeOffset)})` : 'T')),
+    '*',
+  );
+  const ms = masks(fx);
+  if (!opacity && !ms.length) return tf;
+
+  const MW = Math.max(2, Math.round(W / 2));
+  const MH = Math.max(2, Math.round(H / 2));
+  const D = n((frames + fps) / fps);
+  const alpha = [...ms.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
+    .map((x) => `(${x})`).join('*');
+  const dynamic = ms.some((m) => !!m.reveal) ||
+    transforms(fx).some((k) => k.keys.filter((x) => x.o !== undefined).length > 1);
+  const src = dynamic
+    ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*clip(${alpha},0,1)'`
+    : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*clip(${alpha},0,1)',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+  // Never overwrite the input alpha: compose it with the computed effect alpha.
+  return `${tf ? tf + ',' : ''}format=yuva420p,split=2[fxcol${id}][fxold${id}];` +
+    `[fxold${id}]alphaextract[fxorig${id}];` +
+    `${src},scale=${W}:${H}:flags=bicubic,format=gray[fxnew${id}];` +
+    `[fxorig${id}][fxnew${id}]blend=all_mode=multiply[fxmul${id}];` +
+    `[fxcol${id}][fxmul${id}]alphamerge`;
 }

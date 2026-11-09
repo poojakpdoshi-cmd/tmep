@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Phase 2.4A b-roll overlay effects
+
+- The existing `fx` op now accepts explicit b-roll ids (`bN`) for keyframes, zoom/pan, opacity, and shape masks. Untargeted operations still affect only main clips.
+- B-roll effects preserve transparency from source images, geometric transforms, opacity and animated masks, revealing the underlying video instead of flattening to a solid background.
+- Overlay effect timing continues correctly across separate render units; tiny FFmpeg pixel tests cover alpha and masked compositing. Graphics-layer effects remain out of scope.
+
+
 ## Unreleased — Phase 2.3 effects engine
 
 - Clip effects (`Clip.fx`, optional, backward compatible): keyframed scale/position/rotation/opacity

@@ -88,6 +88,8 @@ export interface BRoll {
   ref: TimeRef;
   d: number;
   fit: Fit;
+  /** Clip-local effects, including keyframes and masks. Optional for older timelines. */
+  fx?: Effect[];
 }
 
 export interface Sfx {

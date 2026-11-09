@@ -76,7 +76,8 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 
 ### Effects (`fx`)
 
-Effects attach to a clip, use **clip-local seconds** (0 = the clip's first frame) and compose in
+Effects attach to main clips (`cN`) or b-roll overlays (`bN`), use **clip-local seconds**
+(0 = the element's first frame) and compose in
 order: transforms (scales/opacities multiply, offsets/rotations add) → opacity → masks (intersected).
 
 | Form | Meaning |
@@ -88,11 +89,16 @@ order: transforms (scales/opacities multiply, offsets/rotations add) → opacity
 | `fx mask c1 shape=ellipse x=.5 y=.4 w=.6 h=.4 feather=.04` | rect\|ellipse\|poly mask (centre/size as frame fractions); outside shows the timeline background |
 | `fx mask c1 shape=poly pts="0.1,0.9 0.5,0.1 0.9,0.9" invert=true` | convex polygon, 3–16 points; `invert` flips the mask |
 | `fx mask c1 shape=rect reveal=0.6 from=left at=0.2 e=out` | animated reveal: grow from `center` or wipe from left/right/top/bottom |
-| `fx clear c1` | remove all effects from the clip |
+| `fx mask b2 shape=ellipse w=.5 feather=.03` | mask a b-roll video/image, revealing the main video underneath |
+| `fx zoomin b2 d=1` / `fx kf b2 keys="0:o=0;1:o=1"` | keyframe b-roll zoom or opacity; transparent pixels stay transparent |
+| `fx clear c1` / `fx clear b2` | remove effects from the target |
 
 Limitations: masks are rendered at half resolution then upscaled (fine for feathered edges,
 ≈1 px soft for hard edges); polygons must be convex; push/pull are 2D scale moves, not parallax;
-effects apply to main-track clips (not b-roll or graphics). When `cut`/`delete` splits a clip, each
+effects apply to main clips and explicit b-roll ids (graphics `gN` are not yet supported).
+B-roll effect time stays continuous if the overlay spans cached render units; transparency
+is preserved rather than flattened onto a solid colour. Untargeted `fx` continues to
+affect only main clips. When `cut`/`delete` splits a main clip, each
 part gets its own copy of the effects, re-timed so they continue from the original clip's state at
 the cut point (speed-aware); a removed range is skipped in effect time, like source-anchored zooms.
 
