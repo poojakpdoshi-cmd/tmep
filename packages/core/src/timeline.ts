@@ -374,6 +374,34 @@ export function anchorAt(placed: Placed[], t: number): TimeRef {
 }
 
 /** Remove a source range from every clip that uses it, splitting clips as needed. */
+/**
+ * Remove source range [s, e) (already clamped to the clip) from one clip. Returns the 0-2 clips
+ * that replace it; remainders shorter than 40 ms are dropped. The right part gets a new id only
+ * when both parts survive.
+ */
+function splitClip(tl: Timeline, c: Clip, s: number, e: number): Clip[] {
+  const keepLeft = s - c.in > 0.04;
+  const keepRight = c.out - e > 0.04;
+  const out: Clip[] = [];
+  // effects use clip-local output time: the right part continues where the original was at `e`
+  const withFx = (x: Clip, dt: number): Clip => {
+    if (c.fx) x.fx = shiftFx(c.fx, dt);
+    return x;
+  };
+  if (keepLeft) out.push(withFx({ ...c, out: s, zoom: c.zoom.filter((z) => z.s < s) }, 0));
+  if (keepRight) {
+    const right: Clip = withFx({ ...c, in: e, zoom: c.zoom.filter((z) => z.s >= e), trans: keepLeft ? undefined : c.trans }, (e - c.in) / c.speed);
+    if (keepLeft) right.id = nextId(tl, 'c');
+    out.push(right);
+  }
+  return out;
+}
+
+/**
+ * Source-wide removal: removes [s, e) of `src` from EVERY clip that uses it. This is the intended
+ * semantics for transcript edits (`delete`, `tighten`): a word removed from a source is removed
+ * wherever that footage appears. Returns removed SOURCE seconds.
+ */
 export function removeSrcRange(tl: Timeline, src: string, s: number, e: number): number {
   if (e <= s) return 0;
   let removed = 0;
@@ -384,37 +412,36 @@ export function removeSrcRange(tl: Timeline, src: string, s: number, e: number):
       continue;
     }
     removed += Math.min(e, c.out) - Math.max(s, c.in);
-    const keepLeft = s - c.in > 0.04;
-    const keepRight = c.out - e > 0.04;
-    // effects use clip-local output time: the right part continues where the original was at `e`
-    const withFx = (x: Clip, dt: number): Clip => {
-      if (c.fx) x.fx = shiftFx(c.fx, dt);
-      return x;
-    };
-    if (keepLeft) next.push(withFx({ ...c, out: s, zoom: c.zoom.filter((z) => z.s < s) }, 0));
-    if (keepRight) {
-      const right: Clip = withFx({ ...c, in: e, zoom: c.zoom.filter((z) => z.s >= e), trans: keepLeft ? undefined : c.trans }, (e - c.in) / c.speed);
-      if (keepLeft) right.id = nextId(tl, 'c');
-      next.push(right);
-    }
+    next.push(...splitClip(tl, c, s, e));
   }
   tl.clips = next;
   return removed;
 }
 
-/** Remove a timeline range [a, b). Returns seconds removed. */
+/**
+ * Timeline cut: removes timeline range [a, b) from exactly the placed clips that intersect it.
+ * Other occurrences of the same source footage are left untouched. Returns removed TIMELINE
+ * seconds (duration before minus after, so speed, transition overlap and dropped slivers count).
+ */
 export function cutTimeline(tl: Timeline, a: number, b: number): number {
   if (b <= a) throw new TmepError('E_RANGE', `empty range ${a}-${b}`);
-  const placed = layout(tl);
-  const ranges: [string, number, number][] = [];
-  for (const p of placed) {
+  const before = duration(tl);
+  const ranges = new Map<string, [number, number]>();
+  for (const p of layout(tl)) {
     const s = Math.max(a, p.start);
     const e = Math.min(b, p.start + p.dur);
-    if (e > s) ranges.push([p.clip.src, p.clip.in + (s - p.start) * p.clip.speed, p.clip.in + (e - p.start) * p.clip.speed]);
+    if (e <= s) continue;
+    // placed durations are frame-quantised, so clamp the mapped source range to the clip's own in/out
+    const c = p.clip;
+    const ss = Math.max(c.in, c.in + (s - p.start) * c.speed);
+    const se = Math.min(c.out, c.in + (e - p.start) * c.speed);
+    if (se > ss) ranges.set(c.id, [ss, se]);
   }
-  let removed = 0;
-  for (const [src, s, e] of ranges) removed += removeSrcRange(tl, src, s, e);
-  return removed;
+  tl.clips = tl.clips.flatMap((c) => {
+    const r = ranges.get(c.id);
+    return r ? splitClip(tl, c, r[0], r[1]) : [c];
+  });
+  return Math.max(0, before - duration(tl));
 }
 
 export function findClip(tl: Timeline, id: string): Clip {

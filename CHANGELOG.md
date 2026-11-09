@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Stabilization B1: timeline cut correctness
+
+- Fix (audit P1-1): `cut` removes the timeline range only from the placed clips under it. Other
+  clips that reuse the same source footage are no longer cut. The `cut Ns` note now reports
+  timeline seconds (it reported source seconds, e.g. double on 2x clips).
+- `delete` / `tighten` keep their documented source-wide behaviour.
+
 ## Unreleased — Stabilization A: render reliability
 
 - Fix: concurrent renders of one project (e.g. preview + final) no longer collide on temporary
