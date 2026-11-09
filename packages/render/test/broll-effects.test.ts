@@ -48,10 +48,10 @@ test('b-roll fx omitted leaves legacy graph unchanged; present fx routes through
     v2: { path: 'overlay.mp4', kind: 'video' as const, hash: 'b', audio: false, dur: 2 },
   };
   const settings = { vcodec: 'libx264', preset: 'fast', crf: 22, scale: 64 / 1080 };
-  const oldGraph = unitArgs(tl, u, media, settings, placed, 'out.mp4').graph;
+  const oldGraph = unitArgs(tl, u, media, settings, placed, 'out.mp4', undefined, undefined).graph;
   assert.ok(!oldGraph.includes('fxorigb0'));
   tl.broll[0]!.fx = [mask()];
-  const newGraph = unitArgs(tl, u, media, settings, placed, 'out.mp4').graph;
+  const newGraph = unitArgs(tl, u, media, settings, placed, 'out.mp4', undefined, undefined).graph;
   assert.ok(newGraph.includes('alphaextract') && newGraph.includes('fxorigb0'));
   assert.ok(newGraph.includes('blend=all_mode=multiply') && newGraph.includes('alphamerge'));
   assert.ok(newGraph.includes('overlay=eof_action=pass'));
