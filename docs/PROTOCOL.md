@@ -72,6 +72,29 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 | `sfx` | kind, at, vol=-12 | synthesized sound effect |
 | `format` | ratio, fps | 9:16, 16:9, 1:1, 4:5 |
 | `loudness` | lufs | integrated loudness target (0 = off) |
+| `fx` | kind, clip?, ... | clip effects (below); omitting `clip` applies to every clip |
+
+### Effects (`fx`)
+
+Effects attach to a clip, use **clip-local seconds** (0 = the clip's first frame) and compose in
+order: transforms (scales/opacities multiply, offsets/rotations add) → opacity → masks (intersected).
+
+| Form | Meaning |
+|---|---|
+| `fx kf c1 keys="0:s=1,o=0;0.6:s=1.1,o=1,e=out"` | keyframes: `s` scale, `x`/`y` offset (fraction of frame, +right/+down), `r` degrees clockwise, `o` opacity 0..1, `e` easing into the key: linear\|in\|out\|io (default)\|back\|hold. JSON arrays are accepted too. |
+| `fx zoomin c1 d=1.2 amt=0.15` / `zoomout` | eased zoom (default io, amt 0.15) starting at `at` (default 0) |
+| `fx push c1` / `pull` | slow linear dolly-style scale over the whole clip (amt 0.08) |
+| `fx panleft c1 amt=0.12` / `panright` / `panup` / `pandown` | pan; scale is raised by `amt` so the frame edge is never exposed |
+| `fx mask c1 shape=ellipse x=.5 y=.4 w=.6 h=.4 feather=.04` | rect\|ellipse\|poly mask (centre/size as frame fractions); outside shows the timeline background |
+| `fx mask c1 shape=poly pts="0.1,0.9 0.5,0.1 0.9,0.9" invert=true` | convex polygon, 3–16 points; `invert` flips the mask |
+| `fx mask c1 shape=rect reveal=0.6 from=left at=0.2 e=out` | animated reveal: grow from `center` or wipe from left/right/top/bottom |
+| `fx clear c1` | remove all effects from the clip |
+
+Limitations: masks are rendered at half resolution then upscaled (fine for feathered edges,
+≈1 px soft for hard edges); polygons must be convex; push/pull are 2D scale moves, not parallax;
+effects apply to main-track clips (not b-roll or graphics). When `cut`/`delete` splits a clip, each
+part gets its own copy of the effects, re-timed so they continue from the original clip's state at
+the cut point (speed-aware); a removed range is skipped in effect time, like source-anchored zooms.
 
 A batch is atomic: if any op fails, nothing is committed.
 

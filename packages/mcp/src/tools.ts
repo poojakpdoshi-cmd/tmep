@@ -45,7 +45,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_edit',
-    description: 'Apply ops as one undoable revision. Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed". Times: seconds|@phrase|w:N|c:ID|end. video_help ops.',
+    description: 'Apply ops as one undoable revision. Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed", "fx zoomin c1 d=1.2", "fx mask c1 shape=ellipse reveal=0.5". Times: seconds|@phrase|w:N|c:ID|end. video_help ops.',
     schema: obj({ ops: arr(union([str(), record(any())])).optional(), undo: num().optional(), redo: num().optional(), checkout: num().optional(), note: str().optional(), ...project, ...detail }),
   },
   {
