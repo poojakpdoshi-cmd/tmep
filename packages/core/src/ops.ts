@@ -56,9 +56,9 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   frame: obj({ op: str(), clip: str().optional(), fit: fit.optional(), cx: num({ min: 0, max: 1 }).optional(), cy: num({ min: 0, max: 1 }).optional(), base: num({ min: 1, max: 3 }).optional(), push: num({ min: 0, max: 1 }).optional() }),
   zoom: obj({ op: str(), at: anchor, d: num({ min: 0.1, max: 30 }).default(0.9), to: num({ min: 1, max: 3 }).default(1.15), mode: oneOf(['punch', 'smooth'] as const).default('punch') }),
   transition: obj({ op: str(), type: oneOf(TRANSITIONS), d: num({ min: 0, max: 2 }).default(0.35), clip: str().optional(), at: anchor.optional(), all: bool().default(false) }),
-  broll: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }), in: num({ min: 0 }).default(0), fit: fit.default('cover') }),
-  gfx: obj({ op: str(), preset: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(2.5), props: record(any()).default({}) }),
-  set: obj({ op: str(), id: str(), at: anchor.optional(), d: num({ min: 0.1, max: 600 }).optional(), props: record(any()).optional(), vol: num().optional() }),
+  broll: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }), in: num({ min: 0 }).default(0), fit: fit.default('cover'), z: num({ int: true, min: -100, max: 100 }).optional() }),
+  gfx: obj({ op: str(), preset: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(2.5), props: record(any()).default({}), z: num({ int: true, min: -100, max: 100 }).optional() }),
+  set: obj({ op: str(), id: str(), at: anchor.optional(), d: num({ min: 0.1, max: 600 }).optional(), props: record(any()).optional(), vol: num().optional(), z: num({ int: true, min: -100, max: 100 }).optional() }),
   captions: obj({
     op: str(),
     style: oneOf(['kinetic', 'karaoke', 'clean', 'boxed', 'none'] as const).optional(),
@@ -448,7 +448,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       const inT = op.in as number;
       const d = a.kind === 'image' ? (op.d as number) : Math.min(op.d as number, a.dur - inT);
       if (d <= 0) throw new TmepError('E_RANGE', `broll in=${inT} is past the end of ${op.src}`);
-      tl.broll.push({ id, src: op.src as string, in: inT, ref: anchorAt(placed(), at), d, fit: op.fit as 'cover' });
+      tl.broll.push({ id, src: op.src as string, in: inT, ref: anchorAt(placed(), at), d, fit: op.fit as 'cover', ...(op.z !== undefined ? { z: op.z as number } : {}) });
       created.push(id);
       return `broll ${id}@${r2(at)}`;
     }
@@ -459,20 +459,26 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       }
       const at = t(op.at).t;
       const id = nextId(tl, 'g');
-      tl.gfx.push({ id, preset: op.preset as string, ref: anchorAt(placed(), at), d: op.d as number, props: op.props as Record<string, unknown> });
+      tl.gfx.push({ id, preset: op.preset as string, ref: anchorAt(placed(), at), d: op.d as number, props: op.props as Record<string, unknown>, ...(op.z !== undefined ? { z: op.z as number } : {}) });
       created.push(id);
       return `gfx ${id} ${op.preset}@${r2(at)}`;
     }
     case 'set': {
       const id = op.id as string;
       const item = [...tl.gfx, ...tl.sfx, ...tl.broll].find((x) => x.id === id) as
-        | { ref: { at?: number }; d?: number; props?: Record<string, unknown>; vol?: number }
+        | { ref: { at?: number }; d?: number; props?: Record<string, unknown>; vol?: number; z?: number }
         | undefined;
       if (!item) throw new TmepError('E_NOT_FOUND', `no gfx/sfx/broll ${id}`);
       if (op.at !== undefined) item.ref = anchorAt(placed(), t(op.at).t);
       if (op.d !== undefined && 'd' in item) item.d = op.d as number;
       if (op.props && item.props) Object.assign(item.props, op.props);
       if (op.vol !== undefined && 'vol' in item) item.vol = op.vol as number;
+      if (op.z !== undefined) {
+        if (!tl.broll.some((x) => x.id === id) && !tl.gfx.some((x) => x.id === id)) {
+          throw new TmepError('E_INPUT', 'z is only supported for b-roll and graphics');
+        }
+        item.z = op.z as number;
+      }
       return `set ${id}`;
     }
     case 'captions': {
