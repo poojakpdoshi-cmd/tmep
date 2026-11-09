@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Phase 2.5A deterministic overlay stacking
+
+- Optional integer z (-100..100) on b-roll and graphics, editable by `set <id> z=N` or at creation.
+- Stable compositing order across both media and graphics overlay types; higher z renders in front.
+- Legacy default ordering retained (b-roll before independently effected graphics; captions/plain graphics on top).
+- Graphics with explicit z are isolated into transparent ASS overlays even when no effects are attached.
+- Core validation, graph ordering and 64x64 FFmpeg pixel regression tests.
+
+
 ## Unreleased — Phase 2.4B graphics-layer effects
 
 - `fx` accepts graphics preset ids (`gN`), reusing keyframes, pan/zoom, opacity and mask reveals on a whole graphic group.
