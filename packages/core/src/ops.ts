@@ -369,7 +369,13 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `frame ${targets.length} clips`;
     }
     case 'fx': {
-      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      // Explicit ids may address either a main-track clip (cN) or a b-roll overlay (bN).
+      // Omitting the id retains legacy behavior: apply only to main-track clips.
+      const target = op.clip
+        ? tl.clips.find((c) => c.id === op.clip) ?? tl.broll.find((b) => b.id === op.clip)
+        : undefined;
+      if (op.clip && !target) throw new TmepError('E_NOT_FOUND', `no clip or b-roll "${op.clip}"`);
+      const targets = op.clip ? [target!] : tl.clips;
       if (!targets.length) throw new TmepError('E_RANGE', 'no clips to apply fx to');
       const kind = op.kind as string;
       for (const c of targets) {
@@ -387,7 +393,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
           if (op.reveal !== undefined) m.reveal = { at: op.at as number, d: op.reveal as number, e: (op.e as Ease | undefined) ?? 'out', from: op.from as RevealFrom };
           eff = validateMask(m);
         } else {
-          const clipDur = (c.out - c.in) / c.speed;
+          const clipDur = 'speed' in c ? (c.out - c.in) / c.speed : c.d;
           const at = op.at as number;
           const d = (op.d as number | undefined) ?? Math.max(0.05, clipDur - at);
           eff = { type: 'kf', keys: presetKeys(kind as (typeof FX_PRESETS)[number], at, d, op.amt as number | undefined, op.e as never) };
