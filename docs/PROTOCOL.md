@@ -54,9 +54,9 @@ spaces; `props.<k>=v` sets preset props; multi-word `@phrase` anchors need no qu
 
 | Op | Args (positional first) | Effect |
 |---|---|---|
-| `cut` | from, to? | remove a timeline range (`to` optional for phrase/word/clip anchors) |
-| `delete` | text \| fillers=true, pad | transcript-based removal of every occurrence |
-| `tighten` | max=0.35, pad=0.08 | shorten pauses longer than `max` |
+| `cut` | from, to? | remove a timeline range (`to` optional for phrase/word/clip anchors) from only the clips placed under it; other uses of the same footage are untouched; reports timeline seconds removed |
+| `delete` | text \| fillers=true, pad | transcript-based removal of every occurrence, source-wide (every clip reusing that footage); reports source seconds |
+| `tighten` | max=0.35, pad=0.08 | shorten pauses longer than `max`, source-wide like `delete` |
 | `keep` | src, ranges, append | rebuild clips from source ranges |
 | `add` / `trim` / `move` / `remove` | ... | clip-level edits; `remove` also deletes gfx/sfx/b-roll by id |
 | `speed` | x, clip? | 0.25x to 4x (pitch-preserving audio via `atempo`) |
