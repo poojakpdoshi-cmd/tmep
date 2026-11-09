@@ -43,5 +43,8 @@ test('invalid z values or targeting an sfx are rejected atomically', () => {
   const b = a.broll[0]!;
   assert.throws(() => applyOps(a, ['set ' + b.id + ' z=1.5'], ctx));
   assert.throws(() => applyOps(a, ['set ' + b.id + ' z=101'], ctx));
+  const withSfx = applyOps(a, ['sfx whoosh 0'], ctx).tl;
+  assert.throws(() => applyOps(withSfx, ['set ' + withSfx.sfx[0]!.id + ' z=4'], ctx), /z is only supported/);
+  assert.equal(withSfx.sfx[0]!.vol, -12);
   assert.equal(a.broll[0]!.z, undefined);
 });
