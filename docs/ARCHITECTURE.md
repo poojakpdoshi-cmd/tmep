@@ -103,6 +103,10 @@ reuses what the previous render produced. Different projects render in parallel.
 processes, per-attempt temp names plus atomic rename keep the cache consistent: a duplicate
 publish either replaces the entry with an equivalent complete file (POSIX) or, if the rename
 fails (Windows), keeps the existing entry after validating it.
+Mutable work files (ASS scripts, staged fonts, long filter-graph scripts, concat lists) live in a
+private per-render directory, `.tmep/work/render-<pid>-<random>/`, which is removed when the
+render ends; renders never share or lock each other's work files. FFmpeg runs with that
+directory as `cwd` and fixed relative file names, so output and cache keys do not depend on it.
 Within a render, the first failure (video unit, audio mix or mux) aborts all sibling FFmpeg
 processes, temp files are removed, and the root-cause error is returned on the job; a failing
 audio mix can no longer take down the host process.
