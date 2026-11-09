@@ -79,6 +79,8 @@ export interface Gfx {
   ref: TimeRef;
   d: number;
   props: Record<string, unknown>;
+  /** Optional group effects for an independently composited graphics preset. */
+  fx?: Effect[];
 }
 
 export interface BRoll {
