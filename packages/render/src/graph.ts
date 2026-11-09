@@ -8,6 +8,7 @@
  * resume. Audio is mixed in one continuous pass (no AAC priming gaps at joins).
  */
 import { type Timeline, type Placed, type Clip, type BRoll, resolveRef } from '../../core/src/index.ts';
+import { compileFx } from './effects.ts';
 
 export interface MediaRef {
   path: string;
@@ -124,6 +125,8 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     chain.push(fitChain(c.fit, W, H, c.cx, c.cy, tl.settings.bg, `c${j}`));
     const z = zoomExpr(c, p.frames, fps);
     if (z) chain.push(perspective(z));
+    const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`);
+    if (fx) chain.push(fx);
     chain.push('format=yuv420p', 'tpad=stop_mode=clone:stop_duration=1', `trim=end_frame=${p.frames}`, 'setpts=PTS-STARTPTS');
     const body = chain.join(',');
     g.push(`[${k}:v]${body}[v${j}]`);

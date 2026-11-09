@@ -9,6 +9,7 @@
  *  - Timeline math is frame-quantized (all starts/durations are integer frame counts).
  */
 import { TmepError } from './errors.ts';
+import type { Effect } from './effects.ts';
 
 export type Ratio = '9:16' | '16:9' | '1:1' | '4:5';
 export type Fit = 'cover' | 'contain' | 'blur';
@@ -61,6 +62,8 @@ export interface Clip {
   trans?: Transition;
   vol: number;
   mute: boolean;
+  /** Keyframed transforms and masks (clip-local time). Optional: absent on older timelines. */
+  fx?: Effect[];
 }
 
 /** A point in time: either absolute timeline time (`at`) or a source anchor (`src` + `t`). */

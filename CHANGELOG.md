@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Phase 2.3 effects engine
+
+- Clip effects (`Clip.fx`, optional, backward compatible): keyframed scale/position/rotation/opacity
+  with six easings; zoom in/out, push/pull and pan presets that compile to editable keyframes;
+  rect/ellipse/convex-polygon masks with feathering, inversion, intersection and animated reveals.
+- New `fx` op (compact strings over CLI `tmep edit` and MCP `video_edit`); timeline summaries show `fx[...]`.
+- Renderer: one per-frame `perspective` for transforms (background-filled), `blend`+`sendcmd` for
+  opacity, `geq` signed-distance masks at half resolution.
+
 ## 0.1.0 (2026-11-08)
 
 First working milestone.

@@ -29,6 +29,7 @@ import {
   srcToTl,
 } from './timeline.ts';
 import { r2 } from './util.ts';
+import { FX_KINDS, FX_PRESETS, EASES, parseKeys, presetKeys, validateMask, type Effect, type FxMask, type Ease, type RevealFrom } from './effects.ts';
 
 export interface OpContext {
   transcripts: Record<string, Word[] | undefined>;
@@ -76,6 +77,26 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   sfx: obj({ op: str(), kind: str(), at: anchor, vol: num({ min: -60, max: 12 }).default(-12) }),
   format: obj({ op: str(), ratio: ratio.optional(), fps: num({ int: true, min: 12, max: 60 }).optional() }),
   loudness: obj({ op: str(), lufs: num({ min: -40, max: 0 }) }),
+  fx: obj({
+    op: str(),
+    kind: oneOf(FX_KINDS),
+    clip: str().optional(),
+    at: num({ min: 0 }).default(0),
+    d: num({ min: 0.05, max: 600 }).optional(),
+    amt: num({ min: -0.9, max: 3 }).optional(),
+    e: oneOf(EASES).optional(),
+    keys: any().optional(),
+    shape: oneOf(['rect', 'ellipse', 'poly'] as const).default('rect'),
+    x: num({ min: -1, max: 2 }).default(0.5),
+    y: num({ min: -1, max: 2 }).default(0.5),
+    w: num({ min: 0, max: 4 }).default(0.8),
+    h: num({ min: 0, max: 4 }).default(0.8),
+    pts: any().optional(),
+    feather: num({ min: 0, max: 0.5 }).default(0),
+    invert: bool().default(false),
+    reveal: num({ min: 0.05, max: 600 }).optional(),
+    from: oneOf(['center', 'left', 'right', 'top', 'bottom'] as const).default('center'),
+  }),
 };
 
 /** Positional argument order for the compact string form. */
@@ -97,6 +118,7 @@ const POSITIONAL: Record<string, string[]> = {
   add: ['src', 'in', 'out'],
   trim: ['clip', 'in', 'out'],
   loudness: ['lufs'],
+  fx: ['kind', 'clip'],
 };
 
 function tokenize(s: string): string[] {
@@ -345,6 +367,34 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
         for (const k of ['fit', 'cx', 'cy', 'base', 'push'] as const) if (op[k] !== undefined) (c as unknown as Record<string, unknown>)[k] = op[k];
       }
       return `frame ${targets.length} clips`;
+    }
+    case 'fx': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      if (!targets.length) throw new TmepError('E_RANGE', 'no clips to apply fx to');
+      const kind = op.kind as string;
+      for (const c of targets) {
+        if (kind === 'clear') {
+          delete c.fx;
+          continue;
+        }
+        let eff: Effect;
+        if (kind === 'kf') {
+          if (op.keys === undefined) throw new TmepError('E_INPUT', 'fx kf needs keys', 'keys="0:s=1,o=0;0.6:s=1.1,o=1,e=out"');
+          eff = { type: 'kf', keys: parseKeys(op.keys) };
+        } else if (kind === 'mask') {
+          const m: FxMask = { type: 'mask', shape: op.shape as FxMask['shape'], x: op.x as number, y: op.y as number, w: op.w as number, h: op.h as number, feather: op.feather as number, invert: op.invert as boolean };
+          if (op.pts !== undefined) m.pts = op.pts as [number, number][];
+          if (op.reveal !== undefined) m.reveal = { at: op.at as number, d: op.reveal as number, e: (op.e as Ease | undefined) ?? 'out', from: op.from as RevealFrom };
+          eff = validateMask(m);
+        } else {
+          const clipDur = (c.out - c.in) / c.speed;
+          const at = op.at as number;
+          const d = (op.d as number | undefined) ?? Math.max(0.05, clipDur - at);
+          eff = { type: 'kf', keys: presetKeys(kind as (typeof FX_PRESETS)[number], at, d, op.amt as number | undefined, op.e as never) };
+        }
+        (c.fx ??= []).push(eff);
+      }
+      return `fx ${kind} ${targets.length === 1 ? targets[0]!.id : `${targets.length} clips`}`;
     }
     case 'zoom': {
       const at = t(op.at).t;

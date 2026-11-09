@@ -30,6 +30,7 @@ import {
   fmtTime,
   OP_SCHEMAS,
   TRANSITIONS,
+  fxSummary,
   type Ratio,
   RATIOS,
   VERSION,
@@ -282,6 +283,7 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
           if (c.speed !== 1) s += ` x${c.speed}`;
           if (c.base !== 1) s += ` b${c.base}`;
           if (c.zoom.length) s += ` z${c.zoom.length}`;
+          if (c.fx?.length) s += ` fx[${fxSummary(c.fx)}]`;
           if (c.trans) s += ` <${c.trans.type}`;
           if (ctx.detail !== 'minimal' && c.fit !== 'cover') s += ` ${c.fit}`;
           return s;
