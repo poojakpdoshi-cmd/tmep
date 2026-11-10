@@ -12,7 +12,16 @@
  *   TMEP_FAULT_READ="<count>:<code>"
  *     makes the first <count> `fs.promises.readFile` calls on a job record fail (e.g. EBUSY)
  *
- * Only `.tmep/jobs/<id>.json` paths are affected.
+ *   TMEP_FAULT_BLIND="<skip>:<ms>:<code>"
+ *     after <skip> successful matching calls (e.g. the API's own read when a render starts),
+ *     every read of a job record and every check (access/stat/readFile) of a cancel marker fails
+ *     for <ms>: the owner's cancel poll is blind for a fixed time window, independent of retries
+ *
+ *   TMEP_FAULT_DELAY="cancel-write:<ms>"   (deterministic interleaving for cancellation races)
+ *     delay writes of a job record (rename) and of a cancel marker (writeFile) in THIS
+ *     process, so a canceller's write lands late
+ *
+ * Only `.tmep/jobs/<id>.json` / `.cancel` paths are affected.
  */
 import { promises as fsp, readFileSync } from 'node:fs';
 
@@ -57,4 +66,48 @@ if (readSpec) {
     }
     return (realRead as (...a: unknown[]) => Promise<unknown>)(file, ...rest);
   }) as typeof fsp.readFile;
+}
+
+const blindSpec = process.env.TMEP_FAULT_BLIND;
+if (blindSpec) {
+  const [skipS = '0', msS = '3000', code = 'EBUSY'] = blindSpec.split(':');
+  let skipLeft = Number(skipS);
+  const ms = Number(msS);
+  const re = /[\\/]jobs[\\/]j[0-9a-z]+\.(json|cancel)$/i;
+  let since: number | undefined;
+  for (const name of ['readFile', 'access', 'stat'] as const) {
+    const real = (fsp[name] as (...a: unknown[]) => Promise<unknown>).bind(fsp);
+    (fsp as unknown as Record<string, unknown>)[name] = async (file: unknown, ...rest: unknown[]) => {
+      if (re.test(String(file)) && skipLeft-- <= 0) {
+        since ??= Date.now();
+        if (Date.now() - since < ms) {
+          const e = new Error(`${code}: resource busy or locked, open '${String(file)}' (injected)`) as NodeJS.ErrnoException;
+          e.code = code;
+          e.syscall = 'open';
+          throw e;
+        }
+      }
+      return real(file, ...rest);
+    };
+  }
+}
+
+const delaySpec = process.env.TMEP_FAULT_DELAY;
+if (delaySpec) {
+  const [what, msS = '1000'] = delaySpec.split(':');
+  const ms = Number(msS);
+  const rec = /[\\/]jobs[\\/]j[0-9a-z]+\.json$/i;
+  const marker = /[\\/]jobs[\\/]j[0-9a-z]+\.cancel$/i;
+  const sleep = () => new Promise((r) => setTimeout(r, ms));
+  const wrap = <K extends 'readFile' | 'access' | 'stat' | 'rename' | 'writeFile'>(name: K, match: (args: unknown[]) => boolean) => {
+    const real = (fsp[name] as (...a: unknown[]) => Promise<unknown>).bind(fsp);
+    (fsp as unknown as Record<string, unknown>)[name] = async (...args: unknown[]) => {
+      if (match(args)) await sleep();
+      return real(...args);
+    };
+  };
+  if (what === 'cancel-write') {
+    wrap('rename', (a) => rec.test(String(a[1])));
+    wrap('writeFile', (a) => marker.test(String(a[0])));
+  }
 }

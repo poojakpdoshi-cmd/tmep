@@ -35,7 +35,7 @@ function ffmpegChildren(): string[] {
   return r.stdout.split('\n').map((l) => l.trim()).filter((l) => /ffmpeg/.test(l));
 }
 
-async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none'): Promise<api.Ctx> {
+async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips = 6): Promise<api.Ctx> {
   const ctx: api.Ctx = { project: mkdtempSync(path.join(os.tmpdir(), 'tmep-rel-')), detail: 'standard' };
   const paths = [path.join(fixtures, 'clip.mp4')];
   let music: string | undefined;
@@ -46,7 +46,7 @@ async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none'): Promis
   }
   await api.importMedia(ctx, { paths });
   // several hard cuts -> several video units, so video work is still running when audio fails
-  const ranges = Array.from({ length: 6 }, (_, i) => [i * 0.5, i * 0.5 + 0.4]);
+  const ranges = Array.from({ length: clips }, (_, i) => [(i % 6) * 0.5, (i % 6) * 0.5 + 0.4]);
   const ops: unknown[] = [{ op: 'format', ratio: '9:16' }, { op: 'keep', src: 'v1', ranges }];
   if (music) ops.push({ op: 'music', src: 'a1' });
   await api.edit(ctx, { ops });
@@ -128,6 +128,27 @@ switch (scenario) {
     // let the cross-process cancel poll run at least once on a long-lived process
     if (rest[0]) await new Promise((res) => setTimeout(res, Number(rest[0])));
     emit({ project: ctx.project, view: r, jobs: files(path.join(ctx.project, '.tmep', 'jobs')) });
+    break;
+  }
+  case 'render-long': {
+    // start a render of <clips> segments, announce the job id at once, then wait for the result;
+    // stay alive <keepAliveMs> afterwards. rest = [clips, keepAliveMs]
+    const ctx = await newProject('none', Number(rest[0] ?? 24));
+    const t0 = Date.now();
+    const started = (await api.render(ctx, { wait: 0 })) as Record<string, unknown>;
+    writeSync(1, `STARTED ${JSON.stringify({ project: ctx.project, job: started.job })}\n`);
+    const r = (await api.status(ctx, { job: started.job as string, wait: 600 })) as Record<string, unknown>;
+    const elapsed = Date.now() - t0;
+    await new Promise((res) => setTimeout(res, 300));
+    const ffmpeg = ffmpegChildren();
+    if (rest[1]) await new Promise((res) => setTimeout(res, Number(rest[1])));
+    emit({ project: ctx.project, view: r, elapsed, ffmpeg, leftovers: files(ctx.project).filter((f) => f.includes('.tmp')), jobs: files(path.join(ctx.project, '.tmep', 'jobs')) });
+    break;
+  }
+  case 'cancel': {
+    // cancel a job owned by another process: rest = [projectDir, jobId]
+    const ctx: api.Ctx = { project: rest[0]!, detail: 'standard' };
+    emit(await api.status(ctx, { job: rest[1]!, cancel: true }));
     break;
   }
   case 'status': {
