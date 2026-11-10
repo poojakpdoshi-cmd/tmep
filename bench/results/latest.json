@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-08T04:42:14.359Z",
+  "date": "2026-11-10T08:26:07.499Z",
   "tokenizer": "heuristic estimate (bench/tokens.ts, +-20% absolute)",
   "task": "Edit my raw footage talking_head.mp4 into a professional 20-second Instagram reel (9:16) with animated word-by-word subtitles, a title \"AI video in 20s\", motion graphics for key points, punch zooms and sound effects. Then: make the captions boxed and zoom in on the word \"faster\".",
   "fixture": {
@@ -13,14 +13,14 @@
       "workflow": "TMEP (MCP, detail=standard)",
       "calls": 6,
       "outputTokens": 217,
-      "toolResultTokens": 482,
-      "staticTokensPerTurn": 1968,
-      "cumulativeInputTokens": 16301,
+      "toolResultTokens": 479,
+      "staticTokensPerTurn": 2323,
+      "cumulativeInputTokens": 18779,
       "largestMessage": {
         "label": "tool:video_plan",
         "tokens": 107
       },
-      "wallMs": 29503,
+      "wallMs": 30753,
       "correctness": "rendered + ffprobe-verified (1080x1920, 19.667s)"
     },
     {
@@ -28,22 +28,22 @@
       "calls": 6,
       "outputTokens": 217,
       "toolResultTokens": 180,
-      "staticTokensPerTurn": 1968,
-      "cumulativeInputTokens": 15173,
+      "staticTokensPerTurn": 2323,
+      "cumulativeInputTokens": 17660,
       "largestMessage": {
         "label": "assistant:video_plan",
         "tokens": 45
       },
-      "wallMs": 28034,
+      "wallMs": 31894,
       "correctness": "rendered + ffprobe-verified (1080x1920, s)"
     },
     {
       "workflow": "Conventional agent (shell + write_file), scripted lower bound",
       "calls": 7,
-      "outputTokens": 17937,
-      "toolResultTokens": 5145,
+      "outputTokens": 18190,
+      "toolResultTokens": 5121,
       "staticTokensPerTurn": 330,
-      "cumulativeInputTokens": 99750,
+      "cumulativeInputTokens": 100461,
       "largestMessage": {
         "label": "assistant:write ass",
         "tokens": 10449

@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import { exists, sha256 } from '../../core/src/index.ts';
 import { ffmpegInfo } from '../../media/src/ffmpeg.ts';
+import { commandLineLength } from '../../media/src/exec.ts';
 
 /**
  * Run `fn` over items with at most `n` in flight. Never rejects: errors go to `fail`, and
@@ -58,12 +59,21 @@ export async function publish(tmp: string, dest: string, validate: (file: string
   }
 }
 
+/**
+ * A filter graph this long is passed in a file rather than on the command line. Well under
+ * Windows' 32,767-character limit, which also has to hold the inputs and the output path.
+ */
+export const SCRIPT_THRESHOLD = 16_000;
+
+/** Whether this command's filter graph has to move off the command line. */
+export function graphToScript(args: string[]): boolean {
+  return args.includes('-filter_complex') && commandLineLength('ffmpeg', args) >= SCRIPT_THRESHOLD;
+}
+
 /** Very long filter graphs go to a script file (Windows command-line limit is 32767 chars). */
 export async function maybeScript(args: string[], work: string): Promise<string[]> {
-  const total = args.reduce((a, s) => a + s.length + 3, 0);
-  if (total < 24000) return args;
+  if (!graphToScript(args)) return args;
   const i = args.indexOf('-filter_complex');
-  if (i < 0) return args;
   const info = await ffmpegInfo();
   // unique per call: parallel units of one render can have byte-identical graphs
   const file = tmpFor(path.join(work, `graph-${sha256(args[i + 1]!).slice(0, 12)}`), '.txt');

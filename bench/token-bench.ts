@@ -21,7 +21,8 @@ import { toolList } from '../packages/mcp/src/tools.ts';
 import { Project, layout, timelineWords, totalFrames, type Timeline } from '../packages/core/src/index.ts';
 import { transcriptsFor } from '../packages/engine/src/api.ts';
 import { compileAss } from '../packages/motion/src/compile.ts';
-import { planUnits, unitArgs, audioArgs, type MediaRef } from '../packages/render/src/graph.ts';
+import { planUnits, unitArgs, type MediaRef } from '../packages/render/src/graph.ts';
+import { clipAudio, planSpeech, planSfx, speechChunkArgs, sfxWindowArgs, finalMixArgs, samplePos } from '../packages/render/src/audio.ts';
 import { run } from '../packages/media/src/exec.ts';
 import { ffmpegInfo, ffmpeg } from '../packages/media/src/ffmpeg.ts';
 import { estimateCounter, anthropicCounter, type Counter } from './tokens.ts';
@@ -119,8 +120,14 @@ async function baselineWorkflow(fixture: Awaited<ReturnType<typeof makeFixture>>
     const media: Record<string, MediaRef> = { v1: { path: 'talking_head.mp4', kind: 'video', hash: 'x', audio: true, dur: fixture.dur } };
     const enc = { vcodec: 'libx264', preset: 'veryfast', crf: 19, scale: 1 };
     const cmds = planUnits(placed).map((u, i) => `ffmpeg -y ${unitArgs(tl, u, media, enc, placed, `seg${i}.mp4`, 'gfx.ass', 'fonts').args.map(q).join(' ')}`);
-    const sfx = tl.sfx.map((s, i) => ({ file: `sfx_${s.kind}.wav`, t: i, vol: s.vol }));
-    cmds.push(`ffmpeg -y ${audioArgs(tl, placed, media, sfx, totalFrames(tl), 'audio.m4a').args.map(q).join(' ')}`);
+    const sfx = tl.sfx.map((s, i) => ({ file: `sfx_${s.kind}.wav`, t: i, vol: s.vol, len: 48000 / 2 }));
+    // audio: one command per speech chunk and per sound-effect window, then the final mix
+    const total = samplePos(totalFrames(tl), tl.settings.fps);
+    const chunks = planSpeech(clipAudio(placed, media, tl.settings.fps));
+    for (const [i, c] of chunks.entries()) cmds.push(`ffmpeg -y ${speechChunkArgs(c, `speech${i}.wav`).args.map(q).join(' ')}`);
+    const windows = planSfx(sfx, total);
+    for (const [i, w] of windows.entries()) cmds.push(`ffmpeg -y ${sfxWindowArgs(w, `sfx${i}.wav`).args.map(q).join(' ')}`);
+    cmds.push(`ffmpeg -y ${finalMixArgs(tl, { speechList: 'speech.txt', ...(windows.length ? { sfxList: 'sfx.txt' } : {}), totalSamples: total, out: 'audio.m4a' }).args.map(q).join(' ')}`);
     cmds.push('printf "file seg%d.mp4\\n" ... > list.txt && ffmpeg -y -f concat -safe 0 -i list.txt -i audio.m4a -c copy -movflags +faststart reel.mp4');
     return { ass, cmds, tl };
   };

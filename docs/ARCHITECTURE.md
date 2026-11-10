@@ -76,19 +76,43 @@ timeline --layout--> placed clips --planUnits--> units (split at hard cuts)
          --compileAss--> gfx.ass (captions + presets) + fonts/
 unit i:  ffmpeg -ss/-t inputs -> fps -> fit -> perspective zoom -> xfade -> b-roll overlay
          -> setpts(+unitStart) -> subtitles(gfx.ass) -> x264  => cache/units/<hash>.mp4
-audio:   per-clip trims (+atempo, 12-15 ms edge fades) -> acrossfade/concat -> music ducked by
-         sidechaincompress -> SFX via adelay -> amix -> loudnorm  => cache/audio/<hash>.m4a
+audio:   speech stem j: <=32 clips, per-clip trims (+atempo, 12-15 ms edge fades)
+                        -> acrossfade/concat            => cache/audio/stems/<hash>.wav
+         sfx stem k:    <=32 effects placed with adelay => cache/audio/stems/<hash>.wav
+         final pass:    concat(speech stems) + music ducked by sidechaincompress
+                        + concat(sfx stems) -> amix -> loudnorm => cache/audio/<hash>.m4a
 final:   concat demuxer (stream copy) + audio mux -> faststart MP4 -> ffprobe verification
 ```
 
 - Units are content-hashed; edits re-encode only touched units, previews (`scale 0.5`,
   `ultrafast`) and segment previews (`range`) render subsets, and interrupted renders resume.
-- Video is encoded once (no intermediate re-encode); audio is mixed in one continuous pass
-  so there are no AAC priming gaps at segment joins.
-- FFmpeg runs with `cwd` = job directory and relative ASS/font paths (Windows-safe). Graphs
-  longer than ~24k characters go to a script file (`-filter_complex_script`, or
-  `-/filter_complex` on FFmpeg 8).
+- Video is encoded once (no intermediate re-encode). Audio is still one continuous programme —
+  the stems are lossless 32-bit float PCM joined by the concat demuxer, and only the final pass
+  encodes — so there are still no AAC priming gaps at joins.
+- **No FFmpeg command grows with the length of the timeline** (`audio.ts`). The mix used to be
+  a single process with one input per audible clip, which passed Windows' 32,767-character
+  command-line limit at roughly 360 clips (`spawn ENAMETOOLONG`) and opened one file per clip.
+  Audio is now built in stages, none of which depends on the clip count: speech stems of at most
+  32 clips (and at most ~8 KB of input arguments), sound-effect windows of at most 32 effects,
+  then one final pass with at most three inputs (speech list, music, effects list). Measured:
+  at most 21 inputs and ~7.6 KB of command line from 50 to 5,000 clips, and peak memory flat at
+  ~180 MB where the single pass reached 1.5 GB at 800 clips.
+- Audio positions are **sample-exact**: frame `f` is sample `round(f * 48000 / fps)`, and every
+  trim, pad, fade and crossfade is expressed in samples (`atrim=end_sample`, `apad=whole_len`,
+  `afade=ns`, `acrossfade=ns`). The single pass rounded each clip to milliseconds, which
+  accumulated: a timeline of 60 clips with speed changes ended up ~1,040 samples (22 ms) short.
+- Stems are content-hashed by what they contain, not by where they are, so an edit that shifts
+  the rest of the timeline still only re-mixes the stems whose own clips changed (measured: one
+  of four on a 120-clip timeline), and identical passages share one stem. The cost is cache
+  size: stems are ~366 KB per second of programme (about 117 MB for a 5-minute reel), which
+  makes the outstanding cache-eviction work (audit C) matter more.
+- FFmpeg runs with `cwd` = job directory and relative ASS/font paths (Windows-safe). Commands
+  whose filter graph would make them longer than 16k characters pass the graph in a file
+  instead (`-filter_complex_script`, or `-/filter_complex` on FFmpeg 8).
 - Every render is verified with ffprobe (duration within 2 frames, resolution, audio stream).
+- **Known limit:** a video unit still takes one input per clip, so a timeline whose every cut is
+  a crossfade (one single unit) can still exceed the command-line limit at a few hundred clips.
+  Hard cuts, which is what long timelines are made of, are one input per unit.
 
 ## Jobs
 

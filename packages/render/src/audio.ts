@@ -311,6 +311,8 @@ export interface FinalMix {
   totalSamples: number;
   range?: { s: number; e: number };
   out: string;
+  /** Output encoder arguments (default: the AAC settings of the final mix). */
+  codec?: string[];
 }
 
 /**
@@ -357,7 +359,8 @@ export function finalMixArgs(tl: Timeline, mix: FinalMix): StemArgs {
   post.push(`apad=whole_len=${len}`, `atrim=end_sample=${len}`);
   g.push(`[${master}]${post.join(',')}[aout]`);
   const graph = g.join(';');
-  return { args: [...inputs, '-filter_complex', graph, '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-ar', String(SR), mix.out], graph };
+  const codec = mix.codec ?? ['-c:a', 'aac', '-b:a', '192k', '-ar', String(SR)];
+  return { args: [...inputs, '-filter_complex', graph, '-map', '[aout]', ...codec, mix.out], graph };
 }
 
 /** Length of a PCM WAV file in samples at 48 kHz, read from its header. */
@@ -409,6 +412,8 @@ export interface AudioJob {
   /** Stem processes running at once (default: 2, or 1 on a single core). */
   parallel?: number;
   limits?: AudioLimits;
+  /** Output encoder arguments of the final pass (default: AAC; tests render PCM to compare). */
+  codec?: string[];
 }
 
 export interface AudioStats {
@@ -481,6 +486,7 @@ export async function renderAudio(job: AudioJob): Promise<AudioStats> {
     totalSamples,
     ...(job.range ? { range: job.range } : {}),
     out: job.out,
+    ...(job.codec ? { codec: job.codec } : {}),
   });
   maxInputs = Math.max(maxInputs, args.filter((a) => a === '-i').length);
   await ffmpeg({ args: await maybeScript(args, job.work), cwd: job.work, signal: job.signal });

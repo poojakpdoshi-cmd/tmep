@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — Stabilization A5: long-timeline audio rendering (audit: new)
+
+- Fix: rendering a timeline of a few hundred clips failed on Windows with
+  `spawn ENAMETOOLONG`. The audio mix was a single FFmpeg process with one `-ss/-t/-i <path>`
+  per audible clip, so its command line grew by about 91 characters per clip and passed
+  Windows' 32,767-character limit at roughly 360 clips. Only the filter graph had been moved
+  off the command line, which does not help with inputs. The same process also opened one file
+  per clip (300 clips failed under the macOS default `ulimit -n` of 256) and its memory and
+  thread count grew with the timeline (800 clips: 1.5 GB, 1,603 threads, 182 s).
+- Audio is now mixed in bounded stages (`packages/render/src/audio.ts`): speech stems of at
+  most 32 clips, sound-effect windows of at most 32 effects, then one final pass that reads the
+  stems through concat lists and does music, ducking, loudness and AAC as before. No command
+  depends on the number of clips: from 50 to 5,000 clips, at most 21 inputs and ~7.6 KB of
+  command line per process, peak memory flat at ~180 MB. An 800-clip mix went from 182 s to
+  25 s.
+- Stems are lossless 32-bit float PCM, content-hashed and published atomically, so the mix is
+  still one continuous programme with no AAC priming gaps at joins, and the output is
+  bit-identical to the previous single-pass mix (`tests/audio-parity.test.ts` compares decoded
+  PCM against the 949e6c5 mixer for speech, crossfades, effects, ducked music and loudness).
+- Fix: audio no longer drifts against video. Clip lengths were rounded to milliseconds and the
+  error accumulated; 60 clips with speed changes produced a mix ~1,040 samples (22 ms) shorter
+  than the timeline. All audio positions are now sample-exact, and the mix is always exactly
+  `round(frames * 48000 / fps)` samples long.
+- A stem's key is its content, not its position, so an edit that shifts the rest of the
+  timeline re-mixes only the stems whose clips changed (measured: one of four on a 120-clip
+  timeline) and identical passages share a stem. Cost: stems take ~366 KB per second of
+  programme in `.tmep/cache/audio/stems/`.
+- `media/exec`: `commandLineLength()` measures a command line the way Windows builds it, and
+  `TMEP_CMDLINE_LIMIT` makes `run()` refuse an over-long one, so the Windows limit is enforced
+  in tests on Linux and macOS too. Commands whose graph would exceed 16k characters (was 24k,
+  measured loosely) now pass the graph in a file.
+- Known limit, unchanged: a video unit still takes one input per clip, so a timeline whose
+  every cut is a crossfade renders as one unit and can still exceed the command-line limit at a
+  few hundred clips.
+
 ## Unreleased — Stabilization A4: cross-process cancellation (audit P2-6)
 
 - Fix: a cancel request from another process is stored in its own marker file

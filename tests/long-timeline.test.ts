@@ -9,7 +9,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -73,4 +73,74 @@ test('a 400-clip timeline renders: no FFmpeg command line grows with the number 
   assert.ok(Math.abs((view.dur as number) - 160) < 0.1, `400 clips of 0.4 s: ${view.dur} s`);
   assert.deepEqual(r.result!.ffmpeg, [], 'no FFmpeg process left');
   assert.deepEqual(r.result!.leftovers, [], 'no temporary files');
+});
+
+/** Names of the audio stems in a project's cache. */
+const stemNames = (project: string): string[] => {
+  const d = path.join(project, '.tmep', 'cache', 'audio', 'stems');
+  return existsSync(d) ? readdirSync(d).sort() : [];
+};
+
+test('an edit to a long timeline reuses the audio stems around it', { timeout: 900_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  // 120 clips, rendered, then one clip's speed changed: the stems of the untouched parts of the
+  // timeline must be reused, not mixed again
+  const r = await run(['render-edit-render', FIX, '120'], LIMIT);
+  assert.equal(r.code, 0, r.stderr.slice(-1500));
+  const { project, first, second, stemsAfterFirst, stemsAfterSecond } = r.result as {
+    project: string; first: Record<string, unknown>; second: Record<string, unknown>; stemsAfterFirst: number; stemsAfterSecond: number;
+  };
+  assert.equal(first.state, 'done', JSON.stringify(first));
+  assert.equal(second.state, 'done', JSON.stringify(second));
+  const result = second.result as Record<string, unknown>;
+  const total = result.audioStems as number;
+  const cached = result.audioStemsCached as number;
+  assert.ok(total >= 4, `the timeline is split into stems: ${total}`);
+  // a stem's key is its own content, not its position, so changing one clip's speed (which
+  // shifts everything after it) only invalidates the stem that clip is in
+  assert.ok(cached >= total - 1, `the edit re-mixed one stem of ${total} (reused ${cached})`);
+  assert.ok(stemsAfterSecond - stemsAfterFirst <= 2, `cache grew by ${stemsAfterSecond - stemsAfterFirst} stems`);
+  assert.deepEqual(jobLeftovers(project), [], 'no temporary files left in the cache');
+});
+
+/** Temporary files anywhere under the project. */
+const jobLeftovers = (project: string): string[] => {
+  const walk = (d: string): string[] => {
+    if (!existsSync(d)) return [];
+    return readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.includes('.tmp') ? [e.name] : []));
+  };
+  return walk(path.join(project, '.tmep'));
+};
+
+test('cancelling a 400-clip render stops it and leaves no partial stem behind', { timeout: 900_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  const r = await run(['render-cancel', FIX, '400', '2500'], LIMIT);
+  assert.equal(r.code, 0, r.stderr.slice(-1500));
+  const { project, view } = r.result as { project: string; view: Record<string, unknown> };
+  assert.equal(view.state, 'cancelled', `expected a cancelled render: ${JSON.stringify(view)}`);
+  assert.equal((view.err as { code: string }).code, 'E_CANCELLED');
+  assert.deepEqual(r.result!.ffmpeg, [], 'no FFmpeg process left behind');
+  assert.deepEqual(jobLeftovers(project), [], 'no half-written stem or temporary file left');
+});
+
+test('the mix keeps working with few file descriptors (300 clips, ulimit -n 96)', { timeout: 900_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  if (process.platform === 'win32') return t.skip('no ulimit on Windows');
+  // On 949e6c5 one process opened every clip at once: 300 clips needed 304 descriptors and
+  // failed under the macOS default soft limit of 256.
+  const r = await new Promise<Run>((resolve) => {
+    const proc = spawn('/bin/sh', ['-c', `ulimit -n 96 && exec "$0" "$@"`, process.execPath, CHILD, 'render-long', FIX, '300', '0', 'preview'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...LIMIT } });
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => (out += d));
+    proc.stderr.on('data', (d) => (err += d));
+    proc.on('close', (code) => {
+      const line = out.split('\n').find((l) => l.startsWith('RESULT '));
+      resolve({ code, stderr: err, result: line ? JSON.parse(line.slice(7)) : undefined });
+    });
+  });
+  assert.equal(r.code, 0, r.stderr.slice(-1500));
+  const view = r.result!.view as Record<string, unknown>;
+  assert.equal(view.state, 'done', `the render failed: ${JSON.stringify(view.err ?? view)}`);
+  assert.equal(view.units, 300);
 });

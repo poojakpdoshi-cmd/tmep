@@ -145,6 +145,31 @@ switch (scenario) {
     emit({ project: ctx.project, view: r, elapsed, ffmpeg, leftovers: files(ctx.project).filter((f) => f.includes('.tmp')), jobs: files(path.join(ctx.project, '.tmep', 'jobs')) });
     break;
   }
+  case 'render-edit-render': {
+    // render <clips>, change one clip in the middle, render again: how much audio was reused?
+    const ctx = await newProject('none', Number(rest[0] ?? 24));
+    ctx.detail = 'debug'; // the render result (audioStems) is only in the debug view
+    const first = (await api.render(ctx, { wait: 600, preview: true })) as Record<string, unknown>;
+    const stemDir = path.join(ctx.project, '.tmep', 'cache', 'audio', 'stems');
+    const stemsAfterFirst = files(stemDir).length;
+    const tl = await (await import('../packages/core/src/index.ts')).Project.open(ctx.project).then((p) => p.timeline());
+    const middle = tl.clips[Math.floor(tl.clips.length / 2)]!.id;
+    await api.edit(ctx, { ops: [{ op: 'speed', clip: middle, x: 1.25 }] });
+    const second = (await api.render(ctx, { wait: 600, preview: true })) as Record<string, unknown>;
+    emit({ project: ctx.project, first, second, stemsAfterFirst, stemsAfterSecond: files(stemDir).length });
+    break;
+  }
+  case 'render-cancel': {
+    // start a render of <clips> segments and cancel it after <ms>
+    const ctx = await newProject('none', Number(rest[0] ?? 24));
+    const started = (await api.render(ctx, { wait: 0, preview: true })) as Record<string, unknown>;
+    await new Promise((res) => setTimeout(res, Number(rest[1] ?? 2000)));
+    await api.status(ctx, { job: started.job as string, cancel: true });
+    const view = (await api.status(ctx, { job: started.job as string, wait: 600 })) as Record<string, unknown>;
+    await new Promise((res) => setTimeout(res, 400));
+    emit({ project: ctx.project, view, ffmpeg: ffmpegChildren(), leftovers: files(ctx.project).filter((f) => f.includes('.tmp')) });
+    break;
+  }
   case 'cancel': {
     // cancel a job owned by another process: rest = [projectDir, jobId]
     const ctx: api.Ctx = { project: rest[0]!, detail: 'standard' };
