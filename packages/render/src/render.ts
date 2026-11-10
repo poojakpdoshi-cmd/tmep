@@ -1,6 +1,7 @@
 /**
  * Render orchestration: compile graphics, render content-hashed video units (in
- * parallel, cached, resumable), mix audio once, concat + mux with stream copy, then
+ * parallel, cached, resumable), mix audio in bounded stages (see audio.ts), concat + mux with
+ * stream copy, then
  * verify the output with ffprobe. Progress and cancellation go through RenderHooks.
  */
 import path from 'node:path';
@@ -25,8 +26,12 @@ import {
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
 import { stageFonts } from '../../motion/src/fonts.ts';
-import { planUnits, unitArgs, audioArgs, outSize, type MediaRef, type EncParams, type Unit } from './graph.ts';
+import { planUnits, unitArgs, outSize, type MediaRef, type EncParams, type Unit } from './graph.ts';
+import { renderAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
+import { pool, tmpFor, publish, maybeScript } from './stage.ts';
 import { sfxFile } from './sfx.ts';
+
+export { publish };
 
 export const RENDERER_VERSION = 'r1';
 
@@ -58,6 +63,9 @@ export interface RenderResult {
   units: number;
   unitsCached: number;
   audioCached: boolean;
+  /** Stems the audio mix was built from, and how many were reused from the cache (absent when the mix itself was cached). */
+  audioStems?: number;
+  audioStemsCached?: number;
   cacheHit: boolean;
   ms: number;
   span?: [number, number];
@@ -104,55 +112,6 @@ function assWindow(ass: string, s: number, e: number): string {
     return toSec(parts[1]!) < e && toSec(parts[2]!) > s;
   });
   return head + lines.join('\n');
-}
-
-/**
- * Run `fn` over items with at most `n` in flight. Never rejects: errors go to `fail`, and
- * no new item starts once `stop()` is true, so callers can wait for every running worker
- * (and its ffmpeg child) to finish before cleaning up.
- */
-async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>, stop: () => boolean, fail: (e: unknown) => void): Promise<void> {
-  let i = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(n, items.length)) }, async () => {
-    while (i < items.length && !stop()) {
-      const x = items[i++]!;
-      try {
-        await fn(x);
-      } catch (e) {
-        fail(e);
-      }
-    }
-  });
-  await Promise.all(workers);
-}
-
-/** Collision-resistant temporary path for one write attempt (unique per process AND attempt). */
-function tmpFor(file: string, ext: string): string {
-  return `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp${ext}`;
-}
-
-/**
- * Publish a finished, complete temporary file to a content-addressed cache path with one
- * atomic rename, so readers only ever see a missing entry or a complete one.
- *
- * Concurrent publishers of the same key (renders in separate processes) produce entries from
- * identical inputs. On POSIX the rename atomically REPLACES an existing entry: no error, no
- * validation, and that is safe because both files are complete and equivalent, and a reader
- * that already opened the old file keeps reading the old inode. On Windows the rename can
- * fail instead (e.g. EPERM/EBUSY while another process has the entry open); only then is the
- * existing entry checked with `validate` and accepted. A failed rename is never treated as
- * success without that check; otherwise the original error is thrown.
- */
-export async function publish(tmp: string, dest: string, validate: (file: string) => Promise<boolean>): Promise<void> {
-  try {
-    await fsp.rename(tmp, dest);
-  } catch (e) {
-    if ((await exists(dest)) && (await validate(dest).catch(() => false))) {
-      await fsp.rm(tmp, { force: true });
-      return;
-    }
-    throw e;
-  }
 }
 
 const validVideo = async (f: string) => {
@@ -324,6 +283,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const audioRange = span ? { s: span[0], e: span[1] } : undefined;
   const audioHash = hashOf({
     v: RENDERER_VERSION,
+    a: AUDIO_VERSION,
     fps,
     clips: placed.map((p) => ({ src: media[p.clip.src]!.hash, in: p.clip.in, sp: p.clip.speed, f: p.frames, t: p.transFrames, vol: p.clip.vol, m: p.clip.mute })),
     music: tl.music ? { ...tl.music, h: media[tl.music.src]?.hash } : null,
@@ -355,6 +315,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   if (hooks.signal?.aborted) ctrl.abort();
   hooks.signal?.addEventListener('abort', onCallerAbort, { once: true });
   const temps = new Set<string>();
+  let audioStats: AudioStats | undefined;
   let failure: unknown;
   const isCancel = (e: unknown) => e instanceof TmepError && e.code === 'E_CANCELLED';
   const fail = (e: unknown) => {
@@ -371,8 +332,8 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       await fsp.mkdir(path.dirname(audioFile), { recursive: true });
       const tmp = tmpFor(audioFile, '.m4a');
       temps.add(tmp);
-      const { args } = audioArgs(tl, placed, media, sfxList, frames, tmp, audioRange);
-      await ffmpeg({ args: await maybeScript(args, work), cwd: work, signal: ctrl.signal });
+      // stems in bounded processes, then one final pass: no command grows with the timeline
+      audioStats = await renderAudio({ tl, placed, media, sfx: sfxList, frames, ...(audioRange ? { range: audioRange } : {}), out: tmp, stemDir: project.cachePath('audio', 'stems'), work, signal: ctrl.signal, temps });
       await publish(tmp, audioFile, validAudio);
       temps.delete(tmp);
     })().catch(fail);
@@ -440,27 +401,12 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     units: units.length,
     unitsCached: cachedUnits,
     audioCached,
+    ...(audioStats ? { audioStems: audioStats.stems, audioStemsCached: audioStats.stemsCached } : {}),
     cacheHit: false,
     ms: Date.now() - t0,
     span: span ? [r2(span[0], 3), r2(span[1], 3)] : undefined,
     verified: { dur: v.dur, w: v.w ?? 0, h: v.h ?? 0, audio: v.audio },
   };
-}
-
-/** Very long filter graphs go to a script file (Windows command-line limit is 32767 chars). */
-async function maybeScript(args: string[], work: string): Promise<string[]> {
-  const total = args.reduce((a, s) => a + s.length + 3, 0);
-  if (total < 24000) return args;
-  const i = args.indexOf('-filter_complex');
-  if (i < 0) return args;
-  const info = await ffmpegInfo();
-  // unique per call: parallel units of one render can have byte-identical graphs
-  const file = tmpFor(path.join(work, `graph-${sha256(args[i + 1]!).slice(0, 12)}`), '.txt');
-  await fsp.writeFile(file, args[i + 1]!);
-  const copy = [...args];
-  if (info.major >= 8) copy.splice(i, 2, '-/filter_complex', file);
-  else copy.splice(i, 2, '-filter_complex_script', file);
-  return copy;
 }
 
 /** Extract a few frames as a contact sheet (for agents that can view images). */
