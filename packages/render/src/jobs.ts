@@ -1,12 +1,13 @@
 /**
  * Background render jobs with disk-persisted state. Jobs run in the process that
- * started them; any process (CLI, another MCP server) can read status or request
- * cancellation through the job file. A job interrupted by a crash can be re-run:
+ * started them; any process (CLI, another MCP server) can read status, or request
+ * cancellation by creating the job's cancel marker (`<id>.cancel`), which the owner
+ * polls. A job interrupted by a crash can be re-run:
  * already-rendered units are reused from the content-addressed cache.
  */
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
-import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, shortId, r2 } from '../../core/src/index.ts';
+import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, retryTransient, exists, shortId, r2 } from '../../core/src/index.ts';
 
 export type JobState = 'running' | 'done' | 'error' | 'cancelled';
 
@@ -41,6 +42,11 @@ export const HEARTBEAT_MS = 2000;
 export const STALE_MS = 60_000;
 
 const heartbeatPath = (project: Project, id: string) => project.jobPath(id).replace(/\.json$/, '.alive');
+/**
+ * Cross-process cancel request. It lives in its own file, never in the job record: the owner's
+ * progress writes cannot overwrite it, and a canceller can never overwrite the job's final state.
+ */
+const cancelPath = (project: Project, id: string) => project.jobPath(id).replace(/\.json$/, '.cancel');
 
 /** Jobs owned by this process, registered synchronously before the job file is written. */
 const owned = new Set<string>();
@@ -115,6 +121,8 @@ export async function readJob(project: Project, id: string): Promise<Job> {
       }
     }
   }
+  // a cancel request that arrived after the job had already finished has no effect: drop it
+  if (j.state !== 'running') await fsp.rm(cancelPath(project, id), { force: true }).catch(() => {});
   return j;
 }
 
@@ -147,9 +155,13 @@ export async function startJob(project: Project, kind: string, rev: number, opts
       }),
     );
   };
-  // cross-process cancellation: poll the job file for a cancel flag (a failed read is skipped;
-  // it must never become an unhandled rejection)
+  // cross-process cancellation: poll for the cancel marker; a failed check is simply repeated
+  // next round (the marker stays until the job ends) and can never become an unhandled rejection.
+  // Records written by older TMEP versions carry the request as `cancel: true` in the job file.
   const poll = setInterval(() => {
+    exists(cancelPath(project, job.id)).then((yes) => {
+      if (yes) ctrl.abort();
+    });
     readJsonOr<Job | null>(project.jobPath(job.id), null).then(
       (disk) => {
         if (disk?.cancel) ctrl.abort();
@@ -189,6 +201,8 @@ export async function startJob(project: Project, kind: string, rev: number, opts
         // The heartbeat file is kept (no longer refreshed): once this process exits or the
         // heartbeat ages out, other processes report E_INTERRUPTED instead of "running" forever.
       }
+      // the request (if any) has been honoured or arrived too late; either way it is spent
+      await fsp.rm(cancelPath(project, job.id), { force: true }).catch(() => {});
       live.delete(job.id);
       owned.delete(job.id);
     }
@@ -219,8 +233,11 @@ export async function cancelJob(project: Project, id: string): Promise<Job> {
   }
   const j = await readJob(project, id);
   if (j.state === 'running') {
-    j.cancel = true;
-    await writeJson(project.jobPath(id), j);
+    // never a read-modify-write of the job record: that raced with the owner's progress writes
+    // (request silently overwritten) and could overwrite a final state written in between
+    const marker = JSON.stringify({ at: new Date().toISOString(), pid: process.pid, host: os.hostname() });
+    await retryTransient(() => fsp.writeFile(cancelPath(project, id), marker), 16);
+    j.cancel = true; // reported to the caller; the job record itself is not modified
   }
   return j;
 }

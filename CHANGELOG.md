@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Stabilization A4: cross-process cancellation (audit P2-6)
+
+- Fix: a cancel request from another process is stored in its own marker file
+  (`.tmep/jobs/<id>.cancel`) instead of a read-modify-write of the job record. Previously the
+  owner's progress writes could overwrite the request (the render then ran to `done`), and a
+  canceller whose write landed after the job finished overwrote the final record (the job read
+  as `running`). Late requests are discarded; the legacy `cancel: true` flag is still honoured.
+
 ## Unreleased — Stabilization A3: reliable job persistence
 
 - Fix: `writeJson` retries transient sharing violations (`EPERM`/`EACCES`/`EBUSY`, as Windows
