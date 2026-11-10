@@ -26,7 +26,14 @@ export interface Job {
   pid: number;
   /** Host that runs the job (absent on records written before stale-job detection). */
   host?: string;
+  /** Progress updates that could not be written (the next successful write carries this count). */
+  persistFailures?: number;
+  /** Set (in the owning process only) when the terminal state could not be written to disk. */
+  persistError?: Record<string, unknown>;
 }
+
+/** Retry budget for writing a terminal job state (about 3 s of transient sharing violations). */
+const TERMINAL_WRITE_ATTEMPTS = 16;
 
 /** A running job refreshes `<job>.alive` (mtime) this often ... */
 export const HEARTBEAT_MS = 2000;
@@ -69,8 +76,24 @@ interface Live {
 }
 
 const live = new Map<string, Live>();
+/** Finished jobs of this process whose terminal record is not on disk yet (write kept failing). */
+const unsaved = new Map<string, Job>();
 
 export async function readJob(project: Project, id: string): Promise<Job> {
+  const pending = unsaved.get(id);
+  if (pending) {
+    // this process finished the job but could not record it: answer from memory, try again
+    try {
+      const { persistError: _, ...record } = pending;
+      await writeJson(project.jobPath(id), record);
+      unsaved.delete(id);
+      delete pending.persistError;
+      await fsp.rm(heartbeatPath(project, id), { force: true }).catch(() => {});
+    } catch {
+      // still failing: keep reporting the in-memory result with its persistError
+    }
+    return pending;
+  }
   const j = await readJsonOr<Job | null>(project.jobPath(id), null);
   if (!j) throw new TmepError('E_NOT_FOUND', `job ${id} not found`);
   if (j.state === 'running') {
@@ -79,6 +102,7 @@ export async function readJob(project: Project, id: string): Promise<Job> {
       j.state = 'error';
       j.ended = new Date().toISOString();
       j.error = new TmepError('E_INTERRUPTED', `job was interrupted: ${why}`, 're-run the render; completed units are reused from the cache').toJSON(true);
+      // best effort: if this recovery write fails, the next reader re-derives the same answer
       await writeJson(project.jobPath(id), j).catch(() => {});
       await fsp.rm(heartbeatPath(project, id), { force: true }).catch(() => {});
     }
@@ -90,7 +114,12 @@ export async function startJob(project: Project, kind: string, rev: number, opts
   const job: Job = { id: `j${shortId()}`, kind, state: 'running', progress: 0, phase: 'start', rev, opts, started: new Date().toISOString(), pid: process.pid, host: os.hostname() };
   owned.add(job.id);
   const beat = () => fsp.writeFile(heartbeatPath(project, job.id), String(Date.now())).catch(() => {});
-  await writeJson(project.jobPath(job.id), job);
+  try {
+    await writeJson(project.jobPath(job.id), job);
+  } catch (e) {
+    owned.delete(job.id);
+    throw e;
+  }
   await beat();
   const heartbeat = setInterval(beat, HEARTBEAT_MS);
   heartbeat.unref?.();
@@ -102,12 +131,23 @@ export async function startJob(project: Project, kind: string, rev: number, opts
     if (!force && now - lastWrite < 500) return;
     lastWrite = now;
     const snapshot = { ...job };
-    writing = writing.then(() => writeJson(project.jobPath(job.id), snapshot)).catch(() => {});
+    // progress writes are best effort but never silent: a failure (after retries) is counted
+    // on the job and carried by the next write; the chain itself never rejects
+    writing = writing.then(() =>
+      writeJson(project.jobPath(job.id), snapshot).catch(() => {
+        job.persistFailures = (job.persistFailures ?? 0) + 1;
+      }),
+    );
   };
-  // cross-process cancellation: poll the job file for a cancel flag
-  const poll = setInterval(async () => {
-    const disk = await readJsonOr<Job | null>(project.jobPath(job.id), null);
-    if (disk?.cancel) ctrl.abort();
+  // cross-process cancellation: poll the job file for a cancel flag (a failed read is skipped;
+  // it must never become an unhandled rejection)
+  const poll = setInterval(() => {
+    readJsonOr<Job | null>(project.jobPath(job.id), null).then(
+      (disk) => {
+        if (disk?.cancel) ctrl.abort();
+      },
+      () => {},
+    );
   }, 1000);
   poll.unref?.();
   const promise = (async () => {
@@ -128,10 +168,20 @@ export async function startJob(project: Project, kind: string, rev: number, opts
       clearInterval(poll);
       clearInterval(heartbeat);
       job.ended = new Date().toISOString();
+      await writing; // queued progress writes first, so they cannot overwrite the final state
+      // The job is finalized only once its terminal state is on disk (or the failure is reported).
+      try {
+        await writeJson(project.jobPath(job.id), { ...job }, true, { attempts: TERMINAL_WRITE_ATTEMPTS });
+        await fsp.rm(heartbeatPath(project, job.id), { force: true }).catch(() => {});
+      } catch (e) {
+        const why = asTmepError(e);
+        job.persistError = new TmepError('E_IO', `job state could not be saved: ${why.message}`, 'the result is correct in this process; other processes will report the job as interrupted').toJSON(true);
+        unsaved.set(job.id, job);
+        process.emitWarning(`tmep job ${job.id}: ${job.persistError.msg}`, { code: 'TMEP_JOB_PERSIST' });
+        // The heartbeat file is kept (no longer refreshed): once this process exits or the
+        // heartbeat ages out, other processes report E_INTERRUPTED instead of "running" forever.
+      }
       live.delete(job.id);
-      persist(true);
-      await writing;
-      await fsp.rm(heartbeatPath(project, job.id), { force: true }).catch(() => {});
       owned.delete(job.id);
     }
     return job;
@@ -176,6 +226,7 @@ export function jobView(j: Job, detail: Detail): Record<string, unknown> {
     if (detail === 'debug') o.result = j.result;
   }
   if (j.error) o.err = detail === 'debug' ? j.error : { code: j.error.code, msg: j.error.msg, ...(j.error.hint ? { hint: j.error.hint } : {}) };
+  if (j.persistError) o.persistErr = { code: j.persistError.code, msg: j.persistError.msg };
   if (detail === 'debug') Object.assign(o, { phase: j.phase, started: j.started, ended: j.ended, opts: j.opts });
   return o;
 }

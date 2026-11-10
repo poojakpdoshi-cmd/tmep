@@ -10,7 +10,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, mkdtempSync, readdirSync, writeFileSync, rmSync, promises as fsp } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -122,18 +122,33 @@ test('concurrent readers in other processes do not make job-record writes fail',
   const readers = Array.from({ length: 3 }, () => run(READER, [file, String(until)]));
   let writes = 0;
   const failures: string[] = [];
+  // Diagnostic baseline: the same tmp+rename WITHOUT retries (the pre-A3 writeJson), interleaved,
+  // shows whether this OS really reports sharing violations while other processes read the file.
+  let rawWrites = 0;
+  const rawFailures: string[] = [];
   while (Date.now() < until) {
     try {
       await writeJson(file, { state: 'running', n: ++writes, pad: 'x'.repeat(2000) });
     } catch (e) {
       failures.push((e as NodeJS.ErrnoException).code ?? String(e));
     }
+    const tmp = `${file}.raw.tmp`;
+    writeFileSync(tmp, JSON.stringify({ state: 'running', n: ++rawWrites, pad: 'y'.repeat(2000) }));
+    try {
+      await fsp.rename(tmp, file);
+    } catch (e) {
+      rawFailures.push((e as NodeJS.ErrnoException).code ?? String(e));
+      rmSync(tmp, { force: true });
+    }
   }
   const rs = await Promise.all(readers);
   for (const r of rs) assert.equal(r.code, 0, r.stderr.slice(-800));
   const readErrors = rs.flatMap((r) => (r.result!.errors as string[]) ?? []);
   const reads = rs.reduce((a, r) => a + (r.result!.reads as number), 0);
-  t.diagnostic(`platform=${process.platform} writes=${writes} reads=${reads} writeFailures=${failures.length} readErrors=${readErrors.length}`);
+  const rawReadErrors = rs.flatMap((r) => (r.result!.rawErrors as string[]) ?? []);
+  const rawReadErrorCount = rs.reduce((a, r) => a + ((r.result!.rawErrorCount as number) ?? 0), 0);
+  const codes = (l: string[]) => [...new Set(l)].join('/') || '-';
+  t.diagnostic(`platform=${process.platform} writes=${writes} writeFailures=${failures.length} rawRenames=${rawWrites} rawRenameFailures=${rawFailures.length} (${codes(rawFailures)}) reads=${reads} readErrors=${readErrors.length} (${codes(readErrors)}) rawReadErrors=${rawReadErrorCount} (${codes(rawReadErrors)})`);
   assert.ok(writes > 50 && reads > 50, `exercised: ${writes} writes, ${reads} reads`);
   assert.deepEqual(failures, [], 'no write failed');
   assert.deepEqual(readErrors, [], 'no reader saw an error or a torn record');
