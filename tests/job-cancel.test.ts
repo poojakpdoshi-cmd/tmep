@@ -268,9 +268,11 @@ for (const failure of [
 ]) {
   test(`an undeliverable cancel is an error, cancels nothing and can be repeated: ${failure.name}`, { timeout: 600_000 }, async (t) => {
     if (skip) return t.skip(skip);
-    // 400 segments: still rendering on every runner while the failed request is examined (~10 s);
-    // costs nothing when the test passes, because the job is cancelled at the end
-    const { owner, project, job } = await startOwner(t, 400);
+    // 200 segments: still rendering on every runner while the failed request is examined (~7 s;
+    // the fastest CI runner needs ~20 s for 200), and it costs nothing when the test passes,
+    // because the job is cancelled at the end. Not more: the audio mix passes one `-i <path>` per
+    // segment on the command line, and 400 segments exceed the Windows limit (spawn ENAMETOOLONG).
+    const { owner, project, job } = await startOwner(t, 200);
     const log = faultLog();
     const c = await cliCancel(project, job, { TMEP_FAULT_CANCEL: failure.inject, ...log.env });
     const hits = log.hits();
