@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Stabilization A2: cross-process work-file safety
+
+- Fix: renders no longer share `.tmep/work/ass-<hash>/`. Each render writes its ASS scripts,
+  staged fonts, filter-graph scripts and concat list to a private directory that is removed
+  afterwards. Simultaneous renders of the same project in separate processes could previously
+  fail with `EBUSY` while staging fonts (Windows) or `Invalid data found when processing input`
+  when FFmpeg read an ASS file another process was rewriting (Linux and Windows).
+- Long filter-graph scripts get a unique file name per FFmpeg call.
+
 ## Unreleased — Stabilization B1: timeline cut correctness
 
 - Fix (audit P1-1): `cut` removes the timeline range only from the placed clips under it. Other

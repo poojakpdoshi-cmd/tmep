@@ -192,10 +192,31 @@ async function exclusive<T>(key: string, signal: AbortSignal | undefined, onQueu
 }
 
 export async function renderTimeline(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions = {}, hooks: RenderHooks = {}): Promise<RenderResult> {
-  return exclusive(path.resolve(project.dir), hooks.signal, () => hooks.onProgress?.(0, 'queued'), () => renderUnlocked(project, tl, transcripts, opts, hooks));
+  return exclusive(path.resolve(project.dir), hooks.signal, () => hooks.onProgress?.(0, 'queued'), () =>
+    withWorkDir(project, (work) => renderUnlocked(project, tl, transcripts, opts, hooks, work)),
+  );
 }
 
-async function renderUnlocked(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions, hooks: RenderHooks): Promise<RenderResult> {
+/**
+ * Private working directory for ONE render attempt. ASS files, staged fonts, filter-graph
+ * scripts and concat lists are written here and nowhere else, so renders in other processes
+ * never read, overwrite or lock each other's work files (previously all renders of the same
+ * graphics shared `.tmep/work/ass-<hash>/`). Output does not depend on the directory name:
+ * ffmpeg runs with `cwd` set to it and every file is referenced by a fixed relative name.
+ * The directory is removed when the render finishes, fails or is cancelled.
+ */
+async function withWorkDir<T>(project: Project, fn: (work: string) => Promise<T>): Promise<T> {
+  const work = project.workPath(`render-${process.pid}-${randomBytes(6).toString('hex')}`);
+  await fsp.mkdir(work, { recursive: true });
+  try {
+    return await fn(work);
+  } finally {
+    // maxRetries: Windows can briefly keep a handle on files a just-exited ffmpeg used
+    await fsp.rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+  }
+}
+
+async function renderUnlocked(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions, hooks: RenderHooks, work: string): Promise<RenderResult> {
   const t0 = Date.now();
   if (!tl.clips.length) throw new TmepError('E_STATE', 'timeline has no clips');
   const info = await ffmpegInfo();
@@ -213,10 +234,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const { W, H } = outSize(tl, enc.scale);
   const progress = hooks.onProgress ?? (() => {});
 
-  // job working dir (ASS + fonts referenced by relative names: avoids filtergraph path escaping on Windows)
-  const assHash = sha256(compiled.ass + compiled.layers.map((g) => g.ass + JSON.stringify(g.fx)).join('')).slice(0, 16);
-  const work = project.workPath(`ass-${assHash}`);
-  await fsp.mkdir(work, { recursive: true });
+  // per-render working dir (ASS + fonts referenced by relative names: avoids filtergraph path escaping on Windows)
   await fsp.writeFile(path.join(work, 'gfx.ass'), compiled.ass);
   // The separate ASS overlays use stable generated filenames, not user-provided ids.
   const overlays = compiled.layers.map((g, i) => ({ file: `gfx-fx-${i}.ass`, at: g.at, d: g.d, fx: g.fx, ...(g.z !== undefined ? { z: g.z } : {}) }));
@@ -436,7 +454,8 @@ async function maybeScript(args: string[], work: string): Promise<string[]> {
   const i = args.indexOf('-filter_complex');
   if (i < 0) return args;
   const info = await ffmpegInfo();
-  const file = path.join(work, `graph-${sha256(args[i + 1]!).slice(0, 12)}.txt`);
+  // unique per call: parallel units of one render can have byte-identical graphs
+  const file = tmpFor(path.join(work, `graph-${sha256(args[i + 1]!).slice(0, 12)}`), '.txt');
   await fsp.writeFile(file, args[i + 1]!);
   const copy = [...args];
   if (info.major >= 8) copy.splice(i, 2, '-/filter_complex', file);

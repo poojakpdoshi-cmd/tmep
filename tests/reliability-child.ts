@@ -115,7 +115,10 @@ switch (scenario) {
     const { existsSync } = await import('node:fs');
     while (!existsSync(rest[2]!)) await new Promise((res) => setTimeout(res, 5));
     const r = (await api.render(ctx, { wait: 600, out: rest[1]! })) as Record<string, unknown>;
-    emit({ job: view(ctx, r), cachedUnits: r.cached });
+    // which file the custom font resolved to in THIS process (custom-font tests set the name)
+    const fontName = process.env.TMEP_TEST_FONT_NAME;
+    const fontFile = fontName ? (await import('../packages/motion/src/fonts.ts')).resolveFont(fontName).file : undefined;
+    emit({ job: view(ctx, r), cachedUnits: r.cached, fontFile });
     break;
   }
   case 'status': {
