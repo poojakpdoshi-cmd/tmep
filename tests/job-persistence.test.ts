@@ -10,11 +10,12 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync, mkdtempSync, readdirSync, writeFileSync, rmSync, promises as fsp } from 'node:fs';
+import { mkdirSync, existsSync, mkdtempSync, readdirSync, writeFileSync, rmSync, readFileSync, utimesSync, promises as fsp } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as api from '../packages/engine/src/api.ts';
+import { Project } from '../packages/core/src/index.ts';
 import { ffmpegInfo } from '../packages/media/src/ffmpeg.ts';
 import { writeJson } from '../packages/core/src/util.ts';
 
@@ -179,5 +180,49 @@ test('under saturating tight-loop readers, failures are bounded, reported and le
     for (const f of r.failures) assert.ok(['EPERM', 'EACCES', 'EBUSY'].includes(f), `only transient codes surface: ${f}`);
     assert.deepEqual(r.readErrors, [], 'readers never see an error or a torn record');
     assert.deepEqual(r.leftovers, [], 'failed writes leave no temp file');
+  }
+});
+
+test('stale-heartbeat recovery keeps its evidence until E_INTERRUPTED is persisted (live pid, failing writes)', { timeout: 300_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  // A job owned by a process that is ALIVE but has stopped heartbeating (e.g. hung).
+  const owner = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });
+  try {
+    const project = (await Project.open(mkdtempSync(path.join(os.tmpdir(), 'tmep-stale-')), { create: true })).dir.replace(/[\\/]\.tmep$/, '');
+    const p = await Project.open(project);
+    const id = 'jstale01';
+    const rec = { id, kind: 'render', state: 'running', progress: 0.4, phase: 'video', rev: 1, opts: {}, started: new Date().toISOString(), pid: owner.pid, host: os.hostname() };
+    mkdirSync(path.dirname(p.jobPath(id)), { recursive: true });
+    writeFileSync(p.jobPath(id), JSON.stringify(rec));
+    const hb = p.jobPath(id).replace(/\.json$/, '.alive');
+    writeFileSync(hb, String(Date.now() - 120_000));
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(hb, old, old); // heartbeat expired (> STALE_MS)
+
+    // Two status checks from other processes while every write of the error record fails.
+    const failing = { TMEP_FAULT_RENAME: 'error:all:EPERM' };
+    for (const n of [1, 2]) {
+      const r = await run(CHILD, ['status', FIX, project, id], failing);
+      assert.equal(r.code, 0, r.stderr.slice(-800));
+      assert.equal(r.result!.state, 'error', `check ${n} while writes fail: ${JSON.stringify(r.result)}`);
+      assert.equal((r.result!.err as { code: string }).code, 'E_INTERRUPTED');
+      assert.equal(JSON.parse(readFileSync(p.jobPath(id), 'utf8')).state, 'running', 'record not yet persisted');
+      assert.ok(existsSync(hb), `check ${n}: stale heartbeat kept as evidence until the error is persisted`);
+    }
+    assert.deepEqual(readdirSync(path.dirname(p.jobPath(id))).filter((f) => f.includes('.tmp')), []);
+
+    // Writes recover: the next check persists E_INTERRUPTED and only then removes the heartbeat.
+    const ok = await run(CHILD, ['status', FIX, project, id]);
+    assert.equal(ok.result!.state, 'error');
+    assert.equal((ok.result!.err as { code: string }).code, 'E_INTERRUPTED');
+    const disk = JSON.parse(readFileSync(p.jobPath(id), 'utf8'));
+    assert.equal(disk.state, 'error');
+    assert.equal(disk.error.code, 'E_INTERRUPTED');
+    assert.equal(existsSync(hb), false, 'heartbeat removed once the terminal error is on disk');
+    // and stays interrupted from yet another process (answered from disk now)
+    const after = await run(CHILD, ['status', FIX, project, id]);
+    assert.equal((after.result!.err as { code: string }).code, 'E_INTERRUPTED');
+  } finally {
+    owner.kill();
   }
 });
