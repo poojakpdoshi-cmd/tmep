@@ -94,7 +94,13 @@ final:   concat demuxer (stream copy) + audio mux -> faststart MP4 -> ffprobe ve
 
 Renders and transcriptions run as jobs (`render/jobs.ts`) persisted to `.tmep/jobs/<id>.json`
 with throttled progress. Any process can read them; cancellation works in-process
-(AbortController kills FFmpeg) or across processes (a `cancel` flag polled every second).
+(AbortController kills FFmpeg) or across processes: the canceller creates
+`.tmep/jobs/<id>.cancel`, which the owner polls every second. The request is never written into
+the job record, so the owner's progress writes cannot overwrite it and a late request cannot
+overwrite a final state; a request that arrives after the job finished is discarded. (A
+`cancel: true` flag written by older versions is still honoured.) The marker is
+published atomically (temp file + rename): the owner takes its existence as the request, so a
+write that fails leaves no marker, is reported as `E_IO`, and cancels nothing.
 Tools wait up to `wait` seconds, then return the job id.
 
 **Concurrency.** Renders of the same project are queued in-process (phase `queued`) and run one

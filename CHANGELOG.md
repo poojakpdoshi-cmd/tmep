@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Stabilization A4: cross-process cancellation (audit P2-6)
+
+- Fix: a cancel request from another process is stored in its own marker file
+  (`.tmep/jobs/<id>.cancel`) instead of a read-modify-write of the job record. Previously the
+  owner's progress writes could overwrite the request (the render then ran to `done`), and a
+  canceller whose write landed after the job finished overwrote the final record (the job read
+  as `running`). Late requests are discarded; the legacy `cancel: true` flag is still honoured.
+- The marker is published atomically (temp file + rename, transient sharing violations retried).
+  A request that cannot be written fails with `E_IO` ("cancel request ... was not delivered")
+  and leaves nothing behind, so a failed request never cancels the job; it can be repeated.
+- Tests: fault injection for the marker write itself (`TMEP_FAULT_CANCEL`: transient and
+  persistent `EPERM`/`EBUSY`, a write cut short), matched by path rather than by syscall, and a
+  fault log (`TMEP_FAULT_LOG`) that every such test asserts on. The contention scenario used to
+  inject rename failures into the canceller, which renames nothing: that injection never fired.
+  The late-cancel scenario now holds the canceller's write at a gate (`TMEP_FAULT_HOLD`) instead
+  of a fixed delay.
+
 ## Unreleased — Stabilization A3: reliable job persistence
 
 - Fix: `writeJson` retries transient sharing violations (`EPERM`/`EACCES`/`EBUSY`, as Windows
