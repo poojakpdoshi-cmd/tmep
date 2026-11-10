@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Stabilization B2: effects retiming
+
+- Fix (audit P2-1): main-clip effects now follow `speed` and `trim in=` edits. `speed` scales key
+  times and mask-reveal start/duration by old/new speed; `trim in=` shifts them by the change in
+  clip start (in output seconds), matching how `cut` already re-times split parts. `trim out=` and
+  clips without effects are unchanged.
+
 ## Unreleased — Stabilization A2: cross-process work-file safety
 
 - Fix: renders no longer share `.tmep/work/ass-<hash>/`. Each render writes its ASS scripts,
