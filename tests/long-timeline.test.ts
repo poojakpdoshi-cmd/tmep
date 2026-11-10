@@ -1,0 +1,76 @@
+/**
+ * Long timelines (Stabilization A5).
+ *
+ * A render of a few hundred clips must not depend on how many clips fit on one command line.
+ * Windows starts no process whose command line exceeds 32,767 characters; the renders below run
+ * in child processes with that limit enforced (`TMEP_CMDLINE_LIMIT`), so a command that grows
+ * with the timeline fails on Linux and macOS too, not only on Windows.
+ */
+import { test, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { ffmpegInfo } from '../packages/media/src/ffmpeg.ts';
+import { WINDOWS_CMDLINE_MAX } from '../packages/media/src/exec.ts';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const CHILD = path.join(here, 'reliability-child.ts');
+// Footage rarely lives at a short path. The directory name (with spaces, as user folders have)
+// makes each `-i <path>` cost about what it does for a real project, on every OS.
+const FIX = path.join(os.tmpdir(), 'tmep-long-timeline', 'raw footage 2026-11 (camera A, take 3, selects)');
+/** On Windows the operating system enforces the limit itself; elsewhere the engine is told to. */
+const LIMIT: Record<string, string> = process.platform === 'win32' ? {} : { TMEP_CMDLINE_LIMIT: String(WINDOWS_CMDLINE_MAX) };
+let skip: string | undefined;
+
+before(async () => {
+  try {
+    const info = await ffmpegInfo();
+    if (!info.encoders.has('libx264')) skip = 'ffmpeg lacks libx264';
+  } catch {
+    skip = 'ffmpeg not installed';
+  }
+  if (skip) return;
+  mkdirSync(FIX, { recursive: true });
+  if (!existsSync(path.join(FIX, 'clip.mp4'))) {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=3', '-f', 'lavfi', '-i', 'sine=f=440:d=3:sample_rate=48000', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', path.join(FIX, 'clip.mp4')]);
+    assert.equal(r.status, 0);
+  }
+});
+
+interface Run {
+  code: number | null;
+  stderr: string;
+  result?: Record<string, unknown>;
+}
+
+function run(args: string[], env: Record<string, string> = {}): Promise<Run> {
+  return new Promise((resolve) => {
+    const proc = spawn(process.execPath, [CHILD, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => (out += d));
+    proc.stderr.on('data', (d) => (err += d));
+    proc.on('close', (code) => {
+      const line = out.split('\n').find((l) => l.startsWith('RESULT '));
+      resolve({ code, stderr: err, result: line ? JSON.parse(line.slice(7)) : undefined });
+    });
+  });
+}
+
+test('a 400-clip timeline renders: no FFmpeg command line grows with the number of clips', { timeout: 900_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  // 400 hard cuts of one source: on 949e6c5 the audio mix passed one `-ss/-t/-i <path>` per clip
+  // on a single command line (over 40,000 characters here) and the render failed with
+  // "spawn ENAMETOOLONG" on Windows
+  const r = await run(['render-long', FIX, '400', '0', 'preview'], LIMIT);
+  assert.equal(r.code, 0, r.stderr.slice(-1500));
+  const view = r.result!.view as Record<string, unknown>;
+  assert.equal(view.state, 'done', `the render failed: ${JSON.stringify(view.err ?? view)}`);
+  assert.equal(view.units, 400);
+  assert.ok(Math.abs((view.dur as number) - 160) < 0.1, `400 clips of 0.4 s: ${view.dur} s`);
+  assert.deepEqual(r.result!.ffmpeg, [], 'no FFmpeg process left');
+  assert.deepEqual(r.result!.leftovers, [], 'no temporary files');
+});

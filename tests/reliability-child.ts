@@ -132,10 +132,10 @@ switch (scenario) {
   }
   case 'render-long': {
     // start a render of <clips> segments, announce the job id at once, then wait for the result;
-    // stay alive <keepAliveMs> afterwards. rest = [clips, keepAliveMs]
+    // stay alive <keepAliveMs> afterwards. rest = [clips, keepAliveMs, 'preview'?]
     const ctx = await newProject('none', Number(rest[0] ?? 24));
     const t0 = Date.now();
-    const started = (await api.render(ctx, { wait: 0 })) as Record<string, unknown>;
+    const started = (await api.render(ctx, { wait: 0, preview: rest[2] === 'preview' })) as Record<string, unknown>;
     writeSync(1, `STARTED ${JSON.stringify({ project: ctx.project, job: started.job })}\n`);
     const r = (await api.status(ctx, { job: started.job as string, wait: 600 })) as Record<string, unknown>;
     const elapsed = Date.now() - t0;
