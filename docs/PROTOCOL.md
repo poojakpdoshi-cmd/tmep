@@ -155,7 +155,9 @@ Compact JSON in a single text content block. Examples (`detail=standard`):
 `E_INPUT`, `E_STATE`, `E_NOT_FOUND`, `E_ANCHOR`, `E_RANGE`, `E_NO_TRANSCRIPT`,
 `E_FFMPEG_MISSING`, `E_FFMPEG_FAILED`, `E_ENGINE_MISSING`, `E_ENGINE_FAILED`, `E_MEDIA`,
 `E_CANCELLED`, `E_INTERRUPTED`, `E_IO`, `E_INTERNAL` (`packages/core/src/errors.ts`). A job whose
-process died (or stopped heartbeating) is reported as `state:"error"` with `E_INTERRUPTED`. Over MCP, input and
+process died (or stopped heartbeating) is reported as `state:"error"` with `E_INTERRUPTED`.
+A job whose terminal state could not be written to disk (after retries) additionally carries
+`persistErr: {code:"E_IO", msg}` in the owning process; its result is still valid. Over MCP, input and
 business errors are returned as tool results with `isError: true` (so the model can
 self-correct); unknown tools and malformed requests are JSON-RPC errors.
 

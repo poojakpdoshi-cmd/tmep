@@ -121,6 +121,15 @@ switch (scenario) {
     emit({ job: view(ctx, r), cachedUnits: r.cached, fontFile });
     break;
   }
+  case 'render-once': {
+    // one render; prints the job id and the raw job view (persistence tests)
+    const ctx = await newProject();
+    const r = (await api.render(ctx, { wait: 600 })) as Record<string, unknown>;
+    // let the cross-process cancel poll run at least once on a long-lived process
+    if (rest[0]) await new Promise((res) => setTimeout(res, Number(rest[0])));
+    emit({ project: ctx.project, view: r, jobs: files(path.join(ctx.project, '.tmep', 'jobs')) });
+    break;
+  }
   case 'status': {
     // inspect a job of another process: rest = [projectDir, jobId]
     const ctx: api.Ctx = { project: rest[0]!, detail: 'standard' };

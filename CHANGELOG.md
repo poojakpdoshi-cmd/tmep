@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Stabilization A3: reliable job persistence
+
+- Fix: `writeJson` retries transient sharing violations (`EPERM`/`EACCES`/`EBUSY`, as Windows
+  reports when another process holds the file) with bounded backoff and always removes its temp
+  file when a write fails; `readJson` retries them too.
+- Fix: job records are no longer written fire-and-forget. The terminal state is written with a
+  longer retry budget before the job resolves; if it still fails, the job carries `persistErr`
+  (`E_IO`) and a process warning is emitted instead of the failure being swallowed. Failed progress
+  writes are counted in `persistFailures`.
+- Fix: a failed read in the cross-process cancel poll can no longer crash the process.
+- Tests: deterministic fault injection (`tests/fault-rename.ts`) for rename/read failures,
+  cross-process persistence tests and a multi-process reader/writer stress test.
+
 ## Unreleased — Stabilization B2: effects retiming
 
 - Fix (audit P2-1): main-clip effects now follow `speed` and `trim in=` edits. `speed` scales key

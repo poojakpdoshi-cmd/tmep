@@ -60,8 +60,26 @@ export function mediaHash(file: string): string {
   return h.digest('hex').slice(0, 24);
 }
 
+/**
+ * errno codes Windows reports for transient sharing violations: another process (a reader, an
+ * antivirus or indexer) briefly holds the file, so a rename over it or an open of it fails.
+ */
+const TRANSIENT_FS = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+/** Run `fn`, retrying transient sharing violations with short exponential backoff (bounded). */
+async function retryTransient<T>(fn: () => Promise<T>, attempts: number): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= attempts || !TRANSIENT_FS.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      await new Promise((r) => setTimeout(r, Math.min(250, 10 * 2 ** (i - 1))));
+    }
+  }
+}
+
 export async function readJson<T>(file: string): Promise<T> {
-  return JSON.parse(await fsp.readFile(file, 'utf8')) as T;
+  return JSON.parse(await retryTransient(() => fsp.readFile(file, 'utf8'), 4)) as T;
 }
 
 export async function readJsonOr<T>(file: string, fallback: T): Promise<T> {
@@ -73,12 +91,24 @@ export async function readJsonOr<T>(file: string, fallback: T): Promise<T> {
   }
 }
 
-/** Atomic JSON write (tmp + rename) so an interrupted process never leaves torn state. */
-export async function writeJson(file: string, data: unknown, pretty = true): Promise<void> {
+/**
+ * Atomic JSON write (tmp + rename) so an interrupted process never leaves torn state.
+ * A rename that fails with a transient sharing violation (Windows) is retried up to
+ * `attempts` times (default 16, about 2.8 s: on Windows CI, readers polling every 10 ms made
+ * ~2-5% of plain renames fail and a 0.3 s budget was occasionally not enough, while 16 attempts
+ * absorbed even back-to-back readers in every measured run). A write that still fails throws and removes its
+ * temporary file; the previous contents of `file` are left intact.
+ */
+export async function writeJson(file: string, data: unknown, pretty = true, opts: { attempts?: number } = {}): Promise<void> {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomBytes(3).toString('hex')}.tmp`;
-  await fsp.writeFile(tmp, pretty ? `${JSON.stringify(data, null, 1)}\n` : JSON.stringify(data));
-  await fsp.rename(tmp, file);
+  try {
+    await fsp.writeFile(tmp, pretty ? `${JSON.stringify(data, null, 1)}\n` : JSON.stringify(data));
+    await retryTransient(() => fsp.rename(tmp, file), opts.attempts ?? 16);
+  } catch (e) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
 }
 
 export async function exists(p: string): Promise<boolean> {

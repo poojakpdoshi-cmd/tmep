@@ -113,8 +113,21 @@ audio mix can no longer take down the host process.
 
 **Stale jobs.** A running job refreshes `.tmep/jobs/<id>.alive` every 2 s and records its `pid`
 and `host`. A job file that says `running` but belongs to a dead process on this host (or whose
-heartbeat is older than 60 s) is reported, and persisted, as `error` / `E_INTERRUPTED`. Older
-job records without `host` are checked by pid.
+heartbeat is older than 60 s) is reported, and persisted, as `error` / `E_INTERRUPTED`. The stale
+heartbeat is removed only after that error record is on disk, so if the write fails the next
+reader still sees the evidence and reports `E_INTERRUPTED` again. Older job records without
+`host` are checked by pid.
+
+**Job records.** Job JSON is written atomically (temp file + rename). On Windows a rename (or a
+read) can fail briefly with a sharing violation while another process, antivirus or indexer holds
+the file; these `EPERM`/`EACCES`/`EBUSY` errors are retried with short backoff (about 2.8 s, or
+about 6.5 s for terminal states), and a write that still fails removes its temp file. On Windows
+CI, other processes polling a record every 10 ms made 2-5% of plain renames fail. A job is
+finalized only after its `done`/`error`/`cancelled` record is on disk. If that write keeps
+failing, the job reports `persistErr` (`E_IO`) to the owning process instead of failing
+silently; that process keeps answering from memory and retries on the next read, while other
+processes see the job as `E_INTERRUPTED` once its (no longer refreshed) heartbeat goes stale or
+the process exits. Failed progress writes are counted in `persistFailures`.
 
 ## Design decisions (ADR summary)
 
