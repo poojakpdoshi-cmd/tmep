@@ -102,9 +102,17 @@ export async function readJob(project: Project, id: string): Promise<Job> {
       j.state = 'error';
       j.ended = new Date().toISOString();
       j.error = new TmepError('E_INTERRUPTED', `job was interrupted: ${why}`, 're-run the render; completed units are reused from the cache').toJSON(true);
-      // best effort: if this recovery write fails, the next reader re-derives the same answer
-      await writeJson(project.jobPath(id), j).catch(() => {});
-      await fsp.rm(heartbeatPath(project, id), { force: true }).catch(() => {});
+      // Best effort, but the evidence must survive a failed write: the stale heartbeat (or dead
+      // pid) is what lets the NEXT reader re-derive E_INTERRUPTED, so it is removed only once
+      // the terminal record is on disk. Otherwise a live-but-stalled owner with no heartbeat
+      // file would read as "running" again.
+      try {
+        // short budget: this is a status read; a failed attempt is simply repeated next read
+        await writeJson(project.jobPath(id), j, true, { attempts: 4 });
+        await fsp.rm(heartbeatPath(project, id), { force: true }).catch(() => {});
+      } catch {
+        // record still says running; heartbeat kept; the next read repeats this recovery
+      }
     }
   }
   return j;
