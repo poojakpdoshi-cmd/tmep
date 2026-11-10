@@ -85,7 +85,10 @@ test('a cancel from another process is not lost to the owner’s progress writes
   // Owner: long render whose cancel poll is blind for 3.5 s from its first round, while progress
   // writes (every 500 ms) continue: exactly the window in which a request kept inside the job
   // record gets overwritten. The request must still be honoured once the poll can see again.
-  const owner = start(CHILD, ['render-long', FIX, '36'], { TMEP_FAULT_BLIND: '1:3500:EBUSY' });
+  // 150 segments: long enough on every runner that the job is still running when the blind
+  // window ends (a 36-segment render finished in 5.1 s on a Windows runner, before the poll could
+  // see again, which tested runner speed rather than the race)
+  const owner = start(CHILD, ['render-long', FIX, '150'], { TMEP_FAULT_BLIND: '1:3500:EBUSY' });
   const { project, job } = (await Promise.race([owner.started, owner.done.then((r) => assert.fail(`owner exited early: ${r.stderr.slice(-800)}`))])) as { project: string; job: string };
   await sleep(1500); // inside the blind window (first poll ~1 s after start), progress being persisted
   const c = await run(CHILD, ['cancel', FIX, project, job]);
@@ -127,7 +130,7 @@ test('cancel during concurrent status reads, progress writes and sharing violati
   if (skip) return t.skip(skip);
   // Owner's job-record writes hit injected transient EPERM; three other processes poll the job
   // record every 10 ms (real sharing violations on Windows); then a cancel arrives.
-  const owner = start(CHILD, ['render-long', FIX, '36'], { TMEP_FAULT_RENAME: 'running:8:EPERM' });
+  const owner = start(CHILD, ['render-long', FIX, '150'], { TMEP_FAULT_RENAME: 'running:8:EPERM' });
   const { project, job } = (await owner.started) as { project: string; job: string };
   const rec = path.join(project, '.tmep', 'jobs', `${job}.json`);
   const until = Date.now() + 6000;
