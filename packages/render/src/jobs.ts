@@ -7,7 +7,7 @@
  */
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
-import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, retryTransient, exists, shortId, r2 } from '../../core/src/index.ts';
+import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, exists, shortId, r2 } from '../../core/src/index.ts';
 
 export type JobState = 'running' | 'done' | 'error' | 'cancelled';
 
@@ -235,8 +235,14 @@ export async function cancelJob(project: Project, id: string): Promise<Job> {
   if (j.state === 'running') {
     // never a read-modify-write of the job record: that raced with the owner's progress writes
     // (request silently overwritten) and could overwrite a final state written in between
-    const marker = JSON.stringify({ at: new Date().toISOString(), pid: process.pid, host: os.hostname() });
-    await retryTransient(() => fsp.writeFile(cancelPath(project, id), marker), 16);
+    // The owner takes the marker's existence as the request, so the marker is published
+    // atomically (temp file + rename, transient sharing violations retried): a write that dies
+    // half-way leaves nothing the owner could see, and a failed request cannot cancel the job.
+    try {
+      await writeJson(cancelPath(project, id), { at: new Date().toISOString(), pid: process.pid, host: os.hostname() }, false);
+    } catch (e) {
+      throw new TmepError('E_IO', `cancel request for job ${id} was not delivered: ${e instanceof Error ? e.message : String(e)}`, 'the job was not cancelled by this request; repeat it');
+    }
     j.cancel = true; // reported to the caller; the job record itself is not modified
   }
   return j;

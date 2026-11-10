@@ -67,7 +67,7 @@ export function mediaHash(file: string): string {
 const TRANSIENT_FS = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
 /** Run `fn`, retrying transient sharing violations with short exponential backoff (bounded). */
-export async function retryTransient<T>(fn: () => Promise<T>, attempts: number): Promise<T> {
+async function retryTransient<T>(fn: () => Promise<T>, attempts: number): Promise<T> {
   for (let i = 1; ; i++) {
     try {
       return await fn();
