@@ -179,7 +179,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const t0 = Date.now();
   if (!tl.clips.length) throw new TmepError('E_STATE', 'timeline has no clips');
   const info = await ffmpegInfo();
-  for (const f of ['subtitles', 'xfade', 'perspective', 'loudnorm', 'sidechaincompress', 'amix', 'acrossfade']) {
+  for (const f of ['subtitles', 'xfade', 'perspective', 'loudnorm', 'sidechaincompress', 'amix', 'acrossfade', 'asetnsamples', 'adelay', 'apad', 'atrim']) {
     if (!info.filters.has(f)) throw new TmepError('E_FFMPEG_MISSING', `ffmpeg lacks filter "${f}"`, 'use a full FFmpeg build with libass (gyan.dev full / BtbN GPL)');
   }
   const quality: Quality = opts.quality ?? (opts.preview ? 'draft' : 'standard');

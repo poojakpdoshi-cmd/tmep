@@ -95,7 +95,7 @@ test('an edit to a long timeline reuses the audio stems around it', { timeout: 9
   const result = second.result as Record<string, unknown>;
   const total = result.audioStems as number;
   const cached = result.audioStemsCached as number;
-  assert.ok(total >= 4, `the timeline is split into stems: ${total}`);
+  assert.ok(total >= 4, `the timeline is split into stems: ${total}`); // 120 clips, at most 32 per stem
   // a stem's key is its own content, not its position, so changing one clip's speed (which
   // shifts everything after it) only invalidates the stem that clip is in
   assert.ok(cached >= total - 1, `the edit re-mixed one stem of ${total} (reused ${cached})`);

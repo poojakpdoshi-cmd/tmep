@@ -35,7 +35,7 @@ function ffmpegChildren(): string[] {
   return r.stdout.split('\n').map((l) => l.trim()).filter((l) => /ffmpeg/.test(l));
 }
 
-async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips = 6): Promise<api.Ctx> {
+async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips = 6, distinct = false): Promise<api.Ctx> {
   const ctx: api.Ctx = { project: mkdtempSync(path.join(os.tmpdir(), 'tmep-rel-')), detail: 'standard' };
   const paths = [path.join(fixtures, 'clip.mp4')];
   let music: string | undefined;
@@ -45,8 +45,12 @@ async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips =
     paths.push(music);
   }
   await api.importMedia(ctx, { paths });
-  // several hard cuts -> several video units, so video work is still running when audio fails
-  const ranges = Array.from({ length: clips }, (_, i) => [(i % 6) * 0.5, (i % 6) * 0.5 + 0.4]);
+  // several hard cuts -> several video units, so video work is still running when audio fails.
+  // `distinct`: every clip a different window of the source, so no two chunks have the same
+  // content and the stem count follows the chunk limits rather than deduplication.
+  const ranges = distinct
+    ? Array.from({ length: clips }, (_, i) => [((i * 7) % 100) * 0.025, ((i * 7) % 100) * 0.025 + 0.4])
+    : Array.from({ length: clips }, (_, i) => [(i % 6) * 0.5, (i % 6) * 0.5 + 0.4]);
   const ops: unknown[] = [{ op: 'format', ratio: '9:16' }, { op: 'keep', src: 'v1', ranges }];
   if (music) ops.push({ op: 'music', src: 'a1' });
   await api.edit(ctx, { ops });
@@ -147,7 +151,7 @@ switch (scenario) {
   }
   case 'render-edit-render': {
     // render <clips>, change one clip in the middle, render again: how much audio was reused?
-    const ctx = await newProject('none', Number(rest[0] ?? 24));
+    const ctx = await newProject('none', Number(rest[0] ?? 24), true);
     ctx.detail = 'debug'; // the render result (audioStems) is only in the debug view
     const first = (await api.render(ctx, { wait: 600, preview: true })) as Record<string, unknown>;
     const stemDir = path.join(ctx.project, '.tmep', 'cache', 'audio', 'stems');

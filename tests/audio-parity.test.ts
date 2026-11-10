@@ -20,7 +20,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import * as api from '../packages/engine/src/api.ts';
@@ -29,6 +29,7 @@ import type { MediaRef } from '../packages/render/src/graph.ts';
 import { renderAudio, planSpeech, clipAudio, samplePos, SR, AUDIO_LIMITS, type AudioLimits } from '../packages/render/src/audio.ts';
 import { sfxFile } from '../packages/render/src/sfx.ts';
 import { ffmpegInfo } from '../packages/media/src/ffmpeg.ts';
+import { maybeScript } from '../packages/render/src/stage.ts';
 import { legacyAudioArgs } from './legacy-audio.ts';
 
 const FIX = path.join(os.tmpdir(), 'tmep-audio-fixture');
@@ -147,27 +148,36 @@ async function staged(b: Built, out: string, limits?: Partial<AudioLimits>): Pro
   return { file, stems: stats.stems, maxInputs: stats.maxInputs };
 }
 
-/** The single-pass mixer of 949e6c5, as PCM. */
-function reference(b: Built): string {
+/**
+ * The single-pass mixer of 949e6c5, as PCM. Its graph is long, so it goes to a script file
+ * through the production helper — which also picks the option name this FFmpeg understands
+ * (`-filter_complex_script`, or `-/filter_complex` from FFmpeg 8).
+ */
+async function reference(b: Built): Promise<string> {
   const file = path.join(b.dir, 'reference.wav');
   const plan = legacyAudioArgs(b.tl, b.placed, b.media, b.sfx, b.frames, file, undefined, PCM);
-  const script = path.join(b.work, 'reference-graph.txt');
-  writeFileSync(script, plan.graph);
-  const args = [...plan.args];
-  args.splice(args.indexOf('-filter_complex'), 2, '-filter_complex_script', script);
-  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-v', 'error', ...args], { encoding: 'utf8', maxBuffer: 1 << 26 });
+  const args = await maybeScript(plan.args, b.work);
+  const r = spawnSync('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-v', 'error', ...args], { cwd: b.work, encoding: 'utf8', maxBuffer: 1 << 26 });
   assert.equal(r.status, 0, `reference mix failed: ${r.stderr.slice(-600)}`);
   return file;
 }
 
 /**
- * Allowed difference from the reference. Zero, except for timelines with sound effects: the
- * reference summed every effect into the master `amix` alongside the speech, while effects are
- * now summed into their own stem first and that stem is mixed in. The same numbers are added in
- * a different order, and float32 addition is not associative, so single samples can differ by
- * one unit in the last place — about 3e-8 here, 150 dB below the programme.
+ * Allowed difference from the reference, and why it is not zero in two cases.
+ *
+ * Sound effects: the reference summed every effect into the master `amix` alongside the
+ * speech; effects are now summed into their own stem first and that stem is mixed in. The same
+ * numbers are added in a different order, and float32 addition is not associative, so single
+ * samples can differ by one unit in the last place — about 3e-8, 150 dB below the programme.
+ *
+ * Ducked music: `sidechaincompress` computes its gain envelope frame by frame, so its output
+ * depends on how the samples are framed (clearly on FFmpeg 8, not on 6.1). The staged mix
+ * re-frames both of its inputs to a fixed size, deliberately, so that the ducking cannot
+ * depend on where the chunk boundaries fell; the reference used whatever frames its own graph
+ * produced. The difference is confined to the ducking envelope: a fraction of a percent of the
+ * music's own level, which the RMS check below holds to 0.1% of the programme.
  */
-const tolerance = (c: Case): number => (c.sfx ? 1e-7 : 0);
+const tolerance = (c: Case): number => (c.music ? 5e-3 : c.sfx ? 1e-7 : 0);
 
 const CASES: Case[] = [
   { name: 'speech only', clips: 60 },
@@ -186,12 +196,23 @@ for (const c of CASES) {
     assert.ok(mine.stems > 1, `the timeline must be split into stems to test anything: ${mine.stems}`);
     assert.ok(mine.maxInputs <= AUDIO_LIMITS.maxClips + 1, `inputs per process stay bounded: ${mine.maxInputs}`);
     const want = samplePos(b.frames, FPS);
-    const a = samples(reference(b));
+    const a = samples(await reference(b));
     const d = samples(mine.file);
     assert.equal(d.length / 2, want, 'the mix is exactly as long as the timeline');
     assert.equal(a.length / 2, want, 'this timeline is sample-aligned, so the reference agrees');
     const diff = worstDiff(a, d);
     assert.ok(diff <= tolerance(c), `worst sample differs from the reference by ${diff} (allowed ${tolerance(c)})`);
+    if (tolerance(c) > 0) {
+      // a tolerance must not hide a timing or content error: the difference has to be noise
+      let err = 0;
+      let signal = 0;
+      for (let i = 0; i < a.length; i++) {
+        err += (a[i]! - d[i]!) ** 2;
+        signal += a[i]! ** 2;
+      }
+      const ratio = Math.sqrt(err / signal);
+      assert.ok(ratio < 1e-3, `the difference is ${(ratio * 100).toFixed(4)}% of the programme (RMS)`);
+    }
   });
 }
 
@@ -218,7 +239,7 @@ test('the mix is sample-exact where the single-pass reference drifted', { timeou
   const mine = await staged(b, 'staged.wav');
   const want = samplePos(b.frames, FPS);
   assert.equal(samples(mine.file).length / 2, want, 'exactly as long as the timeline');
-  const ref = samples(reference(b)).length / 2;
+  const ref = samples(await reference(b)).length / 2;
   assert.ok(ref < want, `the reference is shorter than the timeline (drift): ${ref} vs ${want}`);
 });
 

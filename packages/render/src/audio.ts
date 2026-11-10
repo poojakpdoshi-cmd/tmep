@@ -42,6 +42,8 @@ export const AUDIO_VERSION = 'a2';
 
 const n3 = (x: number) => String(Math.round(x * 1000) / 1000);
 const STEREO = 'aformat=sample_fmts=fltp:channel_layouts=stereo';
+/** Fixed audio frame size, for filters whose output depends on how samples are framed. */
+const FRAMES = 'asetnsamples=n=1024:p=0';
 /** Restart timestamps from the sample count (stems arrive through the concat demuxer). */
 const RESTAMP = 'asetpts=N/SR/TB';
 const PCM = ['-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', '-rf64', 'auto'];
@@ -331,8 +333,13 @@ export function finalMixArgs(tl: Timeline, mix: FinalMix): StemArgs {
     const f = Math.min(tl.music.fade, total / 3);
     g.push(`[${k++}:a]aresample=${SR},${STEREO},atrim=duration=${n3(total)},asetpts=PTS-STARTPTS,volume=${n3(tl.music.vol)}dB,afade=t=in:d=${n3(f)},afade=t=out:st=${n3(Math.max(0, total - f))}:d=${n3(f)}[mus]`);
     if (tl.music.duck) {
-      g.push(`[${cur}]asplit=2[spm][sc]`);
-      g.push('[mus][sc]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=380:makeup=1[musd]');
+      // `sidechaincompress` computes its gain envelope frame by frame, and the speech arrives
+      // as a concat of stems, so its frames are as long as the stems are. Both of its inputs
+      // are re-framed to a fixed size first: the ducking then depends only on the samples, not
+      // on where the chunk boundaries happened to fall (which the clips' own paths influence).
+      g.push(`[${cur}]${FRAMES},asplit=2[spm][sc]`);
+      g.push(`[mus]${FRAMES}[musf]`);
+      g.push('[musf][sc]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=380:makeup=1[musd]');
       cur = 'spm';
       buses.push('musd');
     } else buses.push('mus');
