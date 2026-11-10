@@ -51,8 +51,8 @@ test('a rename that keeps failing throws after bounded retries, keeps the old fi
   const c = failRenames(Infinity, 'EPERM');
   const t0 = Date.now();
   await assert.rejects(writeJson(f, { v: 2 }), (e: NodeJS.ErrnoException) => e.code === 'EPERM');
-  assert.ok(c.attempts > 1 && c.attempts <= 10, `bounded attempts: ${c.attempts}`);
-  assert.ok(Date.now() - t0 < 5000, 'bounded time');
+  assert.equal(c.attempts, 16, 'default budget');
+  assert.ok(Date.now() - t0 < 10_000, 'bounded time');
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { v: 1 }, 'previous record intact');
   assert.deepEqual(tmpLeft(d), [], 'no orphaned temp file');
 });
@@ -66,13 +66,15 @@ test('non-transient rename errors are not retried and leave no temp file', async
   assert.deepEqual(tmpLeft(d), []);
 });
 
-test('callers can ask for a longer retry budget (terminal job states)', async () => {
+test('the retry budget is configurable per call', async () => {
   const d = dir();
   const f = path.join(d, 'j.json');
-  const c = failRenames(12, 'EBUSY');
-  await writeJson(f, { v: 3 }, true, { attempts: 16 });
-  assert.equal(c.attempts, 13);
-  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { v: 3 });
+  const c = failRenames(3, 'EBUSY');
+  await assert.rejects(writeJson(f, { v: 3 }, true, { attempts: 2 }), (e: NodeJS.ErrnoException) => e.code === 'EBUSY');
+  assert.equal(c.attempts, 2);
+  assert.deepEqual(tmpLeft(d), []);
+  await writeJson(f, { v: 4 }, true, { attempts: 4 }); // one failure left, then success
+  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { v: 4 });
 });
 
 test('readJson retries a transient sharing violation', async () => {

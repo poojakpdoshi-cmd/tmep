@@ -32,8 +32,8 @@ export interface Job {
   persistError?: Record<string, unknown>;
 }
 
-/** Retry budget for writing a terminal job state (about 3 s of transient sharing violations). */
-const TERMINAL_WRITE_ATTEMPTS = 16;
+/** Retry budget for writing a terminal job state (about 6.5 s of transient sharing violations). */
+const TERMINAL_WRITE_ATTEMPTS = 30;
 
 /** A running job refreshes `<job>.alive` (mtime) this often ... */
 export const HEARTBEAT_MS = 2000;

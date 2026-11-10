@@ -172,7 +172,7 @@ test('under saturating tight-loop readers, failures are bounded, reported and le
   // Diagnostic stress: 3 processes re-reading the record back-to-back. A bounded retry budget can
   // be exhausted here (Windows refuses to replace a file while any reader has it open); the
   // contract is that every failure is thrown (never silently accepted) and leaves no temp file.
-  for (const attempts of [undefined, 16]) {
+  for (const attempts of [undefined, 30]) {
     const r = await contention(3, 0, attempts, 3000);
     t.diagnostic(r.line);
     assert.ok(r.writes > 5, r.line);

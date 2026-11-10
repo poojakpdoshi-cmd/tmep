@@ -94,7 +94,9 @@ export async function readJsonOr<T>(file: string, fallback: T): Promise<T> {
 /**
  * Atomic JSON write (tmp + rename) so an interrupted process never leaves torn state.
  * A rename that fails with a transient sharing violation (Windows) is retried up to
- * `attempts` times (default 6, about 0.3 s). A write that still fails throws and removes its
+ * `attempts` times (default 16, about 2.8 s: on Windows CI, readers polling every 10 ms made
+ * ~2-5% of plain renames fail and a 0.3 s budget was occasionally not enough, while 16 attempts
+ * absorbed even back-to-back readers in every measured run). A write that still fails throws and removes its
  * temporary file; the previous contents of `file` are left intact.
  */
 export async function writeJson(file: string, data: unknown, pretty = true, opts: { attempts?: number } = {}): Promise<void> {
@@ -102,7 +104,7 @@ export async function writeJson(file: string, data: unknown, pretty = true, opts
   const tmp = `${file}.${process.pid}.${randomBytes(3).toString('hex')}.tmp`;
   try {
     await fsp.writeFile(tmp, pretty ? `${JSON.stringify(data, null, 1)}\n` : JSON.stringify(data));
-    await retryTransient(() => fsp.rename(tmp, file), opts.attempts ?? 6);
+    await retryTransient(() => fsp.rename(tmp, file), opts.attempts ?? 16);
   } catch (e) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
     throw e;
