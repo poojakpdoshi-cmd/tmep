@@ -19,14 +19,21 @@
   still one continuous programme with no AAC priming gaps at joins, and the output is
   bit-identical to the previous single-pass mix (`tests/audio-parity.test.ts` compares decoded
   PCM against the 949e6c5 mixer for speech, crossfades, effects, ducked music and loudness).
+- Fix: music ducking no longer depends on how the speech was chunked. `sidechaincompress`
+  computes its envelope frame by frame, and chunk boundaries depend on the clips' own file
+  paths, so the same timeline could duck slightly differently when rendered from a longer
+  folder path (visible on FFmpeg 8, ~7e-4, not on 6.1). Both inputs of the compressor are
+  re-framed to a fixed size first.
 - Fix: audio no longer drifts against video. Clip lengths were rounded to milliseconds and the
   error accumulated; 60 clips with speed changes produced a mix ~1,040 samples (22 ms) shorter
   than the timeline. All audio positions are now sample-exact, and the mix is always exactly
   `round(frames * 48000 / fps)` samples long.
 - A stem's key is its content, not its position, so an edit that shifts the rest of the
-  timeline re-mixes only the stems whose clips changed (measured: one of four on a 120-clip
-  timeline) and identical passages share a stem. Cost: stems take ~366 KB per second of
-  programme in `.tmep/cache/audio/stems/`.
+  timeline does not invalidate it: changing one clip's speed on a 120-clip timeline re-mixed 1
+  of 9 stems on FFmpeg 6.1 and 3 of 11 on FFmpeg 8 (chunk boundaries follow clip content, so an
+  edit moves the boundaries around it), while the video units after the edit all re-render.
+  Identical passages share one stem. Cost: stems take ~366 KB per second of programme in
+  `.tmep/cache/audio/stems/`.
 - `media/exec`: `commandLineLength()` measures a command line the way Windows builds it, and
   `TMEP_CMDLINE_LIMIT` makes `run()` refuse an over-long one, so the Windows limit is enforced
   in tests on Linux and macOS too. Commands whose graph would exceed 16k characters (was 24k,

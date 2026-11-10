@@ -102,10 +102,14 @@ final:   concat demuxer (stream copy) + audio mux -> faststart MP4 -> ffprobe ve
   `afade=ns`, `acrossfade=ns`). The single pass rounded each clip to milliseconds, which
   accumulated: a timeline of 60 clips with speed changes ended up ~1,040 samples (22 ms) short.
 - Stems are content-hashed by what they contain, not by where they are, so an edit that shifts
-  the rest of the timeline still only re-mixes the stems whose own clips changed (measured: one
-  of four on a 120-clip timeline), and identical passages share one stem. The cost is cache
-  size: stems are ~366 KB per second of programme (about 117 MB for a 5-minute reel), which
-  makes the outstanding cache-eviction work (audit C) matter more.
+  the rest of the timeline does not invalidate it; only the stems around the edit are re-mixed
+  (measured on a 120-clip timeline: 1 of 9, and 3 of 11 on another FFmpeg, because the chunk
+  boundaries themselves follow clip content). Identical passages share one stem. The cost is
+  cache size: stems are ~366 KB per second of programme (about 117 MB for a 5-minute reel),
+  which makes the outstanding cache-eviction work (audit C) matter more.
+- Filters whose output depends on how samples are framed are given a fixed frame size
+  (`asetnsamples`): `sidechaincompress` ducks identically however the speech was chunked, which
+  matters because the chunk boundaries depend on the clips' own path lengths.
 - FFmpeg runs with `cwd` = job directory and relative ASS/font paths (Windows-safe). Commands
   whose filter graph would make them longer than 16k characters pass the graph in a file
   instead (`-filter_complex_script`, or `-/filter_complex` on FFmpeg 8).
