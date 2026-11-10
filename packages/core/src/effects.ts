@@ -213,6 +213,26 @@ export function shiftFx(fx: Effect[] | undefined, dt: number): Effect[] | undefi
   return out;
 }
 
+/**
+ * Deep-copy effects for a clip whose playback speed changes by factor `k` = oldSpeed / newSpeed.
+ * Key times, reveal starts and reveal durations are multiplied by `k`, so every effect stays on
+ * the same source content (a whole-clip zoom still spans the whole clip).
+ */
+export function scaleFx(fx: Effect[] | undefined, k: number): Effect[] | undefined {
+  if (!fx) return undefined;
+  const out = structuredClone(fx);
+  if (Math.abs(k - 1) < 1e-12) return out;
+  const r = (x: number) => Math.round(x * k * 1e6) / 1e6;
+  for (const f of out) {
+    if (f.type === 'kf') for (const key of f.keys) key.t = r(key.t);
+    else if (f.reveal) {
+      f.reveal.at = r(f.reveal.at);
+      f.reveal.d = Math.max(1e-6, r(f.reveal.d));
+    }
+  }
+  return out;
+}
+
 /** One-line summary for compact tool output, e.g. "kf3 mask:ellipse". */
 export function fxSummary(fx: Effect[] | undefined): string {
   return (fx ?? []).map((f) => (f.type === 'kf' ? `kf${f.keys.length}` : `mask:${f.shape}${f.invert ? '!' : ''}${f.reveal ? '+rv' : ''}`)).join(' ');

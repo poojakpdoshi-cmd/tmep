@@ -118,6 +118,9 @@ returns an explicit error rather than silently dropping the effects. Untargeted 
 affect only main clips. When `cut`/`delete` splits a main clip, each
 part gets its own copy of the effects, re-timed so they continue from the original clip's state at
 the cut point (speed-aware); a removed range is skipped in effect time, like source-anchored zooms.
+Other edits keep main-clip effects on the same source content too: `trim in=` shifts effect times
+by the change in clip start, `speed` scales effect times and mask-reveal durations by old/new
+speed (a whole-clip zoom still spans the whole clip), and `trim out=` leaves them unchanged.
 
 A batch is atomic: if any op fails, nothing is committed.
 

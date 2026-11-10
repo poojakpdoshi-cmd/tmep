@@ -29,7 +29,7 @@ import {
   srcToTl,
 } from './timeline.ts';
 import { r2 } from './util.ts';
-import { FX_KINDS, FX_PRESETS, EASES, parseKeys, presetKeys, validateMask, type Effect, type FxMask, type Ease, type RevealFrom } from './effects.ts';
+import { FX_KINDS, FX_PRESETS, EASES, parseKeys, presetKeys, validateMask, shiftFx, scaleFx, type Effect, type FxMask, type Ease, type RevealFrom } from './effects.ts';
 
 export interface OpContext {
   transcripts: Record<string, Word[] | undefined>;
@@ -334,9 +334,12 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'trim': {
       const c = findClip(tl, op.clip as string);
+      const oldIn = c.in;
       if (op.in !== undefined) c.in = op.in as number;
       if (op.out !== undefined) c.out = op.out as number;
       if (c.out <= c.in) throw new TmepError('E_RANGE', `clip ${c.id} would be empty`);
+      // effects are clip-local: moving the start keeps them on the same source content
+      if (c.fx && c.in !== oldIn) c.fx = shiftFx(c.fx, (c.in - oldIn) / c.speed);
       return `trim ${c.id}`;
     }
     case 'move': {
@@ -359,7 +362,11 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'speed': {
       const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
-      for (const c of targets) c.speed = op.x as number;
+      for (const c of targets) {
+        // effects are clip-local output time: scale them so they stay on the same source content
+        if (c.fx && c.speed !== op.x) c.fx = scaleFx(c.fx, c.speed / (op.x as number));
+        c.speed = op.x as number;
+      }
       return `speed x${op.x} (${targets.length} clips)`;
     }
     case 'frame': {
