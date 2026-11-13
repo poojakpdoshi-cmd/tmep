@@ -27,7 +27,7 @@ import * as api from '../packages/engine/src/api.ts';
 import { Project, layout, totalFrames, type Timeline } from '../packages/core/src/index.ts';
 import type { MediaRef } from '../packages/render/src/graph.ts';
 import { renderAudio, planSpeech, clipAudio, samplePos, SR, AUDIO_LIMITS, type AudioLimits } from '../packages/render/src/audio.ts';
-import { sfxFile } from '../packages/render/src/sfx.ts';
+import { sfxFile, SFX_KINDS } from '../packages/render/src/sfx.ts';
 import { ffmpegInfo } from '../packages/media/src/ffmpeg.ts';
 import { maybeScript } from '../packages/render/src/stage.ts';
 import { legacyAudioArgs } from './legacy-audio.ts';
@@ -67,6 +67,10 @@ interface Case {
   sfx?: boolean;
   music?: boolean;
   loud?: boolean;
+  /** `n` sound effects starting 2 s in, `every` ms apart (0: all at the same instant). */
+  dense?: { n: number; every: number };
+  /** Mute every clip and switch loudness normalization off: the mix is the effect bus alone. */
+  silent?: boolean;
 }
 
 interface Built {
@@ -104,6 +108,10 @@ async function build(c: Case): Promise<Built> {
     });
   }
   if (c.loud) tl.loudness = -14;
+  if (c.silent) {
+    for (const clip of tl.clips) clip.mute = true;
+    tl.loudness = 0;
+  }
   const placed = layout(tl);
   const media: Record<string, MediaRef> = {};
   for (const id of new Set<string>([...tl.clips.map((x) => x.src), ...(tl.music ? [tl.music.src] : [])])) {
@@ -115,6 +123,11 @@ async function build(c: Case): Promise<Built> {
     const sdir = project.cachePath('sfx');
     const kinds = ['pop', 'ding', 'whoosh', 'click'];
     for (let i = 0; i < 12; i++) sfx.push({ file: await sfxFile(sdir, kinds[i % kinds.length]!), t: i * 0.7 + 0.15, vol: -3 });
+  }
+  if (c.dense) {
+    // all six built-in effects (0.07 s ... 1 s long) at five different volumes
+    const sdir = project.cachePath('sfx');
+    for (let i = 0; i < c.dense.n; i++) sfx.push({ file: await sfxFile(sdir, SFX_KINDS[i % SFX_KINDS.length]!), t: 2 + (i * c.dense.every) / 1000, vol: -30 - (i % 5) });
   }
   const work = path.join(dir, 'work');
   mkdirSync(work, { recursive: true });
@@ -137,11 +150,11 @@ const worstDiff = (a: Float32Array, b: Float32Array): number => {
   return m;
 };
 
-/** The staged mix, as PCM, with the given chunk limits. */
-async function staged(b: Built, out: string, limits?: Partial<AudioLimits>): Promise<{ file: string; stems: number; maxInputs: number }> {
+/** The staged mix, as PCM, with the given chunk limits (and, optionally, only some of the effects). */
+async function staged(b: Built, out: string, limits?: Partial<AudioLimits>, sfx: Built['sfx'] = b.sfx): Promise<{ file: string; stems: number; maxInputs: number }> {
   const file = path.join(b.dir, out);
   const stats = await renderAudio({
-    tl: b.tl, placed: b.placed, media: b.media, sfx: b.sfx, frames: b.frames,
+    tl: b.tl, placed: b.placed, media: b.media, sfx, frames: b.frames,
     out: file, stemDir: path.join(b.dir, 'stems', out), work: b.work, temps: new Set<string>(), codec: PCM,
     ...(limits ? { limits: { ...AUDIO_LIMITS, ...limits } } : {}),
   });
@@ -228,6 +241,95 @@ for (const c of [...CASES, { name: 'speed changes, volume and mutes', clips: 60,
     const d = samples(small.file);
     assert.equal(d.length, a.length, 'same length whatever the chunking');
     assert.equal(worstDiff(a, d), 0, 'not one sample differs between chunked and single-pass mixing');
+  });
+}
+
+// ---- dense effect overlaps -------------------------------------------------------------------
+// A window of the effect bus mixes every effect audible in it, and when far more effects sound
+// at once than may start in one window (32), that is one FFmpeg process with hundreds of
+// streams. These check the audio of exactly that: nothing missing, nothing doubled.
+//
+// Tolerance. The reference adds each effect into the master mix one by one; the staged mix adds
+// them into a stem first. With hundreds of terms the two orders of float32 addition differ by a
+// few units in the last place: measured 2e-7 to 9e-7 of the peak for 33 to 400 overlapping
+// effects. 4e-6 of the peak is allowed. A missing or doubled effect is not in that league: the
+// quietest one here (-34 dB) is about 6e-3 of the peak, a thousand times the tolerance.
+
+/** Largest difference between two mixes, relative to the peak of the first, and as RMS. */
+function compare(a: ArrayLike<number>, d: ArrayLike<number>): { peak: number; worst: number; rms: number } {
+  let peak = 0;
+  let worst = 0;
+  let err = 0;
+  let signal = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = Math.abs(a[i]! - d[i]!);
+    peak = Math.max(peak, Math.abs(a[i]!));
+    worst = Math.max(worst, diff);
+    err += diff * diff;
+    signal += a[i]! * a[i]!;
+  }
+  return { peak, worst: worst / peak, rms: Math.sqrt(err / signal) };
+}
+
+for (const dense of [{ n: 33, every: 0 }, { n: 64, every: 0 }, { n: 128, every: 0 }, { n: 128, every: 3 }]) {
+  const what = dense.every ? `${dense.n} effects ${dense.every} ms apart` : `${dense.n} effects at the same instant`;
+  test(`dense overlap matches the single-pass reference: ${what}`, { timeout: 300_000 }, async (t) => {
+    if (skip) return t.skip(skip);
+    const b = await build({ name: what, clips: 30, dense });
+    const mine = await staged(b, 'staged.wav');
+    // six effect files, however many effects: the most inputs any process has is a speech chunk's
+    assert.ok(mine.maxInputs <= AUDIO_LIMITS.maxClips + 1, `inputs per process: ${mine.maxInputs}`);
+    const want = samplePos(b.frames, FPS);
+    const a = samples(await reference(b));
+    const d = samples(mine.file);
+    assert.equal(d.length / 2, want, 'the mix is exactly as long as the timeline');
+    assert.equal(a.length / 2, want);
+    const r = compare(a, d);
+    assert.ok(r.worst <= 4e-6, `worst sample differs by ${r.worst.toExponential(2)} of the peak`);
+    assert.ok(r.rms < 1e-6, `RMS difference ${r.rms.toExponential(2)} of the programme`);
+  });
+}
+
+for (const dense of [{ n: 400, every: 0 }, { n: 400, every: 3 }]) {
+  const what = dense.every ? `400 effects ${dense.every} ms apart` : '400 effects at the same instant';
+
+  test(`dense overlap is the sum of its parts: ${what}`, { timeout: 300_000 }, async (t) => {
+    if (skip) return t.skip(skip);
+    // The reference cannot mix this everywhere (see the next test), so it is checked without
+    // it. With the speech muted and loudness normalization off (it is on by default, and not
+    // linear), the mix is the effect bus alone, and mixing is linear: all 400 effects together
+    // must equal the sum of four separate mixes of 100 effects each. An effect lost or doubled
+    // only when the overlap is dense would break exactly this.
+    const b = await build({ name: what, clips: 30, dense, silent: true });
+    const whole = samples((await staged(b, 'whole.wav')).file);
+    const sum = new Float64Array(whole.length);
+    for (let k = 0; k < 4; k++) {
+      const part = samples((await staged(b, `part${k}.wav`, undefined, b.sfx.filter((_, i) => i % 4 === k))).file);
+      assert.equal(part.length, whole.length);
+      for (let i = 0; i < part.length; i++) sum[i]! += part[i]!;
+    }
+    assert.equal(whole.length / 2, samplePos(b.frames, FPS), 'the mix is exactly as long as the timeline');
+    const r = compare(sum, whole);
+    assert.ok(r.peak > 0.05, `the effects are in the mix (peak ${r.peak.toFixed(3)})`);
+    assert.ok(r.worst <= 4e-6, `worst sample differs by ${r.worst.toExponential(2)} of the peak`);
+    assert.ok(r.rms < 1e-6, `RMS difference ${r.rms.toExponential(2)}`);
+  });
+
+  test(`dense overlap matches the single-pass reference: ${what}`, { timeout: 300_000 }, async (t) => {
+    if (skip) return t.skip(skip);
+    // The reference needs one input per effect: 430 here. That is past Windows' command-line
+    // limit and past the macOS default of 256 open files — the limits A5 removed — so it can
+    // only be run for comparison on Linux.
+    if (process.platform !== 'linux') return t.skip(`the single-pass reference cannot open 430 inputs on ${process.platform}`);
+    const b = await build({ name: what, clips: 30, dense });
+    const mine = await staged(b, 'staged.wav');
+    const a = samples(await reference(b));
+    const d = samples(mine.file);
+    assert.equal(d.length, a.length);
+    assert.equal(d.length / 2, samplePos(b.frames, FPS));
+    const r = compare(a, d);
+    assert.ok(r.worst <= 4e-6, `worst sample differs by ${r.worst.toExponential(2)} of the peak`);
+    assert.ok(r.rms < 1e-6, `RMS difference ${r.rms.toExponential(2)} of the programme`);
   });
 }
 

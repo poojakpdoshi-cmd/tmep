@@ -78,7 +78,8 @@ unit i:  ffmpeg -ss/-t inputs -> fps -> fit -> perspective zoom -> xfade -> b-ro
          -> setpts(+unitStart) -> subtitles(gfx.ass) -> x264  => cache/units/<hash>.mp4
 audio:   speech stem j: <=32 clips, per-clip trims (+atempo, 12-15 ms edge fades)
                         -> acrossfade/concat            => cache/audio/stems/<hash>.wav
-         sfx stem k:    <=32 effects placed with adelay => cache/audio/stems/<hash>.wav
+         sfx stem k:    <=32 effects start here, placed with adelay (plus those still
+                        sounding; <=6 inputs)           => cache/audio/stems/<hash>.wav
          final pass:    concat(speech stems) + music ducked by sidechaincompress
                         + concat(sfx stems) -> amix -> loudnorm => cache/audio/<hash>.m4a
 final:   concat demuxer (stream copy) + audio mux -> faststart MP4 -> ffprobe verification
@@ -93,10 +94,17 @@ final:   concat demuxer (stream copy) + audio mux -> faststart MP4 -> ffprobe ve
   a single process with one input per audible clip, which passed Windows' 32,767-character
   command-line limit at roughly 360 clips (`spawn ENAMETOOLONG`) and opened one file per clip.
   Audio is now built in stages, none of which depends on the clip count: speech stems of at most
-  32 clips (and at most ~8 KB of input arguments), sound-effect windows of at most 32 effects,
-  then one final pass with at most three inputs (speech list, music, effects list). Measured:
+  32 clips (and at most ~8 KB of input arguments), sound-effect windows in which at most 32
+  effects start, then one final pass with at most three inputs (speech list, music, effects
+  list). Measured:
   at most 21 inputs and ~7.6 KB of command line from 50 to 5,000 clips, and peak memory flat at
   ~180 MB where the single pass reached 1.5 GB at 800 clips.
+- An effect window's **inputs** are bounded (one per distinct effect file: six), its **streams**
+  are not: it mixes every effect audible in it, including those still sounding from earlier
+  windows, so dense overlaps make one process with as many filter chains as effects sound at
+  once. That is cheap far beyond any real sound design (400 simultaneous effects: 69 MB,
+  0.24 s; 1,000: 118 MB, 0.9 s) and superlinear after that (5,000: 1 GB, 19 s). There is no
+  hard cap; if one is ever needed, the way to add it is to mix an over-full window in layers.
 - Audio positions are **sample-exact**: frame `f` is sample `round(f * 48000 / fps)`, and every
   trim, pad, fade and crossfade is expressed in samples (`atrim=end_sample`, `apad=whole_len`,
   `afade=ns`, `acrossfade=ns`). The single pass rounded each clip to milliseconds, which

@@ -10,9 +10,12 @@
  *      chunk is rendered by its own FFmpeg process (same per-clip chain, crossfades and
  *      de-click fades as before) into a 32-bit float PCM file of an exact number of samples,
  *      stored in the cache under a hash of its content.
- *   2. Sound-effect stems. Effects are grouped into windows of at most `maxSfx` effects; each
- *      window is mixed into a PCM file the same way. An effect file is opened once per window
- *      however often it is used, and gaps between windows are a repeated one-second silence.
+ *   2. Sound-effect stems. The effect bus is cut into windows in which at most `maxSfx`
+ *      effects start; each window is mixed into a PCM file the same way. An effect file is
+ *      opened once per window however often it is used, so a window has at most as many inputs
+ *      as there are distinct effect files. How many streams it mixes is how many effects are
+ *      audible in it, which dense overlaps can make large (see `planSfx`). Gaps between windows
+ *      are a repeated one-second silence.
  *   3. Final pass. One process reads the speech stems through a concat list, the music, and the
  *      effect stems through a second list: three inputs at most. Ducking, mixing, loudness
  *      normalization and AAC encoding happen here, over the whole programme, as before.
@@ -60,7 +63,10 @@ export interface AudioLimits {
   every: number;
   /** Upper bound for the characters of one chunk's input arguments. */
   maxInputChars: number;
-  /** Sound effects started per effect window. */
+  /**
+   * Sound effects that may START in one effect window. Not a cap on what a window mixes: it
+   * also carries the effects still sounding when it begins (see `planSfx`).
+   */
   maxSfx: number;
 }
 
@@ -233,10 +239,17 @@ export interface SfxWindow {
 }
 
 /**
- * Group sound effects into windows of at most `maxSfx` effects. Windows follow each other on
- * the effect bus: `silence` one-second files, then the window's own stem. A window ends where
- * the next one starts or where its last effect ends; an effect still sounding at a boundary
- * continues in the next window. Start times are rounded to milliseconds, as `adelay` did.
+ * Cut the effect bus into windows. At most `maxSfx` effects START in a window; the window also
+ * carries every effect that is still sounding when it begins, so the number of streams it
+ * mixes is the number of effects audible in it — set by how densely the effects overlap, not
+ * by the length of the timeline, and not capped (400 simultaneous effects are one window of
+ * 400 streams). What stays fixed is the number of files opened: one input per distinct effect
+ * file, however often it is used.
+ *
+ * Windows follow each other on the bus: `silence` one-second files, then the window's own
+ * stem. A window ends where the next one starts or where its last effect ends; an effect still
+ * sounding at a boundary continues in the next window. A window lists exactly the effects
+ * that sound in it, each exactly once. Start times are rounded to milliseconds, as `adelay` did.
  */
 export function planSfx(sfx: SfxItem[], totalSamples: number, limits: AudioLimits = AUDIO_LIMITS): SfxWindow[] {
   const items = sfx
@@ -258,14 +271,17 @@ export function planSfx(sfx: SfxItem[], totalSamples: number, limits: AudioLimit
     const at = active.length ? written : written + silence * SR;
     const used = [...active, ...own].sort((a, b) => a.order - b.order);
     const nextStart = items[i + limits.maxSfx]?.start ?? Infinity;
-    const to = Math.min(Math.max(...used.map((s) => s.end)), nextStart);
-    const uses = used.map((s) => ({ file: s.file, off: s.start - at, vol: s.vol }));
+    const to = Math.min(used.reduce((m, s) => Math.max(m, s.end), 0), nextStart);
+    // only what sounds before `to`: an effect that starts exactly where the next window does
+    // belongs to that window alone (it would be a stream that is delayed past the end and cut)
+    const uses = used.filter((s) => s.start < to).map((s) => ({ file: s.file, off: s.start - at, vol: s.vol }));
     const samples = to - at;
     active = used;
-    if (samples === 0) {
-      // more than `maxSfx` effects start at this very sample: they all sound in the next window
+    if (samples === 0 || !uses.length) {
+      // more than `maxSfx` effects start at one sample, so nothing of this group sounds before
+      // the next one starts: the next window takes them all, along with any lead-in before them
       carried += silence;
-      written = to;
+      written = at;
       continue;
     }
     windows.push({ key: hashOf({ v: AUDIO_VERSION, kind: 'sfx', uses: uses.map((u) => ({ f: path.basename(u.file), off: u.off, vol: u.vol })), samples }), uses, silence: silence + carried, at, samples });

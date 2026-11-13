@@ -10,7 +10,7 @@
   per clip (300 clips failed under the macOS default `ulimit -n` of 256) and its memory and
   thread count grew with the timeline (800 clips: 1.5 GB, 1,603 threads, 182 s).
 - Audio is now mixed in bounded stages (`packages/render/src/audio.ts`): speech stems of at
-  most 32 clips, sound-effect windows of at most 32 effects, then one final pass that reads the
+  most 32 clips, sound-effect windows in which at most 32 effects start, then one final pass that reads the
   stems through concat lists and does music, ducking, loudness and AAC as before. No command
   depends on the number of clips: from 50 to 5,000 clips, at most 21 inputs and ~7.6 KB of
   command line per process, peak memory flat at ~180 MB. An 800-clip mix went from 182 s to
@@ -38,6 +38,19 @@
   `TMEP_CMDLINE_LIMIT` makes `run()` refuse an over-long one, so the Windows limit is enforced
   in tests on Linux and macOS too. Commands whose graph would exceed 16k characters (was 24k,
   measured loosely) now pass the graph in a file.
+- What an effect window bounds, stated exactly: at most 32 effects *start* in a window, and it
+  opens one input per distinct effect file (six built-in effects: six inputs), but it mixes
+  every effect audible in it, so its number of streams follows how densely the effects overlap.
+  Measured for one window's process: 33 simultaneous effects 50 MB / 0.10 s, 400 effects 69 MB /
+  0.24 s, 1,000 effects 118 MB / 0.9 s — and superlinear beyond that (2,000: 253 MB / 3.4 s,
+  5,000: 1 GB / 19 s). There is no hard cap. Inputs, threads, open files and the command line
+  do not change with the overlap. The single pass needed one input per effect: 400 effects
+  were 434 open files and 9.3 s, and past Windows' command-line limit wherever they sat.
+- Fix: an effect window listed effects that start exactly where it ends. They were delayed past
+  its end and cut, so the audio was right, but the window mixed streams for nothing, its cache
+  key depended on effects it does not contain, and more than 32 effects starting at one sample
+  after a sub-second gap produced a whole window of silence built from 32 such streams. A
+  window now lists exactly the effects that sound in it.
 - Known limit, unchanged: a video unit still takes one input per clip, so a timeline whose
   every cut is a crossfade renders as one unit and can still exceed the command-line limit at a
   few hundred clips.
