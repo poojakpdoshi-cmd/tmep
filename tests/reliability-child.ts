@@ -35,7 +35,7 @@ function ffmpegChildren(): string[] {
   return r.stdout.split('\n').map((l) => l.trim()).filter((l) => /ffmpeg/.test(l));
 }
 
-async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips = 6): Promise<api.Ctx> {
+async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips = 6, distinct = false): Promise<api.Ctx> {
   const ctx: api.Ctx = { project: mkdtempSync(path.join(os.tmpdir(), 'tmep-rel-')), detail: 'standard' };
   const paths = [path.join(fixtures, 'clip.mp4')];
   let music: string | undefined;
@@ -45,8 +45,12 @@ async function newProject(withMusic: 'none' | 'ok' | 'corrupt' = 'none', clips =
     paths.push(music);
   }
   await api.importMedia(ctx, { paths });
-  // several hard cuts -> several video units, so video work is still running when audio fails
-  const ranges = Array.from({ length: clips }, (_, i) => [(i % 6) * 0.5, (i % 6) * 0.5 + 0.4]);
+  // several hard cuts -> several video units, so video work is still running when audio fails.
+  // `distinct`: every clip a different window of the source, so no two chunks have the same
+  // content and the stem count follows the chunk limits rather than deduplication.
+  const ranges = distinct
+    ? Array.from({ length: clips }, (_, i) => [((i * 7) % 100) * 0.025, ((i * 7) % 100) * 0.025 + 0.4])
+    : Array.from({ length: clips }, (_, i) => [(i % 6) * 0.5, (i % 6) * 0.5 + 0.4]);
   const ops: unknown[] = [{ op: 'format', ratio: '9:16' }, { op: 'keep', src: 'v1', ranges }];
   if (music) ops.push({ op: 'music', src: 'a1' });
   await api.edit(ctx, { ops });
@@ -132,10 +136,10 @@ switch (scenario) {
   }
   case 'render-long': {
     // start a render of <clips> segments, announce the job id at once, then wait for the result;
-    // stay alive <keepAliveMs> afterwards. rest = [clips, keepAliveMs]
+    // stay alive <keepAliveMs> afterwards. rest = [clips, keepAliveMs, 'preview'?]
     const ctx = await newProject('none', Number(rest[0] ?? 24));
     const t0 = Date.now();
-    const started = (await api.render(ctx, { wait: 0 })) as Record<string, unknown>;
+    const started = (await api.render(ctx, { wait: 0, preview: rest[2] === 'preview' })) as Record<string, unknown>;
     writeSync(1, `STARTED ${JSON.stringify({ project: ctx.project, job: started.job })}\n`);
     const r = (await api.status(ctx, { job: started.job as string, wait: 600 })) as Record<string, unknown>;
     const elapsed = Date.now() - t0;
@@ -143,6 +147,31 @@ switch (scenario) {
     const ffmpeg = ffmpegChildren();
     if (rest[1]) await new Promise((res) => setTimeout(res, Number(rest[1])));
     emit({ project: ctx.project, view: r, elapsed, ffmpeg, leftovers: files(ctx.project).filter((f) => f.includes('.tmp')), jobs: files(path.join(ctx.project, '.tmep', 'jobs')) });
+    break;
+  }
+  case 'render-edit-render': {
+    // render <clips>, change one clip in the middle, render again: how much audio was reused?
+    const ctx = await newProject('none', Number(rest[0] ?? 24), true);
+    ctx.detail = 'debug'; // the render result (audioStems) is only in the debug view
+    const first = (await api.render(ctx, { wait: 600, preview: true })) as Record<string, unknown>;
+    const stemDir = path.join(ctx.project, '.tmep', 'cache', 'audio', 'stems');
+    const stemsAfterFirst = files(stemDir).length;
+    const tl = await (await import('../packages/core/src/index.ts')).Project.open(ctx.project).then((p) => p.timeline());
+    const middle = tl.clips[Math.floor(tl.clips.length / 2)]!.id;
+    await api.edit(ctx, { ops: [{ op: 'speed', clip: middle, x: 1.25 }] });
+    const second = (await api.render(ctx, { wait: 600, preview: true })) as Record<string, unknown>;
+    emit({ project: ctx.project, first, second, stemsAfterFirst, stemsAfterSecond: files(stemDir).length });
+    break;
+  }
+  case 'render-cancel': {
+    // start a render of <clips> segments and cancel it after <ms>
+    const ctx = await newProject('none', Number(rest[0] ?? 24));
+    const started = (await api.render(ctx, { wait: 0, preview: true })) as Record<string, unknown>;
+    await new Promise((res) => setTimeout(res, Number(rest[1] ?? 2000)));
+    await api.status(ctx, { job: started.job as string, cancel: true });
+    const view = (await api.status(ctx, { job: started.job as string, wait: 600 })) as Record<string, unknown>;
+    await new Promise((res) => setTimeout(res, 400));
+    emit({ project: ctx.project, view, ffmpeg: ffmpegChildren(), leftovers: files(ctx.project).filter((f) => f.includes('.tmp')) });
     break;
   }
   case 'cancel': {

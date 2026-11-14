@@ -162,10 +162,11 @@ test('renders in separate processes publish the same cache keys safely; readers 
     // keep scanning while the renders run, then one complete pass after they have all exited
     for (let last = false; !last; ) {
       last = !reading;
-      for (const sub of ['units', 'audio']) {
+      for (const sub of ['units', 'audio', path.join('audio', 'stems')]) {
         for (const f of fs.existsSync(path.join(cache, sub)) ? fs.readdirSync(path.join(cache, sub)) : []) {
           if (f.includes('.tmp')) continue;
           const file = path.join(cache, sub, f);
+          if (fs.statSync(file).isDirectory()) continue; // audio/stems itself
           const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' });
           const ok = r.status === 0 && Number(r.stdout) > 0;
           seen.set(`${sub}/${f}`, (seen.get(`${sub}/${f}`) ?? true) && ok);
@@ -183,7 +184,12 @@ test('renders in separate processes publish the same cache keys safely; readers 
     const res = assertSurvived(r);
     assertGoodRender(res.job as JobView, FRAMES);
   }
-  assert.equal(seen.size, 7, `reader observed all 6 unit entries + 1 audio entry: ${[...seen.keys()].join(' ')}`);
+  const kinds = [...seen.keys()];
+  const count = (re: RegExp) => kinds.filter((k) => re.test(k)).length;
+  assert.equal(count(/^units\//), 6, `6 unit entries: ${kinds.join(' ')}`);
+  assert.equal(count(/^audio[\\/][^\\/]+\.m4a$/), 1, `1 finished mix: ${kinds.join(' ')}`);
+  assert.ok(count(/stems/) >= 1, `at least one audio stem: ${kinds.join(' ')}`);
+  assert.equal(seen.size, 6 + 1 + count(/stems/), 'nothing else in the cache');
   assert.deepEqual([...seen].filter(([, ok]) => !ok), [], 'every observed cache entry was complete');
   const left = (fs.readdirSync(ctx.project, { recursive: true }) as string[]).filter((f) => String(f).includes('.tmp'));
   assert.deepEqual(left, [], 'no temporary files left');

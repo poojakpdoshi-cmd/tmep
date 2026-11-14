@@ -24,11 +24,59 @@ export interface RunResult {
   ms: number;
 }
 
+/** Windows refuses to start a process whose command line is longer than this (CreateProcessW). */
+export const WINDOWS_CMDLINE_MAX = 32767;
+
+/**
+ * Length of the command line Windows would be handed for `cmd args...`: every argument quoted
+ * and escaped the way libuv does it (quotes only when needed, backslashes before a quote
+ * doubled), joined by single spaces. Pure, so command builders can be checked on every OS.
+ */
+export function commandLineLength(cmd: string, args: string[]): number {
+  let n = 0;
+  for (const a of [cmd, ...args]) {
+    if (a.length === 0) n += 2;
+    else if (!/[ \t"]/.test(a)) n += a.length;
+    else if (!/["\\]/.test(a)) n += a.length + 2;
+    else {
+      // "..." with each quote escaped; a run of backslashes is doubled before a quote or the end
+      let len = 2;
+      let slashes = 0;
+      for (const ch of a) {
+        if (ch === '\\') slashes++;
+        else {
+          if (ch === '"') len += slashes + 1;
+          slashes = 0;
+        }
+        len++;
+      }
+      n += len + slashes;
+    }
+    n++; // separator (the last one stands for the terminating NUL)
+  }
+  return n;
+}
+
+/**
+ * Longest command line a child may be started with: Windows' own limit on Windows, none
+ * elsewhere. TMEP_CMDLINE_LIMIT overrides it, which lets Linux/macOS tests enforce the
+ * Windows limit.
+ */
+function commandLineLimit(): number {
+  const env = Number(process.env.TMEP_CMDLINE_LIMIT);
+  return env > 0 ? env : 0;
+}
+
 export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   const max = opts.maxBuffer ?? 4 * 1024 * 1024;
   const t0 = Date.now();
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) return reject(new TmepError('E_CANCELLED', 'cancelled before start'));
+    const limit = commandLineLimit();
+    const length = limit ? commandLineLength(cmd, args) : 0;
+    if (length > limit) {
+      return reject(new TmepError('E_INTERNAL', `command line too long: ${length} characters for ${cmd} (limit ${limit})`, undefined, { args: args.length, inputs: args.filter((a) => a === '-i').length }));
+    }
     let child;
     try {
       child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
