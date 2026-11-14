@@ -405,7 +405,7 @@ export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { ran
 }
 
 export async function status(ctx: Ctx, inp: { job: string; cancel?: boolean; wait?: number }): Promise<Record<string, unknown>> {
-  const p = await openProject(ctx.project);
+  const p = await openProject(ctx.project, false);
   const j = inp.cancel ? await cancelJob(p, inp.job) : await waitJob(p, inp.job, inp.wait ?? 0);
   return jobView(j, ctx.detail);
 }
