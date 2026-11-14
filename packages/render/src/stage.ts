@@ -9,6 +9,7 @@ import { promises as fsp } from 'node:fs';
 import { exists, sha256 } from '../../core/src/index.ts';
 import { ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { commandLineLength } from '../../media/src/exec.ts';
+import { ownerTag } from './recovery.ts';
 
 /**
  * Run `fn` over items with at most `n` in flight. Never rejects: errors go to `fail`, and
@@ -32,7 +33,7 @@ export async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>
 
 /** Collision-resistant temporary path for one write attempt (unique per process AND attempt). */
 export function tmpFor(file: string, ext: string): string {
-  return `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp${ext}`;
+  return `${file}.${ownerTag()}.${randomBytes(4).toString('hex')}.tmp${ext}`;
 }
 
 /**

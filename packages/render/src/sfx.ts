@@ -3,9 +3,10 @@
  * no licensing questions). Generated once per kind and cached as WAV.
  */
 import path from 'node:path';
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir, rename, rm } from 'node:fs/promises';
 import { exists } from '../../core/src/index.ts';
 import { ffmpeg } from '../../media/src/ffmpeg.ts';
+import { tmpFor } from './stage.ts';
 
 const SR = 48000;
 
@@ -26,8 +27,12 @@ export async function sfxFile(cacheDir: string, kind: string): Promise<string> {
   const file = path.join(cacheDir, `${kind}-v1.wav`);
   if (await exists(file)) return file;
   await mkdir(cacheDir, { recursive: true });
-  const tmp = path.join(cacheDir, `${kind}-v1.${process.pid}.tmp.wav`);
-  await ffmpeg({ args: ['-f', 'lavfi', '-i', def.graph, '-ac', '2', '-ar', String(SR), '-c:a', 'pcm_s16le', tmp] });
-  await rename(tmp, file);
+  const tmp = tmpFor(file, '.wav');
+  try {
+    await ffmpeg({ args: ['-f', 'lavfi', '-i', def.graph, '-ac', '2', '-ar', String(SR), '-c:a', 'pcm_s16le', tmp] });
+    await rename(tmp, file);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => {});
+  }
   return file;
 }

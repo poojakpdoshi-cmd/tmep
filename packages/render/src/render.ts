@@ -30,6 +30,7 @@ import { planUnits, unitArgs, outSize, type MediaRef, type EncParams, type Unit 
 import { renderAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
 import { pool, tmpFor, publish, maybeScript } from './stage.ts';
 import { sfxFile } from './sfx.ts';
+import { ownerTag } from './recovery.ts';
 
 export { publish };
 
@@ -165,7 +166,7 @@ export async function renderTimeline(project: Project, tl: Timeline, transcripts
  * The directory is removed when the render finishes, fails or is cancelled.
  */
 async function withWorkDir<T>(project: Project, fn: (work: string) => Promise<T>): Promise<T> {
-  const work = project.workPath(`render-${process.pid}-${randomBytes(6).toString('hex')}`);
+  const work = project.workPath(`render-${ownerTag()}-${randomBytes(6).toString('hex')}`);
   await fsp.mkdir(work, { recursive: true });
   try {
     return await fn(work);

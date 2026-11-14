@@ -105,11 +105,18 @@ switch (scenario) {
   }
   case 'start-and-die': {
     // start a render, then die abruptly (no cleanup, no exit handlers) while it runs
-    const ctx = await newProject();
+    const ctx = await newProject('none', 30, true);
     const r = (await api.render(ctx, { wait: 0 })) as Record<string, unknown>;
-    emit({ project: ctx.project, job: r.job });
-    await new Promise((res) => setTimeout(res, 400));
-    process.kill(process.pid, 'SIGKILL');
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const temps = files(ctx.project).filter((f) => /\.tmp(?:\.mp4|\.m4a|\.wav)$/.test(f));
+      if (temps.length) {
+        emit({ project: ctx.project, job: r.job, temps });
+        process.kill(process.pid, 'SIGKILL');
+      }
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    throw new Error('render produced no temporary media before the crash deadline');
     break;
   }
   case 'render-shared': {
