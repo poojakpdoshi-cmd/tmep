@@ -31,8 +31,10 @@ export function parseArgs(argv: string[]): Args {
       if (eq > 0) out[a.slice(2, eq)] = coerce(a.slice(eq + 1));
       else {
         const next = argv[i + 1];
-        if (next !== undefined && !next.startsWith('--')) {
-          out[a.slice(2)] = coerce(next);
+        const value = next === undefined ? undefined : coerce(next);
+        // --cancel can precede the job ID. Keep accepting explicit boolean and numeric values.
+        if (next !== undefined && next !== '-p' && !next.startsWith('--') && (a !== '--cancel' || typeof value !== 'string')) {
+          out[a.slice(2)] = value;
           i++;
         } else out[a.slice(2)] = true;
       }
