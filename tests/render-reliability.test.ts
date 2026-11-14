@@ -9,7 +9,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -117,12 +117,21 @@ test('audio mix failure during video rendering is a job error, not a process cra
   for (const u of res.units as string[]) assert.ok(inspect(u).frames > 0, `cache entry ${u} is valid`);
 });
 
-test('a job whose process died is reported as interrupted, not running', { timeout: 600_000 }, async (t) => {
+test('a dead render owner leaves a recoverable job, temporary media and workspace', { timeout: 600_000 }, async (t) => {
   if (skip) return t.skip(skip);
   const died = await child(['start-and-die', FIX]);
   // POSIX reports the signal; Windows reports a non-zero exit code for a self-kill
   assert.ok(died.signal === 'SIGKILL' || (process.platform === 'win32' && died.code !== 0), `child did not die abruptly: ${died.code}/${died.signal}`);
-  const { project, job } = died.result as { project: string; job: string };
+  const { project, job, temps } = died.result as { project: string; job: string; temps: string[] };
+  const work = path.join(project, '.tmep', 'work');
+  const abandoned = readdirSync(work).find((name) => name.startsWith('render-'))!;
+  assert.ok(abandoned, 'the killed process left a workspace');
+  assert.ok(temps.some((file) => existsSync(path.join(project, file))), 'the killed process left temporary media');
+  const cache = path.join(project, '.tmep', 'cache', 'units');
+  const published = `${'0'.repeat(20)}.mp4`;
+  const active = `${published}.${abandoned.split('-')[1]}-${process.pid}.12345678.tmp.mp4`;
+  writeFileSync(path.join(cache, published), 'published cache entry');
+  writeFileSync(path.join(cache, active), 'another owner’s temporary file');
   // from this (different) process, and again from a fresh process
   const s1 = (await api.status({ project, detail: 'standard' }, { job })) as Record<string, unknown>;
   assert.equal(s1.state, 'error', JSON.stringify(s1));
@@ -130,6 +139,9 @@ test('a job whose process died is reported as interrupted, not running', { timeo
   const s2 = assertSurvived(await child(['status', FIX, project, job]));
   assert.equal(s2.state, 'error');
   assert.equal((s2.err as { code: string }).code, 'E_INTERRUPTED');
+  assert.ok(!existsSync(path.join(work, abandoned)), 'abandoned workspace was removed');
+  assert.deepEqual(readdirSync(path.join(project, '.tmep', 'cache'), { recursive: true, encoding: 'utf8' }).filter((name) => /\.tmp\./.test(name)), [path.join('units', active)]);
+  assert.ok(existsSync(path.join(cache, published)), 'published cache entries are preserved');
 });
 
 test('an active job seen from another process is still running', { timeout: 600_000 }, async (t) => {

@@ -8,6 +8,7 @@
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
 import { type Project, type Detail, TmepError, asTmepError, writeJson, readJsonOr, exists, shortId, r2 } from '../../core/src/index.ts';
+import { processIsGone, recoverRenderFiles } from './recovery.ts';
 
 export type JobState = 'running' | 'done' | 'error' | 'cancelled';
 
@@ -51,15 +52,6 @@ const cancelPath = (project: Project, id: string) => project.jobPath(id).replace
 /** Jobs owned by this process, registered synchronously before the job file is written. */
 const owned = new Set<string>();
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'; // exists, owned by another user
-  }
-}
-
 /**
  * Decide whether a job file that says `running` belongs to a process that is gone.
  * Conservative: a job is only declared interrupted when that is certain (same host and
@@ -70,7 +62,7 @@ async function interrupted(project: Project, j: Job): Promise<string | undefined
   if (owned.has(j.id)) return undefined;
   const sameHost = j.host === undefined || j.host === os.hostname();
   if (sameHost && j.pid === process.pid) return 'its process restarted';
-  if (sameHost && !pidAlive(j.pid)) return `process ${j.pid} is no longer running`;
+  if (sameHost && processIsGone(j.pid)) return `process ${j.pid} is no longer running`;
   const hb = await fsp.stat(heartbeatPath(project, j.id)).then((s) => s.mtimeMs, () => undefined);
   if (hb !== undefined && Date.now() - hb > STALE_MS) return `no heartbeat for ${Math.round((Date.now() - hb) / 1000)} s`;
   return undefined;
@@ -120,6 +112,11 @@ export async function readJob(project: Project, id: string): Promise<Job> {
         // record still says running; heartbeat kept; the next read repeats this recovery
       }
     }
+  }
+  // A stale heartbeat alone does not authorize deleting files from a possibly live render.
+  // Retry cleanup on later reads if a surviving FFmpeg child still held files open on Windows.
+  if (j.kind === 'render' && j.error?.code === 'E_INTERRUPTED' && j.host === os.hostname() && processIsGone(j.pid)) {
+    await recoverRenderFiles(project, j.pid, j.opts?.out);
   }
   // a cancel request that arrived after the job had already finished has no effect: drop it
   if (j.state !== 'running') await fsp.rm(cancelPath(project, id), { force: true }).catch(() => {});
