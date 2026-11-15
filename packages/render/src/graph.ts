@@ -8,7 +8,7 @@
  * resume. Audio is built separately, in bounded stages, and muxed in at the end (audio.ts).
  */
 import { type Timeline, type Placed, type Clip, type BRoll, type Effect, resolveRef } from '../../core/src/index.ts';
-import { compileFx, compileOverlayFx } from './effects.ts';
+import { compileFx, compileOverlayFx, transformFilter } from './effects.ts';
 
 export interface MediaRef {
   path: string;
@@ -40,6 +40,7 @@ export interface GfxOverlay {
   fx: Effect[];
   /** Explicit compositing order. Defaults to 10 for graphics. */
   z?: number;
+  camera?: Effect[];
 }
 
 const n3 = (x: number) => String(Math.round(x * 1000) / 1000);
@@ -166,16 +167,21 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     if (m.kind === 'image') inputs.push('-loop', '1', '-framerate', String(fps), '-t', n3(len + 0.5), '-i', m.path);
     else inputs.push('-ss', n3(b.in + (s - T)), '-t', n3(len + 0.5), '-i', m.path);
     const fades: string[] = [];
-    if (T >= U0 - 1e-6) fades.push(`fade=t=in:st=0:d=0.12:alpha=1`);
-    if (T + b.d <= U1 + 1e-6) fades.push(`fade=t=out:st=${n3(Math.max(0, len - 0.12))}:d=0.12:alpha=1`);
+    if (!b.scene && T >= U0 - 1e-6) fades.push(`fade=t=in:st=0:d=0.12:alpha=1`);
+    if (!b.scene && T + b.d <= U1 + 1e-6) fades.push(`fade=t=out:st=${n3(Math.max(0, len - 0.12))}:d=0.12:alpha=1`);
     const overlayFx = compileOverlayFx(b.fx, W, H, fps, frames, `b${bi}`, s - T);
+    const sw = b.scene && even(W * b.scene.w), sh = b.scene && even(H * b.scene.h);
+    const sceneFit = sw && sh ? [`scale=${sw}:${sh}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black@0`, 'setsar=1'] : undefined;
+    const camera = b.scene?.camera && transformFilter(b.scene.camera, W, H, fps, 'black', s - T, true);
     const chain = [
       'setpts=PTS-STARTPTS',
       `fps=${fps}`,
       // Preserve original PNG alpha and transparent letterboxing for effected overlays.
-      ...(b.fx?.length ? ['format=yuva420p'] : []),
-      fitChain(b.fit, W, H, 0.5, 0.5, b.fx?.length ? 'black@0' : tl.settings.bg, `b${bi}`),
+      ...(b.scene || b.fx?.length ? ['format=yuva420p'] : []),
+      ...(sceneFit ?? [fitChain(b.fit, W, H, 0.5, 0.5, b.fx?.length ? 'black@0' : tl.settings.bg, `b${bi}`)]),
       ...(overlayFx ? [overlayFx] : []),
+      ...(camera ? [camera] : []),
       'format=yuva420p',
       'tpad=stop_mode=clone:stop_duration=1',
       `trim=end_frame=${frames}`,
@@ -200,6 +206,7 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const offset = s - layer.at;
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
     const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset);
+    const camera = layer.camera && transformFilter(layer.camera, W, H, fps, 'black', offset, true);
     const chain = [
       `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${n3(len + 0.5)}`,
       'format=rgba',
@@ -207,6 +214,7 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
       `subtitles=filename=${layer.file}${fd}:alpha=1`,
       'setpts=PTS-STARTPTS',
       ...(fx ? [fx] : []),
+      ...(camera ? [camera] : []),
       'format=yuva420p',
       'tpad=stop_mode=clone:stop_duration=1',
       `trim=end_frame=${frames}`,

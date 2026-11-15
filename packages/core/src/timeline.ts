@@ -10,6 +10,7 @@
  */
 import { TmepError } from './errors.ts';
 import { type Effect, shiftFx } from './effects.ts';
+import type { SceneEntry } from './scene.ts';
 
 export type Ratio = '9:16' | '16:9' | '1:1' | '4:5';
 export type Fit = 'cover' | 'contain' | 'blur';
@@ -96,6 +97,8 @@ export interface BRoll {
   fx?: Effect[];
   /** Explicit compositing order. Default 0; higher is in front. */
   z?: number;
+  /** Render-time placement for a compiled Visual Scene media layer. */
+  scene?: { w: number; h: number; camera?: Effect[] };
 }
 
 export interface Sfx {
@@ -135,6 +138,7 @@ export interface Timeline {
   clips: Clip[];
   broll: BRoll[];
   gfx: Gfx[];
+  scenes?: SceneEntry[];
   sfx: Sfx[];
   music?: Music;
   captions: Captions;

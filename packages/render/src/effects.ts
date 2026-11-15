@@ -230,8 +230,10 @@ export function compileOverlayFx(
   const ms = masks(fx);
   if (!opacity && !ms.length) return tf;
 
-  const MW = Math.max(2, Math.round(W / 2));
-  const MH = Math.max(2, Math.round(H / 2));
+  // Opacity without a mask is uniform. Evaluate its time expression on a tiny
+  // plane, then use the same upscaling and source-alpha multiplication as masks.
+  const MW = ms.length ? Math.max(2, Math.round(W / 2)) : 2;
+  const MH = ms.length ? Math.max(2, Math.round(H / 2)) : 2;
   const D = n((frames + fps) / fps);
   const alpha = [...ms.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
     .map((x) => `(${x})`).join('*');

@@ -29,6 +29,7 @@ import {
   srcToTl,
 } from './timeline.ts';
 import { r2 } from './util.ts';
+import { visualSceneSchema, type VisualScene } from './scene.ts';
 import { FX_KINDS, FX_PRESETS, EASES, parseKeys, presetKeys, validateMask, shiftFx, scaleFx, type Effect, type FxMask, type Ease, type RevealFrom } from './effects.ts';
 
 export interface OpContext {
@@ -58,6 +59,7 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   transition: obj({ op: str(), type: oneOf(TRANSITIONS), d: num({ min: 0, max: 2 }).default(0.35), clip: str().optional(), at: anchor.optional(), all: bool().default(false) }),
   broll: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }), in: num({ min: 0 }).default(0), fit: fit.default('cover'), z: num({ int: true, min: -100, max: 100 }).optional() }),
   gfx: obj({ op: str(), preset: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(2.5), props: record(any()).default({}), z: num({ int: true, min: -100, max: 100 }).optional() }),
+  scene: obj({ op: str(), spec: visualSceneSchema }),
   set: obj({ op: str(), id: str(), at: anchor.optional(), d: num({ min: 0.1, max: 600 }).optional(), props: record(any()).optional(), vol: num().optional(), z: num({ int: true, min: -100, max: 100 }).optional() }),
   captions: obj({
     op: str(),
@@ -350,6 +352,11 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'remove': {
       const id = op.id as string;
+      const sceneIndex = tl.scenes?.findIndex((scene) => scene.id === id) ?? -1;
+      if (sceneIndex >= 0) {
+        tl.scenes!.splice(sceneIndex, 1);
+        return `remove ${id}`;
+      }
       for (const key of ['clips', 'gfx', 'sfx', 'broll'] as const) {
         const list = tl[key] as { id: string }[];
         const i = list.findIndex((x) => x.id === id);
@@ -358,7 +365,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
           return `remove ${id}`;
         }
       }
-      throw new TmepError('E_NOT_FOUND', `no clip/gfx/sfx/broll with id ${id}`);
+      throw new TmepError('E_NOT_FOUND', `no clip/gfx/sfx/broll/scene with id ${id}`);
     }
     case 'speed': {
       const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
@@ -471,6 +478,13 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       created.push(id);
       return `gfx ${id} ${op.preset}@${r2(at)}`;
     }
+    case 'scene': {
+      const spec = op.spec as VisualScene;
+      const id = nextId(tl, 'scene');
+      (tl.scenes ??= []).push({ id, spec });
+      created.push(id);
+      return `scene ${id}`;
+    }
     case 'set': {
       const id = op.id as string;
       const item = [...tl.gfx, ...tl.sfx, ...tl.broll].find((x) => x.id === id) as
@@ -567,6 +581,7 @@ export function diffTimelines(a: Timeline, b: Timeline): Record<string, unknown>
   if (capChg.length) out.captions = capChg;
   if (JSON.stringify(a.settings) !== JSON.stringify(b.settings)) out.settings = b.settings;
   if (JSON.stringify(a.music) !== JSON.stringify(b.music)) out.music = b.music ?? null;
+  if (JSON.stringify(a.scenes ?? []) !== JSON.stringify(b.scenes ?? [])) out.scenes = (b.scenes ?? []).map(({ id }) => id);
   return out;
 }
 

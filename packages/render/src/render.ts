@@ -25,6 +25,7 @@ import {
 } from '../../core/src/index.ts';
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
+import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
 import { stageFonts } from '../../motion/src/fonts.ts';
 import { planUnits, unitArgs, outSize, type MediaRef, type EncParams, type Unit } from './graph.ts';
 import { renderAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
@@ -188,25 +189,30 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const fps = tl.settings.fps;
   const placed = layout(tl);
   const frames = totalFrames(tl);
-  const media = await mediaMap(project, tl);
   const words = timelineWords(tl, transcripts, placed);
+  const scenes = tl.scenes?.length ? compileScenes(tl, words, new Map((await project.assets()).map((a) => [a.id, a]))) : undefined;
+  if (scenes?.media.length) tl = { ...tl, broll: [...tl.broll, ...scenes.media] };
+  const media = await mediaMap(project, tl);
   const compiled = compileAss(tl, words, placed);
   const { W, H } = outSize(tl, enc.scale);
   const progress = hooks.onProgress ?? (() => {});
 
   // per-render working dir (ASS + fonts referenced by relative names: avoids filtergraph path escaping on Windows)
   await fsp.writeFile(path.join(work, 'gfx.ass'), compiled.ass);
-  // The separate ASS overlays use stable generated filenames, not user-provided ids.
-  const overlays = compiled.layers.map((g, i) => ({ file: `gfx-fx-${i}.ass`, at: g.at, d: g.d, fx: g.fx, ...(g.z !== undefined ? { z: g.z } : {}) }));
-  await Promise.all(compiled.layers.map((g, i) => fsp.writeFile(path.join(work, overlays[i]!.file), g.ass)));
-  const hasFonts = compiled.fonts.some((f) => f.file);
-  if (hasFonts) stageFonts(compiled.fonts, work);
-  const fontKey = compiled.fonts.map((f) => (f.file ? path.basename(f.file) : f.name)).join('|');
+  // Use generated filenames for independent ASS overlays.
+  const layers: (Omit<SceneGraphic, 'z'> & { z?: number })[] = [...compiled.layers, ...(scenes?.layers ?? [])];
+  const overlays = layers.map(({ ass, id, ...g }, i) => ({ ...g, file: `gfx-fx-${i}.ass` }));
+  await Promise.all(layers.map((g, i) => fsp.writeFile(path.join(work, overlays[i]!.file), g.ass)));
+  const fonts = [...compiled.fonts, ...(scenes?.fonts ?? [])];
+  const hasFonts = fonts.some((f) => f.file);
+  if (hasFonts) stageFonts(fonts, work);
+  const fontKey = fonts.map((f) => (f.file ? path.basename(f.file) : f.name)).join('|');
 
   const baseName = opts.out ? path.basename(opts.out).replace(/\.[^.]+$/, '') : `render-${Date.now().toString(36)}`;
 
   // ---- alpha graphics-only export ----
   if (opts.alpha) {
+    if (scenes) throw new TmepError('E_INPUT', 'Visual Scenes require normal composited export');
     if (compiled.layers.length) {
       throw new TmepError('E_INPUT', 'alpha-only export of effects on graphics is not supported yet', 'render normally, or remove fx from graphics before --alpha');
     }
@@ -242,6 +248,18 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     if (!units.length) throw new TmepError('E_RANGE', `range ${a}-${b} is outside the timeline (0-${r2(frames / fps)})`);
     span = [units[0]!.startFrame / fps, (units[units.length - 1]!.startFrame + units[units.length - 1]!.frames) / fps];
   }
+  if (scenes) {
+    const intervals = [
+      ...scenes.layers.map(({ at, d }) => ({ at, d })),
+      ...scenes.media.map(({ ref, d }) => ({ at: ref.at!, d })),
+    ];
+    for (const unit of units) {
+      const start = unit.startFrame / fps, end = (unit.startFrame + unit.frames) / fps;
+      if (intervals.filter(({ at, d }) => at < end && at + d > start).length > 16) {
+        throw new TmepError('E_INPUT', 'a video render unit supports at most 16 Visual Scene layers', 'reduce layers or place scenes in separate video units');
+      }
+    }
+  }
   const unitDir = project.cachePath('units');
   await fsp.mkdir(unitDir, { recursive: true });
   const unitHash = (u: Unit) =>
@@ -257,10 +275,10 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
         .filter((x) => x.T !== undefined && x.T < (u.startFrame + u.frames) / fps && x.T + x.b.d > u.startFrame / fps)
         .map((x) => ({ ...x, T: r2(x.T! - u.startFrame / fps, 4) })),
       ass: sha256(assWindow(compiled.ass, u.startFrame / fps, (u.startFrame + u.frames) / fps)),
-      ...(compiled.layers.length ? {
-        gfxFx: compiled.layers
+      ...(layers.length ? {
+        gfxFx: layers
           .filter((g) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps)
-          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx, z: g.z ?? 10 })),
+          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx, z: g.z ?? 10, ...(g.camera && { camera: g.camera }) })),
       } : {}),
       fonts: fontKey,
     });
