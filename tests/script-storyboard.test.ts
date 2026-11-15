@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -22,7 +22,7 @@ test('educational script creates ordered animated scenes with cumulative frame t
   assert.equal(first.template, 'process');
   assert.ok(plan.storyboard.scenes.slice(1).every((scene) => scene.template === 'explanation'));
   assert.deepEqual(first.steps,
-    ['sort the records', 'group matching keys', 'count each group']);
+    ['Sort the records', 'Group matching keys', 'Count each group']);
   const compiled = compileStoryboard(plan.storyboard);
   let expected = 0;
   for (const { frames, spec } of compiled.scenes) {
@@ -95,12 +95,84 @@ test('explicit comparisons retain both claims and animate them in the same scene
   const planned = api.planScript(script);
   assert.deepEqual(planned.storyboard.scenes, [{
     frames: 132, transition: 'cut', template: 'comparison',
-    first: 'A paper map works offline', second: 'a live map updates traffic',
+    first: 'A paper map works offline', second: 'A live map updates traffic',
   }]);
   const [scene] = compileStoryboard(planned.storyboard).scenes;
   const claims = scene!.spec.layers.filter((layer) => layer.kind === 'text');
   assert.deepEqual(claims.map(({ text }) => text.replaceAll('\n', ' ')),
-    ['A paper map works offline', 'a live map updates traffic']);
+    ['A paper map works offline', 'A live map updates traffic']);
   assert.ok(claims[1]!.start > claims[0]!.start);
   assert.ok(claims.every(({ keys }) => keys?.length === 2));
+});
+
+const lessonFixture = 'examples/creator-quality/solar-lesson.txt';
+
+test('planner labels keep whole phrases and never repeat a process step as its title', async () => {
+  const script = await readFile(lessonFixture, 'utf8');
+  const [process, explanation, comparison] = api.planScript(script).storyboard.scenes;
+  // A question line before a step run titles the process instead of becoming a fragment scene.
+  assert.deepEqual(process, {
+    frames: 324, transition: 'cut', template: 'process', title: 'How does a solar panel make electricity?',
+    steps: ['Sunlight strikes silicon cells', 'The light knocks electrons loose', 'Wires carry that current'],
+    cues: [84, 156, 228],
+  });
+  // Explanations split at a clause boundary, not after the third word.
+  assert.deepEqual(explanation, { frames: 144, transition: 'fade', template: 'explanation',
+    title: 'An inverter converts direct current', point: 'Into alternating current your outlets use' });
+  assert.deepEqual(comparison, { frames: 180, transition: 'fade', template: 'comparison',
+    first: 'Direct current flows in one steady direction', second: 'Alternating current reverses many times' });
+  const labels = api.planScript(script).storyboard.scenes.flatMap((scene) => Object.values(scene).filter((v) => typeof v === 'string' || Array.isArray(v)).flat());
+  assert.ok(labels.every((value) => typeof value !== 'string' || !/(?:…|\b(?:a|an|the|of|to|into|your)\s*)$/iu.test(value)));
+  // Without a heading the title names the run rather than duplicating step one.
+  const plain = api.planScript('First, sort the records. Next, group matching keys. Finally, count each group.');
+  assert.equal(plain.storyboard.scenes[0]!.template === 'process' && plain.storyboard.scenes[0]!.title, '3 steps');
+  // A clause that cannot be shortened at a boundary still falls back to a marked word cut.
+  const long = api.planScript('Engineers measure the extraordinarily complicated interconnected thermodynamic behaviour carefully, whereas students guess quickly.');
+  const first = long.storyboard.scenes[0]!.template === 'comparison' ? long.storyboard.scenes[0]!.first : '';
+  assert.ok(first.endsWith('…') && first.length <= 44, first);
+});
+
+test('process steps enter on narration cues and the connector follows them', () => {
+  const base = { v: 1 as const, script: 'Steps.', scenes: [{ template: 'process' as const, title: 'Flow', steps: ['Input', 'Check', 'Output'], frames: 300 }] };
+  const starts = (board: unknown) => {
+    const layers = compileStoryboard(board).scenes[0]!.spec.layers;
+    return { steps: layers.filter((l) => l.id.startsWith('step')).map((l) => l.start),
+      draw: (layers.find((l) => l.id === 'connector') as { draw: { t: number; to: number }[] }).draw };
+  };
+  // Legacy storyboards without cues spread the steps across the scene instead of the first 1.2 s.
+  assert.deepEqual(starts(base).steps, [.4, 100 / 30, 200 / 30]);
+  const cued = starts({ ...base, scenes: [{ ...base.scenes[0]!, cues: [60, 90, 240] }] });
+  assert.deepEqual(cued.steps, [2, 3, 8]);
+  for (let n = 1; n < cued.draw.length; n++) {
+    assert.ok(cued.draw[n]!.t > cued.draw[n - 1]!.t && cued.draw[n]!.to >= cued.draw[n - 1]!.to);
+  }
+  assert.ok(cued.draw.some(({ t, to }) => t === 8 && to < .6), 'connector holds until the last step enters');
+  assert.ok(cued.steps.every((t) => Number.isInteger(Math.round(t * 30 * 1e6) / 1e6)), 'starts sit on the 30 fps grid');
+  // Very short scenes still keep every entrance inside the scene.
+  const tiny = starts({ ...base, scenes: [{ ...base.scenes[0]!, frames: 12, cues: [0, 5, 11] }] });
+  assert.ok(tiny.steps.every((t) => t < 12 / 30) && tiny.draw.every(({ t }) => t < 12 / 30));
+  for (const cues of [[0, 90], [90, 60, 120], [0, 60, 300]]) {
+    assert.throws(() => compileStoryboard({ ...base, scenes: [{ ...base.scenes[0]!, cues }] }), /cues/);
+  }
+});
+
+test('longest planner labels fit their boxes without clipping or collisions', { timeout: 60_000 }, async (t) => {
+  const project = await mkdtemp(path.join(os.tmpdir(), 'tmep-labels-'));
+  t.after(() => rm(project, { recursive: true, force: true, maxRetries: 5 }));
+  const ctx = { project, detail: 'standard' } as const;
+  // Wide-glyph labels at each planner limit: title 40, step 32, point 44, claim 44 characters.
+  const title = 'Why does warm moist air make wet storms?';
+  const step = 'Workers move heavy metal frames!';
+  const claim = 'Moving water makes power when meeting mills!';
+  const board = { v: 1, script: 'Fit check.', scenes: [
+    { template: 'process', title, steps: [step, step, step], frames: 90 },
+    { template: 'explanation', title, point: 'Mammals migrate when warm weather wanes now!', frames: 60, transition: 'fade' },
+    { template: 'comparison', first: claim, second: claim, frames: 60, transition: 'fade' },
+  ] };
+  assert.deepEqual([title.length, step.length, claim.length], [40, 32, 44]);
+  const { rev } = await api.storyboard(ctx, board);
+  const report = await api.inspect(ctx, { what: 'scenes', rev });
+  assert.deepEqual(report.issues, []);
+  const solar = await api.storyboard(ctx, api.planScript(await readFile(lessonFixture, 'utf8')).storyboard);
+  assert.deepEqual((await api.inspect(ctx, { what: 'scenes', rev: solar.rev })).issues, []);
 });
