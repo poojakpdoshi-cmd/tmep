@@ -90,3 +90,17 @@ test('CLI exports editable JSON and renders a new revision without replacing an 
     'Approved title');
   assert.deepEqual(await p.revision(original.rev), original);
 });
+test('explicit comparisons retain both claims and animate them in the same scene', () => {
+  const script = 'A paper map works offline, while a live map updates traffic.';
+  const planned = api.planScript(script);
+  assert.deepEqual(planned.storyboard.scenes, [{
+    frames: 132, transition: 'cut', template: 'comparison',
+    first: 'A paper map works offline', second: 'a live map updates traffic',
+  }]);
+  const [scene] = compileStoryboard(planned.storyboard).scenes;
+  const claims = scene!.spec.layers.filter((layer) => layer.kind === 'text');
+  assert.deepEqual(claims.map(({ text }) => text.replaceAll('\n', ' ')),
+    ['A paper map works offline', 'a live map updates traffic']);
+  assert.ok(claims[1]!.start > claims[0]!.start);
+  assert.ok(claims.every(({ keys }) => keys?.length === 2));
+});
