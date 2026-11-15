@@ -19,7 +19,9 @@ test('storyboard compiles ordered frame timing and validates the strict plan', (
   const { scenes, frames } = compileStoryboard(board);
   assert.equal(frames, 42);
   assert.deepEqual(scenes.map(({ spec }) => [spec.at, spec.duration]), [[0, 19 / 30], [19 / 30, 23 / 30]]);
-  assert.ok(scenes[0]!.spec.layers.some((layer) => layer.kind === 'path' && layer.draw?.length === 2));
+  // The connector draws down step by step, reaching the second step centre (half the path).
+  assert.ok(scenes[0]!.spec.layers.some((layer) => layer.kind === 'path' && (layer.draw?.length ?? 0) > 2
+    && Math.abs(layer.draw!.at(-1)!.to! - .5) < .01));
   assert.ok(scenes[1]!.spec.layers.some((layer) => layer.kind === 'text' && layer.keys?.length === 2));
   assert.throws(() => compileStoryboard({ ...board, typo: true }), /typo/);
   assert.throws(() => compileStoryboard({ ...board, script: '  ' }), /script/);
