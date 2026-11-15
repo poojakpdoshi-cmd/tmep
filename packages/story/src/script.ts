@@ -53,7 +53,7 @@ export function planScript(script: unknown, options: unknown = {}) {
 
   const scenes: Scene[] = [];
   const warnings = ['Timing is estimated from speaking pace, without speech alignment.',
-    'Visuals use stock process and explanation templates. Review the storyboard if the script needs bespoke diagrams or illustrations.'];
+    'Visuals use stock process, explanation, and comparison templates. Review the storyboard if the script needs bespoke diagrams or illustrations.'];
   let estimatedWords = 0;
   let elapsedFrames = 0;
   for (let i = 0; i < parts.length;) {
@@ -84,11 +84,17 @@ export function planScript(script: unknown, options: unknown = {}) {
         steps: bodies.map((body) => label(body, 20, markShortened)) });
     } else {
       const body = bodies[0]!;
-      const tokens = [...wordSplitter.segment(body)].filter(({ isWordLike }) => isWordLike);
-      const pivot = tokens.length > 2 ? tokens[Math.min(3, Math.floor(tokens.length / 2))]!.index : 0;
-      const title = label(pivot ? body.slice(0, pivot) : body, 24, markShortened);
-      const point = label(pivot ? body.slice(pivot) : body, 24, markShortened);
-      scenes.push({ ...fields, template: 'explanation', title, point });
+      const sides = body.split(/,\s+while\s+|,?\s+whereas\s+/iu);
+      if (sides.length === 2 && sides.every((side) => words(side).length >= 3)) {
+        scenes.push({ ...fields, template: 'comparison',
+          first: label(sides[0]!, 32, markShortened), second: label(sides[1]!, 32, markShortened) });
+      } else {
+        const tokens = [...wordSplitter.segment(body)].filter(({ isWordLike }) => isWordLike);
+        const pivot = tokens.length > 2 ? tokens[Math.min(3, Math.floor(tokens.length / 2))]!.index : 0;
+        const title = label(pivot ? body.slice(0, pivot) : body, 24, markShortened);
+        const point = label(pivot ? body.slice(pivot) : body, 24, markShortened);
+        scenes.push({ ...fields, template: 'explanation', title, point });
+      }
     }
     if (shortened) warnings.push(`Scene ${scenes.length}: on-screen labels are excerpts. The script is preserved.`);
   }

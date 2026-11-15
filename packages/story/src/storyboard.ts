@@ -13,6 +13,7 @@ export const storyboardSchema = obj({
   scenes: arr(union([
     obj({ ...timing, template: oneOf(['process'] as const), title: label, steps: arr(label, { min: 2, max: 3 }) }),
     obj({ ...timing, template: oneOf(['explanation'] as const), title: label, point: label }),
+    obj({ ...timing, template: oneOf(['comparison'] as const), first: label, second: label }),
     obj({ ...timing, template: oneOf(['custom'] as const), visual: visualSceneContent }),
   ]), { min: 1, max: 16 }),
 });
@@ -31,7 +32,28 @@ export function compileStoryboard(input: unknown) {
     const enter = () => [{ t: 0, y: -.02, o: 0 }, { t: beat, y: 0, o: 1, e: 'out' }];
     const text = (id: string, value: string, y: number, start = 0) =>
       ({ id, kind: 'text', text: value, style: 'type', y, w: .85, h: .095, start, keys: enter() });
-    const visual = scene.template === 'custom' ? scene.visual : {
+    const visual = scene.template === 'custom' ? scene.visual : scene.template === 'comparison' ? {
+      styles: [
+        { id: 'type', size: 52, font: 'bold', color: '#F2F6FF' },
+        { id: 'upper', color: '#214B4B' }, { id: 'lower', color: '#293C69' },
+      ],
+      layers: [scene.first, scene.second].flatMap((value, n) => {
+        const y = .38 + n * .22;
+        const start = n * beat;
+        const pieces = value.split(/\s+/u);
+        const lines = pieces.reduce<string[]>((rows, word) => {
+          const last = rows.at(-1);
+          if (last && last.length + 1 + word.length <= 19) rows[rows.length - 1] += ' ' + word;
+          else rows.push(word);
+          return rows;
+        }, []);
+        return [
+          { id: `card${n}`, kind: 'rect', style: n ? 'lower' : 'upper', y, w: .85, h: .18,
+            start, overlap: true, keys: enter() },
+          { ...text(`claim${n}`, lines.join('\n'), y, start), h: .14 },
+        ];
+      }),
+    } : {
       styles: [{ id: 'type', size: 36, font: 'bold', color: '#F2F6FF' }, { id: 'accent', color: '#70DAC4' }],
       layers: scene.template === 'process' ? [
         text('title', scene.title, .18),
