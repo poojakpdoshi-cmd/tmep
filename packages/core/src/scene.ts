@@ -15,6 +15,9 @@ const layerKey = obj({ t: seconds, ...motion, o: num({ min: 0, max: 1 }).optiona
 const text = str({ min: 1, max: 240, pattern: /^[^\x00-\x09\x0b-\x1f\x7f]+$/ });
 const fraction = num({ min: 0, max: 1 });
 const inset = num({ min: 0, max: .49 });
+// SVG path data: a moveto, then commands and numbers only. Skia parses and checks the grammar.
+const pathData = str({ min: 2, max: 4000, pattern: /^\s*[Mm][MmZzLlHhVvCcSsQqTtAa0-9eE.,+\-\s]*$/ });
+const drawKey = obj({ t: seconds, from: fraction.optional(), to: fraction.optional(), e: easing });
 const layer = {
   id, group: id.optional(), style: id.optional(), start: seconds.default(0), end: seconds.optional(),
   x: offset.default(.5), y: offset.default(.5),
@@ -46,6 +49,12 @@ export const visualSceneSchema = obj({
     obj({ ...layer, kind: oneOf(['polygon'] as const),
       points: arr(obj({ x: fraction, y: fraction }), { min: 3, max: 24 }) }),
     obj({ ...layer, kind: oneOf(['image', 'video'] as const), asset: id, in: seconds.default(0) }),
+    // Vector path for the deterministic frame rasterizer. `draw` trims the stroke along its length.
+    obj({ ...layer, kind: oneOf(['path'] as const), d: pathData,
+      view: obj({ w: num({ min: .001, max: 10000 }), h: num({ min: .001, max: 10000 }) }).optional(),
+      stroke: num({ min: 0, max: 64 }).default(6), fill: color.optional(), glow: num({ min: 0, max: 64 }).default(0),
+      cap: oneOf(['round', 'butt', 'square'] as const).default('round'),
+      draw: arr(drawKey, { min: 1, max: 12 }).optional() }),
   ]), { min: 1, max: 16 }),
 });
 

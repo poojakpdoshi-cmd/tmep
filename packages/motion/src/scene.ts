@@ -7,9 +7,10 @@ import { AssDoc, escapeText, tagColor } from './ass.ts';
 import { captionLayout, paginate } from './captions.ts';
 import { resolveFont, type ResolvedFont } from './fonts.ts';
 import { poly, rect, signedArea } from './icons.ts';
+import { pathBounds, type DrawKey, type VectorLayer, type VectorRun } from './vector.ts';
 
 export interface SceneGraphic { id: string; at: number; d: number; ass: string; fx: Effect[]; z: number; camera?: Effect[] }
-export interface CompiledScenes { layers: SceneGraphic[]; media: BRoll[]; fonts: ResolvedFont[] }
+export interface CompiledScenes { layers: SceneGraphic[]; media: BRoll[]; fonts: ResolvedFont[]; vectors: VectorRun[] }
 export type SceneAssets = ReadonlyMap<string, { kind: string; dur: number }>;
 export interface SceneDiagnostic {
   code: 'invalid' | 'clipping' | 'safe-area' | 'collision' | 'caption' | 'discontinuity';
@@ -46,6 +47,19 @@ function keysFor(input: Key[] | undefined, span: number, name: string, onJump: (
     }
   }
   return keys;
+}
+
+function drawKeysFor(draw: DrawKey[], span: number, name: string, onJump: (t: number, msg: string) => void): void {
+  draw.forEach((key, i) => {
+    if (key.from === undefined && key.to === undefined) bad(`${name}: draw key at t=${key.t} sets neither from nor to`);
+    if (key.t >= span || (i > 0 && key.t - draw[i - 1]!.t < 1e-3)) bad(`${name}: draw keys must be ordered and inside the active interval`);
+  });
+  for (const prop of ['from', 'to'] as const) {
+    const track = draw.filter((key) => key[prop] !== undefined);
+    for (let i = 1; i < track.length; i++) {
+      if (track[i]!.e === 'hold' && track[i]![prop] !== track[i - 1]![prop]) onJump(track[i]!.t, `${name}: draw ${prop} jumps at a hold key`);
+    }
+  }
 }
 
 export function sceneRange(tl: Timeline, words: TlWord[], spec: VisualScene, onStart?: (time: number) => void): [number, number] {
@@ -146,7 +160,7 @@ function textFits(text: string, font: ResolvedFont, size: number, w: number, h: 
 
 /** Compile agent scene specs to existing ASS layer and media overlay inputs. Throws before queueing edits on invalid scenes. */
 export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets, onIssue?: (issue: SceneDiagnostic) => void): CompiledScenes {
-  const out: CompiledScenes = { layers: [], media: [], fonts: [] };
+  const out: CompiledScenes = { layers: [], media: [], fonts: [], vectors: [] };
   if (!tl.scenes?.length) return out;
   if (tl.scenes.length > 16) {
     const msg = 'a timeline supports at most 16 visual scenes';
@@ -208,6 +222,8 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           (cap.y - captionHalf < safe.top * h || cap.y + captionHalf > (1 - safe.bottom) * h)) {
         report('caption', [], Math.max(start, firstCaption.s), `${entry.id}: captions outside vertical safe area`);
       }
+      // Path layers in scene frames, by layer index; consecutive ones share one raster overlay.
+      const paths = new Map<number, { layer: VectorLayer; id: string; z: number }>();
       const layers = spec.layers.flatMap((layer, layerIndex) => {
         let layerStart = start + layer.start;
         try {
@@ -244,6 +260,17 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
             if (layer.kind === 'video' && layer.in + d > asset!.dur + .001) bad(`${name}: overlay exceeds source duration`);
             out.media.push({ id, src: layer.asset, in: layer.in, ref: { at }, d, fit: 'contain', fx: effects, z,
               scene: { w: layer.w, h: layer.h, ...(cameraFx && { camera: cameraFx }) } });
+          } else if (layer.kind === 'path') {
+            const view: [number, number] = [layer.view?.w ?? 100, layer.view?.h ?? 100];
+            const [l, t, r, b] = pathBounds(layer.d);
+            const tol = 1e-6 * Math.max(...view);
+            if (l < -tol || t < -tol || r > view[0] + tol || b > view[1] + tol) {
+              report('clipping', [layer.id], at, `${name}: path leaves its view box`);
+            }
+            if (layer.draw) drawKeysFor(layer.draw, d, name, (kt, msg) => report('discontinuity', [layer.id], at + kt, msg));
+            paths.set(layerIndex, { id, z, layer: { id: layer.id, from, to, keys: fx, draw: layer.draw ?? [], d: layer.d, view,
+              box: [width, height], stroke: layer.stroke, glow: layer.glow, color: style?.color ?? '#FFFFFF',
+              ...(layer.fill && { fill: layer.fill }), cap: layer.cap } });
           } else {
             const doc = new AssDoc(w, h);
             const font = layer.kind === 'text' ? resolveFont(style?.font ?? 'regular') : { name: 'Arial' };
@@ -272,6 +299,22 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           return [];
         }
       });
+      // One raster overlay per run of consecutive path layers keeps draw order and z between other layers.
+      let run: { id: string; z: number; members: VectorLayer[] } | undefined;
+      const flush = () => {
+        if (!run) return;
+        const lo = Math.min(...run.members.map((m) => m.from)), hi = Math.max(...run.members.map((m) => m.to));
+        out.vectors.push({ id: run.id, at: (first + lo) / fps, d: (hi - lo) / fps, frames: hi - lo, z: run.z, w, h, fps,
+          camera, sceneFrame: lo, layers: run.members.map((m) => ({ ...m, from: m.from - lo, to: m.to - lo })) });
+        run = undefined;
+      };
+      for (let i = 0; i < spec.layers.length; i++) {
+        const p = paths.get(i);
+        if (!p) { flush(); continue; }
+        run ??= { id: p.id, z: p.z, members: [] };
+        run.members.push(p.layer);
+      }
+      flush();
       validateFrames(layers, camera, frames, fps, w, h, safeBox, captionBand, pages, first, report);
     } catch (e) {
       if (!onIssue || !(e instanceof TmepError)) throw e;

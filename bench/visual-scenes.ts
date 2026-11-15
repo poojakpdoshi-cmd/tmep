@@ -5,14 +5,16 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import * as api from '../packages/engine/src/api.ts';
 
-const [mode, root, countArg, variant = 'animated'] = process.argv.slice(2);
+const [mode, root, countArg, variant = 'animated', kind = 'rect'] = process.argv.slice(2);
 assert.ok(root && countArg);
 const count = Number(countArg);
 assert.ok([0, 1, 8, 16].includes(count));
 assert.ok(['static', 'translate', 'opacity', 'animated'].includes(variant));
+assert.ok(['rect', 'path'].includes(kind));
 const translation = variant === 'translate' || variant === 'animated';
 const opacity = variant === 'opacity' || variant === 'animated';
-const project = path.resolve(root, `${variant}-${count}`);
+// `path` draws the same tiles as filled Visual Scene path layers (one shared raster overlay).
+const project = path.resolve(root, `${variant}-${count}${kind === 'path' ? '-path' : ''}`);
 const ctx = { project, detail: 'debug' } as const;
 const run = (command: string, args: string[]) => execFileSync(command, args, { windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
 const ff = (args: string[]) => run('ffmpeg', ['-nostdin', '-v', 'error', ...args]);
@@ -26,8 +28,11 @@ if (mode === 'setup') {
   });
   await api.importMedia(ctx, { paths });
   const layers = Array.from({ length: count }, (_, i) => ({
-    id: `tile${i}`, kind: 'rect', x: .15 + .23 * (i % 4), y: .16 + .21 * Math.floor(i / 4),
+    id: `tile${i}`, x: .15 + .23 * (i % 4), y: .16 + .21 * Math.floor(i / 4),
     w: .14, h: .12, style: 'red',
+    ...(kind === 'path'
+      ? { kind: 'path', view: { w: 151.2, h: 230.4 }, d: 'M0 0 H151.2 V230.4 H0 Z', stroke: 0, fill: '#F03838' }
+      : { kind: 'rect' }),
     ...((translation || opacity) && { keys: [
       { t: 0, ...(translation && { x: 0 }), ...(opacity && { o: 1 }) },
       { t: 1.6, ...(translation && { x: .02 }), ...(opacity && { o: .75 }), e: 'io' },
@@ -50,7 +55,7 @@ if (mode === 'setup') {
   assert.deepEqual(detail.span, [0, 4]);
   assert.equal(detail.units, 2);
   assert.equal(detail.unitsCached, mode === 'cold' ? 0 : 2, 'use a fresh benchmark directory');
-  console.log(JSON.stringify({ variant, count, mode, wallMs: Math.round(performance.now() - start),
+  console.log(JSON.stringify({ variant, kind, count, mode, wallMs: Math.round(performance.now() - start),
     renderMs: detail.ms, units: detail.units, cached: detail.unitsCached }));
 } else if (mode === 'verify') {
   function verify(file: string) {
@@ -86,8 +91,8 @@ if (mode === 'setup') {
   const frameHash = (file: string) => ff(['-i', path.join(project, file), '-map', '0:v:0', '-f', 'framemd5', '-']);
   const decoded = frameHash('cold.mp4');
   assert.deepEqual(decoded, frameHash('cached.mp4'));
-  console.log(JSON.stringify({ variant, count, frames: 120, boundaryFrame: 60, sampledPixelsMatch: true,
+  console.log(JSON.stringify({ variant, kind, count, frames: 120, boundaryFrame: 60, sampledPixelsMatch: true,
     videoHash: createHash('sha256').update(decoded).digest('hex') }));
 } else {
-  throw new Error('usage: node bench/visual-scenes.ts setup|cold|cached|verify <scratch-dir> <0|1|8|16> [animated|static|translate|opacity]');
+  throw new Error('usage: node bench/visual-scenes.ts setup|cold|cached|verify <scratch-dir> <0|1|8|16> [animated|static|translate|opacity] [rect|path]');
 }
