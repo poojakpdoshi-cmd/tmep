@@ -5,9 +5,9 @@
  */
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { openSync, mkdirSync } from 'node:fs';
+import { openSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { asTmepError, VERSION, type Detail } from '../../core/src/index.ts';
+import { asTmepError, TmepError, VERSION, type Detail } from '../../core/src/index.ts';
 import * as api from '../../engine/src/api.ts';
 import { renderTimeline } from '../../render/src/render.ts';
 import { serveStdio } from '../../mcp/src/server.ts';
@@ -55,6 +55,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   reference <asset> [--threshold 0.3] [--sampleFps 15] [--maxSeconds 120]  analyze reference cuts
   transcribe <asset> [--engine auto|whisper.cpp|faster-whisper|import] [--lang auto|en|hi|hinglish] [--model base] [--file subs.srt] [--force]
   plan [--reference v2] [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
+  storyboard <plan.json> [--out file.mp4] [--preview] [--compile-only]
   edit <op> [<op>...]                ops as strings, e.g. "cut 3.2 4.0" "zoom @phrase to=1.2" "fx panleft c2"  (or --json '[...]')
   undo [n] | redo [n] | checkout <rev>
   inspect [project|assets|timeline|transcript|silence|diff|log|jobs|scenes] [--asset v1] [--from s] [--to s] [--find q] [--words]
@@ -62,7 +63,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   render [--preview] [--range a,b] [--quality draft|standard|high] [--out file.mp4] [--alpha] [--frames n] [--detach]
   status <job> [--cancel] [--wait s] | jobs
   render --scene id [--range localStart,localEnd]
-  help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene]
+  help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene|storyboard]
   doctor                             check ffmpeg, filters, speech engines
   mcp                                start the MCP server on stdio`;
 
@@ -132,6 +133,19 @@ export async function main(argv: string[]): Promise<number> {
           pretty,
         );
         return 0;
+      case 'storyboard': {
+        if (args._.length !== 1) throw new TmepError('E_INPUT', 'storyboard needs one JSON file');
+        if (args.out !== undefined && (typeof args.out !== 'string' || !/\.mp4$/i.test(args.out))) throw new TmepError('E_INPUT', '--out must be an MP4 path');
+        const source = readFileSync(path.resolve(args._[0]!), 'utf8');
+        let input: unknown;
+        try { input = JSON.parse(source.replace(/^\uFEFF/, '')); }
+        catch { throw new TmepError('E_INPUT', 'storyboard file must contain valid JSON'); }
+        const project = await api.storyboard(ctx, input);
+        if (args['compile-only']) { print(project, pretty); return 0; }
+        const result = await api.render(ctx, { rev: project.rev, out: args.out as string | undefined, preview: !!args.preview, parallel: 1, wait: 1e9 });
+        print({ ...result, rev: project.rev }, pretty);
+        return result.state === 'done' ? 0 : 1;
+      }
       case 'edit': {
         const ops = args.json ? (JSON.parse(String(args.json)) as unknown[]) : args._;
         print(await api.edit(ctx, { ops, note: args.note as string }), pretty);

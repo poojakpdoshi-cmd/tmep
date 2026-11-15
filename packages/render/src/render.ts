@@ -263,8 +263,13 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       ...scenes.vectors.map(({ at, d }) => ({ at, d })),
     ];
     for (const unit of units) {
-      const start = unit.startFrame / fps, end = (unit.startFrame + unit.frames) / fps;
-      if (intervals.filter(({ at, d }) => at < end && at + d > start).length > 16) {
+      // Compiled scene geometry already lies on the frame grid. Compare integer
+      // boundaries so adjacent storyboard scenes cannot count as overlapping.
+      const end = unit.startFrame + unit.frames;
+      if (intervals.filter(({ at, d }) => {
+        const first = Math.round(at * fps);
+        return first < end && first + Math.round(d * fps) > unit.startFrame;
+      }).length > 16) {
         throw new TmepError('E_INPUT', 'a video render unit supports at most 16 Visual Scene layers', 'reduce layers or place scenes in separate video units');
       }
     }

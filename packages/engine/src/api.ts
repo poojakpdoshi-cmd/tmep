@@ -4,6 +4,8 @@
  * results to the project, and returns a compact, detail-shaped object.
  */
 import path from 'node:path';
+import { retryTransient } from '../../core/src/util.ts';
+import { randomUUID } from 'node:crypto';
 import { promises as fsp, statSync } from 'node:fs';
 import {
   Project,
@@ -15,6 +17,7 @@ import {
   shape,
   mediaHash,
   hashOf,
+  sha256,
   readJsonOr,
   writeJson,
   exists,
@@ -43,6 +46,7 @@ import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, t
 import { transcribeWhisperCpp, transcribeFasterWhisper, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
+import { compileStoryboard, storyboardSchema, STORYBOARD_FPS } from '../../story/src/storyboard.ts';
 import { TEMPLATES } from '../../story/src/templates.ts';
 import { PRESET_NAMES, presetCatalog } from '../../motion/src/presets.ts';
 import { compileScenes, diagnoseScenes, sceneRange } from '../../motion/src/scene.ts';
@@ -223,6 +227,63 @@ export async function plan(ctx: Ctx, inp: { reference?: string; src?: string | s
   );
 }
 
+/** Compile one storyboard into one editable project revision. */
+export async function storyboard(ctx: Ctx, input: unknown) {
+  const plan = compileStoryboard(input);
+  const p = await openProject(ctx.project);
+  const assets = new Map((await p.assets()).map((asset) => [asset.id, asset]));
+  const narration = plan.narration ? await p.asset(plan.narration) : undefined;
+  if (narration && (narration.kind !== 'audio' || !narration.audio || !Number.isFinite(narration.dur) || narration.dur <= 0)) {
+    throw new TmepError('E_INPUT', 'narration must be an imported audio asset');
+  }
+  const audioFrames = Math.min(plan.frames, Math.floor((narration?.dur ?? 0) * STORYBOARD_FPS + 1e-8));
+  const base = emptyTimeline('9:16', STORYBOARD_FPS);
+  base.captions.style = 'none';
+  base.loudness = 0;
+  base.meta.storyboard = { v: 1, script: plan.script };
+
+  const placeholder = 'storyboardBackdrop';
+  const ops: unknown[] = [];
+  let frame = 0;
+  for (const scene of plan.scenes) {
+    const end = frame + scene.frames;
+    const audioEnd = Math.min(end, audioFrames);
+    if (narration && audioEnd > frame) {
+      ops.push({ op: 'add', src: narration.id, in: frame / STORYBOARD_FPS, out: audioEnd / STORYBOARD_FPS });
+    }
+    const remaining = end - Math.max(frame, audioEnd);
+    if (remaining > 0) ops.push({ op: 'add', src: placeholder, out: remaining / STORYBOARD_FPS });
+    ops.push({ op: 'scene', spec: scene.spec });
+    frame = end;
+  }
+  const { tl } = applyOps(base, ops, {
+    assets: { ...Object.fromEntries(assets), [placeholder]: { kind: 'image', dur: 0 } },
+    transcripts: {}, presets: PRESET_NAMES, sfxKinds: SFX_KINDS,
+  });
+  compileScenes(tl, [], assets);
+  if (audioFrames < plan.frames) {
+    // The regular image clip path loops this tiny, project-owned black source.
+    const image = Buffer.concat([Buffer.from('P6\n2 2\n255\n'), Buffer.alloc(12)]);
+    const hash = sha256(image);
+    const file = path.join(p.dir, 'storyboard-black.ppm');
+    const tmp = `${file}.${randomUUID()}.tmp`;
+    if (!(await exists(file))) {
+      try {
+        await fsp.writeFile(tmp, image);
+        await retryTransient(() => fsp.rename(tmp, file), 16);
+      } finally {
+        await fsp.rm(tmp, { force: true });
+      }
+    }
+    const { asset } = await p.addAsset({ kind: 'image', path: file, name: path.basename(file), hash,
+      dur: 0, w: 2, h: 2, audio: false, size: image.length });
+    for (const clip of tl.clips) if (clip.src === placeholder) clip.src = asset.id;
+    for (const op of ops as { src?: string }[]) if (op.src === placeholder) op.src = asset.id;
+  }
+  const rev = await p.commit(tl, ops, 'compile storyboard');
+  return { ok: 1, rev, frames: plan.frames, dur: plan.frames / STORYBOARD_FPS, scenes: plan.scenes.length };
+}
+
 // ---------------------------------------------------------------- edit
 async function opContext(p: Project, tl: Timeline) {
   const assets: Record<string, { dur: number; kind: string }> = {};
@@ -394,12 +455,12 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
 }
 
 // ---------------------------------------------------------------- render
-export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { range?: (number | string)[]; wait?: number; frames?: number; scene?: string }): Promise<Record<string, unknown>> {
+export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { range?: (number | string)[]; wait?: number; frames?: number; scene?: string; rev?: number }): Promise<Record<string, unknown>> {
   if (inp.quality && !['draft', 'standard', 'high'].includes(inp.quality)) throw new TmepError('E_INPUT', 'quality must be draft|standard|high');
   if (inp.range && inp.range.length !== 2) throw new TmepError('E_INPUT', 'range needs [start, end]');
   const p = await openProject(ctx.project, inp.scene === undefined);
-  const m = await p.manifest();
-  const tl = await p.timeline();
+  const rev = inp.rev ?? (await p.manifest()).head;
+  const tl = await p.timeline(rev);
   const transcripts = await transcriptsFor(p, tl.clips.map((c) => c.src));
   let range: [number, number] | undefined;
   if (inp.scene !== undefined) {
@@ -421,8 +482,8 @@ export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { ran
   }
   const preview = inp.scene !== undefined ? true : inp.preview;
   const opts: RenderOptions = { preview, range, quality: inp.quality, out: inp.out ? path.resolve(ctx.project, inp.out) : undefined, alpha: inp.alpha, parallel: inp.parallel, encoder: inp.encoder };
-  if (!opts.out && !opts.alpha) opts.out = p.rendersPath(`r${m.head}${preview ? '-preview' : ''}${range ? `-${range.map((x) => r2(x, inp.scene !== undefined ? 3 : 1)).join('-')}` : ''}.mp4`);
-  const job = await startJob(p, 'render', m.head, { ...opts }, async (signal, progress) => {
+  if (!opts.out && !opts.alpha) opts.out = p.rendersPath(`r${rev}${preview ? '-preview' : ''}${range ? `-${range.map((x) => r2(x, inp.scene !== undefined ? 3 : 1)).join('-')}` : ''}.mp4`);
+  const job = await startJob(p, 'render', rev, { ...opts }, async (signal, progress) => {
     const res = await renderTimeline(p, tl, transcripts, opts, { signal, onProgress: progress });
     const out: Record<string, unknown> = { ...res, out: path.relative(ctx.project, res.out) || res.out };
     if (inp.frames && !opts.alpha) {
@@ -447,6 +508,8 @@ export async function status(ctx: Ctx, inp: { job: string; cancel?: boolean; wai
 // ---------------------------------------------------------------- help (on-demand docs keep tool schemas tiny)
 export function help(topic = 'workflow'): Record<string, unknown> {
   switch (topic) {
+    case 'storyboard':
+      return { schema: storyboardSchema.json, doc: 'docs/STORYBOARD.md' };
     case 'scene':
       return { op: { op: 'scene', spec: visualSceneSchema.json }, doc: 'docs/VISUAL_SCENE.md' };
     case 'workflow':
@@ -473,7 +536,7 @@ export function help(topic = 'workflow'): Record<string, unknown> {
     case 'captions':
       return { styles: 'kinetic|karaoke|clean|boxed|none', fields: 'style,pos(lower|middle|upper),maxWords,upper,color,accent,size,font,emphasis,script(latin|native)', fix: 'op fix {find,replace} corrects transcript words in captions' };
     default:
-      throw new TmepError('E_INPUT', `unknown help topic "${topic}"`, 'topics: workflow,ops,anchors,presets,templates,sfx,icons,captions,scene');
+      throw new TmepError('E_INPUT', `unknown help topic "${topic}"`, 'topics: workflow,ops,anchors,presets,templates,sfx,icons,captions,scene,storyboard');
   }
 }
 
