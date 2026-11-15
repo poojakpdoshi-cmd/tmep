@@ -55,6 +55,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   reference <asset> [--threshold 0.3] [--sampleFps 15] [--maxSeconds 120]  analyze reference cuts
   transcribe <asset> [--engine auto|whisper.cpp|faster-whisper|import] [--lang auto|en|hi|hinglish] [--model base] [--file subs.srt] [--force]
   plan [--reference v2] [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
+  script <file.txt> [--wpm 150] [--narration a1] [--compile-only | --render [--preview] [--out file.mp4]]
   storyboard <plan.json> [--out file.mp4] [--preview] [--compile-only]
   edit <op> [<op>...]                ops as strings, e.g. "cut 3.2 4.0" "zoom @phrase to=1.2" "fx panleft c2"  (or --json '[...]')
   undo [n] | redo [n] | checkout <rev>
@@ -133,13 +134,23 @@ export async function main(argv: string[]): Promise<number> {
           pretty,
         );
         return 0;
+      case 'script':
       case 'storyboard': {
-        if (args._.length !== 1) throw new TmepError('E_INPUT', 'storyboard needs one JSON file');
+        if (args._.length !== 1) throw new TmepError('E_INPUT', `${cmd} needs one input file`);
         if (args.out !== undefined && (typeof args.out !== 'string' || !/\.mp4$/i.test(args.out))) throw new TmepError('E_INPUT', '--out must be an MP4 path');
         const source = readFileSync(path.resolve(args._[0]!), 'utf8');
         let input: unknown;
-        try { input = JSON.parse(source.replace(/^\uFEFF/, '')); }
-        catch { throw new TmepError('E_INPUT', 'storyboard file must contain valid JSON'); }
+        if (cmd === 'script') {
+          const render = args.render === true || args.preview === true || args.out !== undefined;
+          if (render && args['compile-only']) throw new TmepError('E_INPUT', 'choose --compile-only or rendering');
+          const plan = api.planScript(source, { wpm: args.wpm, narration: args.narration });
+          for (const warning of plan.warnings) process.stderr.write(`${warning}\n`);
+          if (!render && !args['compile-only']) { print(plan.storyboard, pretty); return 0; }
+          input = plan.storyboard;
+        } else {
+          try { input = JSON.parse(source.replace(/^\uFEFF/, '')); }
+          catch { throw new TmepError('E_INPUT', 'storyboard file must contain valid JSON'); }
+        }
         const project = await api.storyboard(ctx, input);
         if (args['compile-only']) { print(project, pretty); return 0; }
         const result = await api.render(ctx, { rev: project.rev, out: args.out as string | undefined, preview: !!args.preview, parallel: 1, wait: 1e9 });

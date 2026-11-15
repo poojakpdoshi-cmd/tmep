@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Automatic script-to-storyboard foundation (November 15, 2026)
+
+- Plan an editable storyboard from plain text with deterministic sequence detection, animated templates, and estimated frame timing. The script CLI can export JSON, create a revision, or render an MP4. See [Storyboard](docs/STORYBOARD.md).
+
 ## Unreleased - Storyboard-to-video foundation (November 15, 2026)
 
 - Compile an ordered, frame-timed storyboard into an editable 9:16 video project. Includes animated process and explanation templates, custom Visual Scenes, cuts and fades, and optional imported narration. See [Storyboard](docs/STORYBOARD.md).
