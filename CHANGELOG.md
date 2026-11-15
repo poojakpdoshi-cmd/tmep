@@ -5,6 +5,18 @@
 - Planner labels keep whole phrases: they drop articles or end before a clause word instead of cutting mid-phrase with “…”, start with a capital and never end on a function word. A question or colon heading titles the following process instead of the title repeating step one, and explanations split at a clause boundary.
 - Process steps enter on narration cues (new optional `cues`, written by the planner; evenly spread when absent) with the connector drawing down to each step, instead of all steps appearing within the first second. Text is larger and wraps; labels may be up to 48 characters. Existing project revisions are unchanged. Fixture: `examples/creator-quality/solar-lesson.txt`.
 
+## Unreleased - Path layer fixes: frame-exact placement and whole-layer opacity (November 15, 2026)
+
+- Fix: a path-layer run that started partway into a video unit could appear one frame early, or
+  drop its first frame, when the start frame was not a multiple of 3 at 30 fps (similar offsets
+  at 24 and 60 fps). The image-sequence overlay was placed with millisecond-rounded `setpts` and
+  `enable` times. It is now placed with integer frame offsets and gated half a frame wide of its
+  edges.
+- Fix: path-layer opacity now applies to the whole layer. Previously, `@napi-rs/canvas` left
+  the glow (shadow) at full strength while a layer faded, and a fill showed through its stroke.
+  A translucent layer is now painted opaque on a scratch canvas and composited once.
+- Fix: a `%` in the project path no longer breaks the frame-sequence input pattern.
+
 ## Unreleased - Automatic script-to-storyboard foundation (November 15, 2026)
 
 - Plan an editable storyboard from plain text with deterministic sequence detection, animated templates, and estimated frame timing. The script CLI can export JSON, create a revision, or render an MP4. See [Storyboard](docs/STORYBOARD.md).

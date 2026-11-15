@@ -110,3 +110,23 @@ test('rasterizing is deterministic and reuses bytes for held frames', async (t) 
   ac.abort();
   await assert.rejects(rasterizeVectorRun(run, 270, 480, path.join(dir, 'c'), ac.signal), /cancelled/);
 });
+
+test('layer opacity applies to the whole layer, including fill under stroke and glow', () => {
+  const { createCanvas, Path2D } = canvasModule();
+  const pixels = (opacity: number) => {
+    const run = compile([{ ...square, id: 'p', style: 'green', stroke: 20, glow: 10, opacity }],
+      { styles: [{ id: 'green', color: '#00FF00' }] }).vectors[0]!;
+    const ctx = createCanvas(540, 960).getContext('2d');
+    drawVectorFrame(ctx, run, 0, .5, [new Path2D(run.layers[0]!.d)]);
+    const px = (x: number, y: number) => [...ctx.getImageData(x, y, 1, 1).data];
+    // Box edge at x = 108 output px; stroke half-width 5 px; glow outside the stroke.
+    return { strokeOverFill: px(110, 288), halo: px(101, 288) };
+  };
+  const full = pixels(1), half = pixels(.5);
+  assert.deepEqual(full.strokeOverFill.slice(0, 3), [0, 255, 0]);
+  // Group opacity: the stroke hides the fill below it, so no red shows through at 50 %.
+  assert.ok(half.strokeOverFill[0]! < 8 && half.strokeOverFill[1]! > 247, `stroke over fill: ${half.strokeOverFill}`);
+  assert.ok(Math.abs(half.strokeOverFill[3]! - 128) <= 2, `stroke alpha: ${half.strokeOverFill}`);
+  assert.ok(full.halo[3]! > 10, `glow visible: ${full.halo}`);
+  assert.ok(Math.abs(half.halo[3]! - full.halo[3]! / 2) <= 2, `glow fades with the layer: ${half.halo[3]} vs ${full.halo[3]}`);
+});

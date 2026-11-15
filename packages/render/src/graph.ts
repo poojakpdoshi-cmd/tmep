@@ -200,6 +200,20 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
   // Each preset has local ASS timestamps, so a graphic spanning multiple video units
   // starts the next unit partway into its original animation instead of restarting.
   const drawGfx = (layer: GfxOverlay, gi: number) => {
+    if (layer.seq) {
+      // Frame-exact in integer frames: the sequence frame is selected by index, placed with an
+      // integer PTS offset (its time base is 1/fps) and gated half a frame wide of its edges.
+      const first = Math.round(layer.at * fps), sF = Math.max(first, unit.startFrame);
+      const n = Math.min(first + Math.round(layer.d * fps), unit.startFrame + unit.frames) - sF;
+      if (n < 1) return;
+      const lsF = sF - unit.startFrame;
+      inputs.push('-framerate', String(fps), '-start_number', String(sF - first), '-i', path.join(layer.seq.replace(/%/g, '%%'), '%05d.png'));
+      g.push(`[${k}:v]setpts=PTS-STARTPTS,format=yuva420p,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${n},setpts=PTS-STARTPTS+${lsF}[gfx${gi}]`);
+      g.push(`[${cur}][gfx${gi}]overlay=eof_action=pass:enable='between(t,${n3((lsF - .5) / fps)},${n3((lsF + n - .5) / fps)})'[gc${gi}]`);
+      cur = `gc${gi}`;
+      k++;
+      return;
+    }
     const s = Math.max(layer.at, U0);
     const e = Math.min(layer.at + layer.d, U1);
     if (e - s < 1 / fps) return;
@@ -207,15 +221,6 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const len = e - s;
     const frames = Math.round(len * fps);
     const offset = s - layer.at;
-    if (layer.seq) {
-      // Frame-exact: the unit's first frame of the run is selected by index, not by seeking.
-      inputs.push('-framerate', String(fps), '-start_number', String(Math.round(offset * fps)), '-i', path.join(layer.seq, '%05d.png'));
-      g.push(`[${k}:v]setpts=PTS-STARTPTS,format=yuva420p,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${frames},setpts=PTS-STARTPTS+${n3(ls)}/TB[gfx${gi}]`);
-      g.push(`[${cur}][gfx${gi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[gc${gi}]`);
-      cur = `gc${gi}`;
-      k++;
-      return;
-    }
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
     const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset);
     const camera = layer.camera && transformFilter(layer.camera, W, H, fps, 'black', offset, true);

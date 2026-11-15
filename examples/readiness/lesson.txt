@@ -1,0 +1,1 @@
+First, sort the records. Next, group matching keys. Finally, count each group. Totals show the key counts.

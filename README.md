@@ -82,6 +82,8 @@ as proof that TMEP can automatically reproduce another creator's editing style.
 
 ## Quick start
 
+For a repeatable Windows setup check and two small demos, see the [readiness guide](docs/READINESS.md).
+
 Requirements: **Node.js >= 22.18** (runs the TypeScript sources directly) and **FFmpeg**
 with libass and libx264 (the default builds from gyan.dev/BtbN on Windows, Homebrew on
 macOS and most Linux distros qualify).

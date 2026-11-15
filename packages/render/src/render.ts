@@ -274,7 +274,11 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       }
     }
   }
-  const overlaps = (g: { at: number; d: number }, u: Unit) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps;
+  // In integer frames, matching the frame-exact placement of path runs in graph.ts.
+  const overlaps = (g: { at: number; frames: number }, u: Unit) => {
+    const first = Math.round(g.at * fps);
+    return first < u.startFrame + u.frames && first + g.frames > u.startFrame;
+  };
   const unitDir = project.cachePath('units');
   await fsp.mkdir(unitDir, { recursive: true });
   const unitHash = (u: Unit) =>

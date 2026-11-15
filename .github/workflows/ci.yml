@@ -64,3 +64,7 @@ jobs:
 
       - name: End-to-end render tests
         run: npm run test:e2e
+
+      - name: Readiness smoke test (Windows)
+        if: runner.os == 'Windows' && matrix.node == '24.x'
+        run: node examples/readiness/smoke.mjs
