@@ -26,8 +26,8 @@ For API callers, `api.storyboard(ctx, plan)` validates and commits the revision,
 
 ## Scene plan
 
-- Supply 1–16 scenes, each with 6–1800 whole frames. At 30 fps, starts and the final duration are exact frame counts. Scenes play consecutively.
-- `process` uses a path reveal and staggered animated labels for two or three steps.
+- Supply 1–16 scenes, each with 6–1800 whole frames. Text labels are 1–48 characters and wrap automatically. At 30 fps, starts and the final duration are exact frame counts. Scenes play consecutively.
+- `process` uses a path reveal and animated labels for two or three steps. Optional `cues` gives one increasing frame offset per step at which that step enters, and the connector draws down to it. Without `cues`, steps enter evenly across the scene.
 - `explanation` animates a shape and brings in the title and point with coordinated motion and opacity.
 - `custom` accepts `visual` with the `layers`, `styles`, `groups`, `camera`, and `safe` fields from [Visual Scene](VISUAL_SCENE.md). Frame count and placement come from the storyboard. Import referenced media into the same project first.
 - `transition` defaults to `cut`. `fade` reveals the incoming scene from black over up to nine frames without overlapping scenes or changing duration. Fade reserves one layer and one style and requires a scene without camera keys. For custom fades, the reserved IDs are `storyboardFade` and `storyboardBlack`.
@@ -50,7 +50,7 @@ The first command writes only Phase 1 JSON to stdout and never changes a project
 
 The engine API exposes `planScript(text, { wpm, narration })`, returning `{ storyboard, frames, warnings }`. Pass the plan or an edited copy to `storyboard(ctx, plan)`, then use `render(ctx, { rev, preview, out })` with the returned revision.
 
-The planner uses sentence and line boundaries, with explicit English sequence cues such as “First”, “Next”, and “Finally” for runs of up to three process steps. Other passages use the animated explanation template. Display labels are excerpts from the script. The original text remains in the JSON and project revision. Durations estimate speech at 60–240 WPM, defaulting to 150. The planner rounds cumulative timing onto the 30 fps grid. It does not align audio or infer pauses from recordings.
+The planner uses sentence and line boundaries, with explicit English sequence cues such as “First”, “Next”, and “Finally” for runs of up to three process steps. Other passages use the animated explanation template. Display labels are excerpts from the script. Labels up to 32 characters (steps), 40 (titles) or 44 (points and claims) keep the whole phrase. Longer passages drop articles first, then end before a clause word such as “into”, “when” or “each”. Only if neither fits are they cut at a word and marked with “…”. Labels start with a capital letter and never end on a function word. A question or colon line directly before a step run becomes that process title, and the planner writes `cues` from each step’s estimated speech start. A run without such a heading is titled “2 steps” or “3 steps” instead of repeating its first step. Explanations split at the clause word nearest the middle of the sentence. The original text remains in the JSON and project revision. Durations estimate speech at 60–240 WPM, defaulting to 150. The planner rounds cumulative timing onto the 30 fps grid. It does not align audio or infer pauses from recordings.
 
 Inputs are limited to 20,000 characters, 16 scenes, and 60 seconds per scene. Passages without a clear label are rejected. The stock templates cannot infer specialized diagrams, illustrations, assets, or narrative intent. Use custom Visual Scenes or revise the generated JSON for those scripts. There is no TTS or model invocation.
 

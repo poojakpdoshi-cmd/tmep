@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased - Storyboard creator-quality fixes (pre-hackathon, November 15, 2026)
+
+- Planner labels keep whole phrases: they drop articles or end before a clause word instead of cutting mid-phrase with “…”, start with a capital and never end on a function word. A question or colon heading titles the following process instead of the title repeating step one, and explanations split at a clause boundary.
+- Process steps enter on narration cues (new optional `cues`, written by the planner; evenly spread when absent) with the connector drawing down to each step, instead of all steps appearing within the first second. Text is larger and wraps; labels may be up to 48 characters. Existing project revisions are unchanged. Fixture: `examples/creator-quality/solar-lesson.txt`.
+
 ## Unreleased - Path layer fixes: frame-exact placement and whole-layer opacity (November 15, 2026)
 
 - Fix: a path-layer run that started partway into a video unit could appear one frame early, or

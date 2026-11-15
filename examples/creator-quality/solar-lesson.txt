@@ -1,0 +1,4 @@
+How does a solar panel make electricity?
+First, sunlight strikes the silicon cells. Next, the light knocks electrons loose. Finally, wires carry that current into your home.
+An inverter converts direct current into the alternating current your outlets use.
+Direct current flows in one steady direction, whereas alternating current reverses many times each second.

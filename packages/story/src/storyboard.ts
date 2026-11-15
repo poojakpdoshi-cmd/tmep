@@ -1,6 +1,6 @@
 import { arr, num, obj, oneOf, str, union, TmepError, visualSceneSchema, visualSceneContent } from '../../core/src/index.ts';
 
-const label = str({ min: 1, max: 32, pattern: /^(?=.*\S)[^\x00-\x1f\x7f]+$/ });
+const label = str({ min: 1, max: 48, pattern: /^(?=.*\S)[^\x00-\x1f\x7f]+$/ });
 const timing = {
   frames: num({ int: true, min: 6, max: 1800 }),
   transition: oneOf(['cut', 'fade'] as const).default('cut'),
@@ -11,7 +11,9 @@ export const storyboardSchema = obj({
   script: str({ min: 1, max: 20000, pattern: /\S/ }),
   narration: str({ pattern: /^a[1-9]\d*$/ }).optional(),
   scenes: arr(union([
-    obj({ ...timing, template: oneOf(['process'] as const), title: label, steps: arr(label, { min: 2, max: 3 }) }),
+    obj({ ...timing, template: oneOf(['process'] as const), title: label, steps: arr(label, { min: 2, max: 3 }),
+      // Optional frame offsets, one per step, at which each step label enters (narration cues).
+      cues: arr(num({ int: true, min: 0, max: 1799 }), { min: 2, max: 3 }).optional() }),
     obj({ ...timing, template: oneOf(['explanation'] as const), title: label, point: label }),
     obj({ ...timing, template: oneOf(['comparison'] as const), first: label, second: label }),
     obj({ ...timing, template: oneOf(['custom'] as const), visual: visualSceneContent }),
@@ -19,6 +21,16 @@ export const storyboardSchema = obj({
 });
 
 export const STORYBOARD_FPS = 30;
+
+/** Greedy word wrap for centred labels; one word longer than `width` stays on its own line. */
+function wrap(value: string, width: number): string {
+  return value.split(/\s+/u).reduce<string[]>((rows, word) => {
+    const last = rows.at(-1);
+    if (last && last.length + 1 + word.length <= width) rows[rows.length - 1] += ' ' + word;
+    else rows.push(word);
+    return rows;
+  }, []).join('\n');
+}
 
 export function compileStoryboard(input: unknown) {
   const parsed = storyboardSchema.parse(input);
@@ -30,8 +42,28 @@ export function compileStoryboard(input: unknown) {
     const duration = scene.frames / STORYBOARD_FPS;
     const beat = Math.min(.4, duration / 5);
     const enter = () => [{ t: 0, y: -.02, o: 0 }, { t: beat, y: 0, o: 1, e: 'out' }];
-    const text = (id: string, value: string, y: number, start = 0) =>
-      ({ id, kind: 'text', text: value, style: 'type', y, w: .85, h: .095, start, keys: enter() });
+    const text = (id: string, value: string, y: number, start = 0, style = 'type', h = .095) =>
+      ({ id, kind: 'text', text: value, style, y, w: .85, h, start, keys: enter() });
+    if (scene.template === 'process' && scene.cues) {
+      if (scene.cues.length !== scene.steps.length) throw new TmepError('E_INPUT', `scene ${i + 1}: cues needs one frame offset per step`);
+      if (scene.cues.some((cue, n) => cue >= scene.frames || (n && cue <= scene.cues![n - 1]!))) {
+        throw new TmepError('E_INPUT', `scene ${i + 1}: cues must increase and stay inside the scene`);
+      }
+    }
+    // Steps enter on their cue (or evenly across the scene), not all within the first second.
+    const stepStarts = scene.template === 'process' ? scene.steps.map((_, n) => {
+      const cue = (scene.cues?.[n] ?? Math.round(n * scene.frames / scene.steps.length)) / STORYBOARD_FPS;
+      const start = Math.min(Math.max(cue, (n + 1) * beat), duration - beat - 1 / STORYBOARD_FPS);
+      return Math.round(start * STORYBOARD_FPS) / STORYBOARD_FPS;
+    }) : [];
+    // The connector draws down to each step as it enters (step centres .38 + .16n on a .36–.72 path).
+    const draw: { t: number; to: number; e?: 'out' }[] = [{ t: 0, to: 0 }];
+    stepStarts.forEach((start, n) => {
+      const last = draw.at(-1)!;
+      if (start > last.t) draw.push({ t: start, to: last.to });
+      const t = Math.max(start + beat, draw.at(-1)!.t + 1 / STORYBOARD_FPS);
+      if (t < duration) draw.push({ t, to: Math.min(1, (((.02 + .16 * n) / .36) * 500 - 20) / 460), e: 'out' });
+    });
     const visual = scene.template === 'custom' ? scene.visual : scene.template === 'comparison' ? {
       styles: [
         { id: 'type', size: 52, font: 'bold', color: '#F2F6FF' },
@@ -40,33 +72,30 @@ export function compileStoryboard(input: unknown) {
       layers: [scene.first, scene.second].flatMap((value, n) => {
         const y = .38 + n * .22;
         const start = n * beat;
-        const pieces = value.split(/\s+/u);
-        const lines = pieces.reduce<string[]>((rows, word) => {
-          const last = rows.at(-1);
-          if (last && last.length + 1 + word.length <= 19) rows[rows.length - 1] += ' ' + word;
-          else rows.push(word);
-          return rows;
-        }, []);
         return [
           { id: `card${n}`, kind: 'rect', style: n ? 'lower' : 'upper', y, w: .85, h: .18,
             start, overlap: true, keys: enter() },
-          { ...text(`claim${n}`, lines.join('\n'), y, start), h: .14 },
+          text(`claim${n}`, wrap(value, 19), y, start, 'type', .16),
         ];
       }),
     } : {
-      styles: [{ id: 'type', size: 36, font: 'bold', color: '#F2F6FF' }, { id: 'accent', color: '#70DAC4' }],
+      // Phone-legible sizes; labels wrap inside boxes sized for the planner's label limits.
+      styles: [
+        { id: 'head', size: 60, font: 'bold', color: '#F2F6FF' },
+        { id: 'type', size: 48, font: 'bold', color: '#F2F6FF' }, { id: 'accent', color: '#70DAC4' },
+      ],
       layers: scene.template === 'process' ? [
-        text('title', scene.title, .18),
-        { id: 'connector', kind: 'path', style: 'accent', x: .18, y: .50, w: .08, h: .30,
-          view: { w: 100, h: 500 }, d: 'M50 20 V480', stroke: 12, draw: [{ t: 0, to: 0 }, { t: 2 * beat, to: 1, e: 'out' }] },
+        text('title', wrap(scene.title, 22), .20, 0, 'head', .13),
+        { id: 'connector', kind: 'path', style: 'accent', x: .18, y: .54, w: .08, h: .36,
+          view: { w: 100, h: 500 }, d: 'M50 20 V480', stroke: 12, draw },
         ...scene.steps.map((step, n) => ({
-          ...text(`step${n}`, step, .36 + .14 * n, (n + 1) * beat), x: .59, w: .68,
+          ...text(`step${n}`, wrap(step, 20), .38 + .16 * n, stepStarts[n], 'type', .10), x: .58, w: .66,
         })),
       ] : [
-        { id: 'panel', kind: 'rect', style: 'accent', y: .58, w: .78, h: .19, overlap: true,
+        { id: 'panel', kind: 'rect', style: 'accent', y: .56, w: .85, h: .24, overlap: true,
           keys: [{ t: 0, s: .4, o: 0 }, { t: 2 * beat, s: 1, o: .32, e: 'out' }] },
-        text('title', scene.title, .29),
-        text('point', scene.point, .58, beat),
+        text('title', wrap(scene.title, 22), .32, 0, 'head', .13),
+        { ...text('point', wrap(scene.point, 24), .56, beat, 'type', .20), w: .78 },
       ],
     };
     if (scene.template === 'custom' && scene.transition === 'fade' && scene.visual.camera) {
