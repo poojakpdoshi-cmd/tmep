@@ -89,28 +89,34 @@ test('path layers render frame-exact across video units and reuse their cached r
   });
   await api.importMedia(ctx, { paths: files });
   // A 216 px red square moving 0.3 frame widths in 0.8 s (6.75 output px per preview frame), plus a
-  // stroke drawn on along a curve. The scene crosses the unit boundary at 1 s.
+  // stroke drawn on along a curve. The scene starts at frame 16, deliberately not a multiple of 3
+  // (millisecond-rounded placement drifts by a frame there at 30 fps), and crosses the unit boundary at 1 s.
   const square = { id: 'square', kind: 'path', x: .3, y: .3, w: .2, h: .1125, stroke: 0, fill: '#FF0000',
     d: 'M0 0 H100 V100 H0 Z', keys: [{ t: 0, x: 0 }, { t: .8, x: .3, e: 'linear' }] };
   const curve = { id: 'curve', kind: 'path', x: .5, y: .7, w: .6, h: .1, view: { w: 600, h: 100 }, stroke: 8,
     d: 'M10 90 C 200 0 400 0 590 90', draw: [{ t: 0, to: 0 }, { t: .6, to: 1, e: 'out' }] };
   const label = { id: 'label', kind: 'text', text: 'Path', x: .5, y: .5, w: .3, h: .06 };
-  const spec = { v: 1, at: .5, duration: 1, layers: [square, curve, label] };
+  const spec = { v: 1, at: 16 / 30, duration: 1, layers: [square, curve, label] };
   const edit = await api.edit(ctx, { ops: ['add v1', 'add v2', { op: 'loudness', lufs: 0 }, { op: 'captions', style: 'none' }, { op: 'scene', spec }] });
   const scene = (edit.ids as string[]).at(-1)!;
   assert.deepEqual(await api.inspect(ctx, { what: 'scenes', scene }), { ok: true, issues: [], truncated: false });
   const first = await api.render(ctx, { preview: true, parallel: 1, wait: 60 });
   assert.equal(first.state, 'done', JSON.stringify(first));
   const out = path.join(project, first.out as string);
-  const rows = ff(['-i', out, '-vf', `select='eq(n,29)+eq(n,30)',crop=540:2:0:288`, '-fps_mode', 'passthrough',
-    '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']);
-  for (const [i, frame] of [29, 30].entries()) {
+  // The run's first frame, the last frame of unit 1 and the first frame of unit 2.
+  const frames = [15, 16, 29, 30];
+  const rows = ff(['-i', out, '-vf', `select='${frames.map((f) => `eq(n,${f})`).join('+')}',crop=540:2:0:288`,
+    '-fps_mode', 'passthrough', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']);
+  const red = (row: Buffer, x: number) => row[3 * x]! > 150 && row[3 * x + 1]! < 80;
+  assert.ok(!Array.from({ length: 540 }, (_, x) => red(rows.subarray(0, 540 * 3), x)).some(Boolean), 'square drawn before the scene');
+  for (const [i, frame] of frames.entries()) {
+    if (frame < 16) continue;
     // Scene-local time of this output frame, then the expected left edge of the square.
-    const local = (frame - 15) / 30;
+    const local = (frame - 16) / 30;
     const expected = (.3 + .3 * Math.min(1, local / .8) - .1) * 540;
     const row = rows.subarray(i * 540 * 6, i * 540 * 6 + 540 * 3);
     let left = -1;
-    for (let x = 0; x < 540 && left < 0; x++) if (row[3 * x]! > 150 && row[3 * x + 1]! < 80) left = x;
+    for (let x = 0; x < 540 && left < 0; x++) if (red(row, x)) left = x;
     assert.ok(Math.abs(left - expected) <= 2, `frame ${frame}: square left edge ${left}, expected ${expected.toFixed(1)}`);
   }
   const vectors = path.join(project, '.tmep', 'cache', 'vectors');
