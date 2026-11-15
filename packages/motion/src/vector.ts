@@ -97,9 +97,12 @@ const sample = (keys: Key[], t: number) => ({ x: sampleKeys(keys, 'x', t), y: sa
  */
 export function drawVectorFrame(ctx: Ctx, run: VectorRun, f: number, scale: number, shapes: Path2D[]): string {
   const { Path2D } = canvasModule();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  const clear = (c: Ctx) => {
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = 1;
+    c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+  };
+  clear(ctx);
   const cam = sample(run.camera, (run.sceneFrame + f) / run.fps);
   const state: number[] = [cam.x, cam.y, cam.s, cam.r];
   run.layers.forEach((layer, i) => {
@@ -109,38 +112,60 @@ export function drawVectorFrame(ctx: Ctx, run: VectorRun, f: number, scale: numb
     const [from, to] = drawRange(layer.draw, t);
     state.push(i, a.x, a.y, a.s, a.r, a.o, from, to);
     if (a.o <= 0) return;
+    // Layer opacity applies to the whole layer, like the FFmpeg overlay of other layers: a
+    // translucent layer is painted opaque on a scratch canvas and composited once. Painting
+    // with globalAlpha instead would blend fill and stroke separately and, in this canvas,
+    // would leave the glow (shadow) at full strength.
+    const translucent = a.o < 1;
+    const c = translucent ? scratchFor(ctx) : ctx;
+    if (translucent) clear(c);
     // Same composition as the validator and FFmpeg: layer rotate/scale about its centre, then
     // offset; the camera then rotates/zooms about the frame centre and offsets.
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    ctx.translate(run.w / 2 + cam.x * run.w, run.h / 2 + cam.y * run.h);
-    ctx.rotate(cam.r * Math.PI / 180);
-    ctx.scale(cam.s, cam.s);
-    ctx.translate(a.x * run.w, a.y * run.h);
-    ctx.rotate(a.r * Math.PI / 180);
-    ctx.scale(a.s, a.s);
+    c.setTransform(scale, 0, 0, scale, 0, 0);
+    c.translate(run.w / 2 + cam.x * run.w, run.h / 2 + cam.y * run.h);
+    c.rotate(cam.r * Math.PI / 180);
+    c.scale(cam.s, cam.s);
+    c.translate(a.x * run.w, a.y * run.h);
+    c.rotate(a.r * Math.PI / 180);
+    c.scale(a.s, a.s);
     const k = Math.min(layer.box[0] / layer.view[0], layer.box[1] / layer.view[1]);
-    ctx.scale(k, k);
-    ctx.translate(-layer.view[0] / 2, -layer.view[1] / 2);
-    ctx.globalAlpha = Math.min(1, a.o);
+    c.scale(k, k);
+    c.translate(-layer.view[0] / 2, -layer.view[1] / 2);
     const shape = shapes[i]!;
     if (layer.fill) {
-      ctx.fillStyle = layer.fill;
-      ctx.fill(shape);
+      c.fillStyle = layer.fill;
+      c.fill(shape);
     }
     if (layer.stroke > 0 && to > from) {
-      ctx.lineWidth = layer.stroke / k;
-      ctx.lineCap = layer.cap;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = layer.color;
+      c.lineWidth = layer.stroke / k;
+      c.lineCap = layer.cap;
+      c.lineJoin = 'round';
+      c.strokeStyle = layer.color;
       // Canvas shadow blur is in device pixels and ignores the current transform.
-      ctx.shadowColor = layer.color;
-      ctx.shadowBlur = layer.glow * scale;
+      c.shadowColor = layer.color;
+      c.shadowBlur = layer.glow * scale;
       // Path2D.trim mutates its receiver, so trim a copy.
-      ctx.stroke(from <= 0 && to >= 1 ? shape : new Path2D(shape).trim(from, to));
-      ctx.shadowBlur = 0;
+      c.stroke(from <= 0 && to >= 1 ? shape : new Path2D(shape).trim(from, to));
+      c.shadowBlur = 0;
+    }
+    if (translucent) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = a.o;
+      ctx.drawImage(c.canvas, 0, 0);
+      ctx.globalAlpha = 1;
     }
   });
   return state.join(',');
+}
+
+const scratches = new WeakMap<object, Ctx>();
+function scratchFor(ctx: Ctx): Ctx {
+  let scratch = scratches.get(ctx.canvas);
+  if (!scratch) {
+    scratch = canvasModule().createCanvas(ctx.canvas.width, ctx.canvas.height).getContext('2d');
+    scratches.set(ctx.canvas, scratch);
+  }
+  return scratch;
 }
 
 export const frameFile = (f: number) => `${String(f).padStart(5, '0')}.png`;
