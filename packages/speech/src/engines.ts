@@ -16,7 +16,7 @@ import os from 'node:os';
 import { promises as fsp } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TmepError, exists } from '../../core/src/index.ts';
-import { run } from '../../media/src/exec.ts';
+import { commandLineLength, run, WINDOWS_CMDLINE_MAX } from '../../media/src/exec.ts';
 import { parseWhisperCppJson, parseFasterWhisperJson, makeTranscript, type Transcript } from './transcript.ts';
 
 export interface EngineOptions {
@@ -56,22 +56,55 @@ export async function resolveGgmlModel(name?: string): Promise<string | undefine
 }
 
 export async function transcribeWhisperCpp(wav: string, workDir: string, o: EngineOptions = {}): Promise<Transcript> {
+  await fsp.mkdir(workDir, { recursive: true });
+  const scratch = await fsp.mkdtemp(path.join(workDir, 'run-'));
+  try {
+    const [result] = await whisperCppBatch([wav], scratch, o);
+    if (result instanceof Error) throw result;
+    return result!;
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+export async function whisperCppBatch(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
   const bin = await findWhisperCpp();
   if (!bin) throw new TmepError('E_ENGINE_MISSING', 'whisper.cpp (whisper-cli) not found', 'download a release from github.com/ggml-org/whisper.cpp/releases and set TMEP_WHISPER_CPP, or use engine:"import"');
   const model = await resolveGgmlModel(o.model);
   if (!model) throw new TmepError('E_ENGINE_MISSING', `whisper.cpp model "${o.model ?? process.env.TMEP_WHISPER_MODEL ?? 'base'}" not found in ${modelsDir()}`, 'download ggml-<name>.bin from huggingface.co/ggerganov/whisper.cpp into that folder or set TMEP_WHISPER_MODEL');
   await fsp.mkdir(workDir, { recursive: true });
-  const outBase = path.join(workDir, 'wcpp');
   const lang = !o.lang || o.lang === 'auto' ? 'auto' : o.lang === 'hinglish' ? 'hi' : o.lang;
-  const args = ['-m', model, '-f', wav, '-l', lang, '-ojf', '-of', outBase, '-np'];
-  if (o.threads) args.push('-t', String(o.threads));
+  // LRC output enables token timestamps in whisper-cli; its sidecar stays in scratch.
+  const common = ['-m', model, '-l', lang, '-ojf', '-olrc', '-np'];
+  if (o.threads) common.push('-t', String(o.threads));
   const prompt = o.prompt ?? (o.lang === 'hinglish' ? HINGLISH_PROMPT : undefined);
-  if (prompt) args.push('--prompt', prompt);
-  const res = await run(bin, args, { signal: o.signal, maxBuffer: 2 * 1024 * 1024 });
-  if (res.code !== 0) throw new TmepError('E_ENGINE_FAILED', `whisper.cpp exited ${res.code}`, undefined, res.stderr.slice(-2000));
-  const json = await fsp.readFile(`${outBase}.json`, 'utf8');
-  const parsed = parseWhisperCppJson(json);
-  return makeTranscript('whisper.cpp', parsed.lang, parsed.words, { model: path.basename(model), approx: parsed.approx });
+  if (prompt) common.push('--prompt', prompt);
+  const results: (Transcript | Error)[] = [];
+  let offset = 0;
+  while (offset < wavs.length) {
+    const args = [...common];
+    const outputs: string[] = [];
+    for (let i = offset; i < wavs.length; i++) {
+      const out = path.join(workDir, `wcpp-${i}`);
+      const pair = ['-f', wavs[i]!, '-of', out];
+      if (outputs.length && process.platform === 'win32' && commandLineLength(bin, [...args, ...pair]) > WINDOWS_CMDLINE_MAX) break;
+      args.push(...pair);
+      outputs.push(out);
+    }
+    const res = await run(bin, args, { signal: o.signal, maxBuffer: 2 * 1024 * 1024 });
+    const failure = new TmepError('E_ENGINE_FAILED', res.code ? `whisper.cpp exited ${res.code}` : 'whisper.cpp produced no transcript for this asset',
+      'check the audio and model, then retry the failed asset', res.stderr.slice(-2000));
+    for (const out of outputs) {
+      try {
+        const parsed = parseWhisperCppJson(await fsp.readFile(`${out}.json`, 'utf8'));
+        results.push(makeTranscript('whisper.cpp', parsed.lang, parsed.words, { model: path.basename(model), approx: parsed.approx }));
+      } catch (error) {
+        results.push((error as NodeJS.ErrnoException).code === 'ENOENT' ? failure : error as Error);
+      }
+    }
+    offset += outputs.length;
+  }
+  return results;
 }
 
 /** Romanized Hinglish prompt: biases Whisper toward Latin-script code-mixed output. */
@@ -111,6 +144,34 @@ export async function transcribeFasterWhisper(wav: string, o: EngineOptions = {}
   if (res.code !== 0) throw new TmepError('E_ENGINE_FAILED', 'faster-whisper failed', undefined, res.stderr.slice(-2000));
   const parsed = parseFasterWhisperJson(res.stdout);
   return makeTranscript('faster-whisper', parsed.lang, parsed.words, { model });
+}
+
+/** One Python worker loads the model once and writes per-asset results to disk. */
+export async function fasterWhisperBatch(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
+  const py = await findPython();
+  if (!py || !(await hasFasterWhisper())) throw new TmepError('E_ENGINE_MISSING', 'faster-whisper is not installed', 'install faster-whisper or select whisper.cpp');
+  const model = o.model ?? 'small';
+  const lang = !o.lang || o.lang === 'auto' ? '' : o.lang === 'hinglish' ? 'hi' : o.lang;
+  const prompt = o.prompt ?? (o.lang === 'hinglish' ? HINGLISH_PROMPT : undefined);
+  const manifest = path.join(workDir, 'inputs.json');
+  const args = [FW_SCRIPT, '--batch', manifest, '--model', model];
+  if (lang) args.push('--lang', lang);
+  if (prompt) args.push('--prompt', prompt);
+  const items = wavs.map((wav, i) => ({ wav, out: path.join(workDir, `fw-${i}.json`) }));
+  await fsp.writeFile(manifest, JSON.stringify(items));
+  const res = await run(py, args, { signal: o.signal });
+  const failure = new TmepError('E_ENGINE_FAILED', 'faster-whisper batch did not produce a transcript for this asset',
+    'check that the local model is available and retry the failed asset', res.stderr.slice(-2000));
+  return Promise.all(items.map(async ({ out }) => {
+    try {
+      const json = JSON.parse(await fsp.readFile(out, 'utf8'));
+      if (json.error) return new TmepError('E_ENGINE_FAILED', 'faster-whisper failed for this asset', undefined, json.error);
+      const parsed = parseFasterWhisperJson(JSON.stringify(json));
+      return makeTranscript('faster-whisper', parsed.lang, parsed.words, { model });
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? failure : error as Error;
+    }
+  }));
 }
 
 export async function engineStatus(): Promise<Record<string, unknown>> {

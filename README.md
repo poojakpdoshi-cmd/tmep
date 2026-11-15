@@ -59,7 +59,7 @@ as proof that TMEP can automatically reproduce another creator's editing style.
 |---|---|
 | Import + content-hash asset ids, probing, dedupe | Done, tested |
 | Transcript import (SRT, VTT, JSON, whisper.cpp JSON) | Done, tested |
-| whisper.cpp and faster-whisper adapters (word timestamps, VAD in faster-whisper, Hinglish prompt) | Implemented; output parsers unit-tested; **not run in this repo** (no engine available here) |
+| whisper.cpp and faster-whisper adapters (word timestamps, VAD in faster-whisper, Hinglish prompt) | Output parsers unit-tested; Whisper.cpp verified locally on synthetic speech |
 | Hinglish captions (Devanagari -> romanized, schwa deletion) | Done, unit-tested; recognition accuracy not measured |
 | Silence/filler detection, rough cut to target length, transcript search | Done, tested |
 | Declarative timeline: cuts, trims, speed, multi-clip, b-roll cutaways, transitions, undo/redo, diffs | Done, tested |
@@ -114,6 +114,23 @@ the TypeScript compiler and Node types for development.
   `~/.cache/tmep/models` (or set `TMEP_WHISPER_MODEL`).
 - **faster-whisper** (NVIDIA GPU users): `pip install faster-whisper`.
 - **Bring your own**: `tmep transcribe v1 --file subs.srt` (SRT, VTT or JSON).
+
+### Batch local transcription
+
+Pre-hackathon development, November 16, 2026. After importing your clips, run one command from the repository root.
+
+```powershell
+node bin/tmep.js transcribe-batch v1 a1 a2 -p "./my project" --engine whisper.cpp --lang en
+```
+
+The command emits one JSON manifest with asset IDs, durations, languages, up to eight source-time speech spans per asset, and up to three deterministic keywords. `tr` points to the full word-level JSON relative to the project. Use `--detail debug` for all spans and engine diagnostics, or `inspect transcript --asset v1 --words` for word-level inspection. `approx: true` marks transcripts containing reconstructed timing.
+
+Valid cached results for the same media and options are reused. `--force` bypasses transcript cache reads. Reimport media if source bytes change. Use an explicit `--model` or `--force` when replacing a model selected through the environment. Batch accepts up to 64 IDs. Failures appear separately, and any failure yields exit code 1 while successful transcripts remain saved. Retry just the failed IDs.
+
+Whisper.cpp processes each command-line-sized group in a single invocation. Faster-Whisper uses one Python worker for uncached inputs and requires a locally available model. Existing single-asset CLI and MCP calls still work.
+
+On two synthetic speech clips on Windows with Whisper.cpp 1.8.3 and GGML base, the cached batch took one CLI call and printed 393 bytes. Two single-asset calls printed 428 bytes. Adding two transcript inspections for timestamp context took four calls and printed 689 bytes total. These counts are CLI calls and stdout bytes, with no provider token measurement.
+
 
 ## Use it from an agent
 

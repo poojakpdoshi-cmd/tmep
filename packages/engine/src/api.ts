@@ -14,6 +14,7 @@ import {
   type Word,
   type Asset,
   TmepError,
+  asTmepError,
   shape,
   mediaHash,
   hashOf,
@@ -43,7 +44,7 @@ import {
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
 import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, transcriptText } from '../../speech/src/transcript.ts';
-import { transcribeWhisperCpp, transcribeFasterWhisper, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
+import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
 import { compileStoryboard, storyboardSchema, STORYBOARD_FPS } from '../../story/src/storyboard.ts';
@@ -145,6 +146,38 @@ export async function transcriptsFor(p: Project, ids: Iterable<string>): Promise
   return out;
 }
 
+interface SpeechOptions { engine?: string; lang?: string; model?: string; prompt?: string; force?: boolean; signal?: AbortSignal }
+
+function transcriptKey(a: Asset, engine: string, inp: SpeechOptions, fileHash?: string): string {
+  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model: inp.model ?? null, prompt: inp.prompt ?? null, f: fileHash ?? null });
+}
+
+async function speechWav(p: Project, a: Asset, signal?: AbortSignal): Promise<string> {
+  const wav = p.cachePath('wav', `${a.hash}.wav`);
+  if (await exists(wav)) return wav;
+  const tmp = p.cachePath('wav', `${a.hash}.${randomUUID()}.tmp.wav`);
+  try {
+    await extractSpeechWav(a.path, tmp, signal);
+    await retryTransient(() => fsp.rename(tmp, wav), 16);
+    return wav;
+  } finally {
+    await fsp.rm(tmp, { force: true });
+  }
+}
+
+function validateTranscript(tr: Transcript, a: Asset): void {
+  if (!tr.words.length) throw new TmepError('E_ENGINE_FAILED', 'transcript is empty');
+  const last = tr.words.at(-1)!;
+  if (last.s > a.dur + 1) throw new TmepError('E_INPUT', `transcript extends past media end (${r2(last.s)}s > ${r2(a.dur)}s)`, 'is this the right file?');
+}
+
+async function saveTranscriptText(p: Project, a: Asset, lines: ReturnType<typeof sentences>) {
+  const txt = p.rendersPath('..', 'transcripts', `${a.id}.txt`);
+  await fsp.mkdir(path.dirname(txt), { recursive: true });
+  await fsp.writeFile(txt, lines.map((line) => `[${fmtTime(line.s)}] ${line.text}`).join('\n') + '\n');
+  return txt;
+}
+
 export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string; lang?: string; model?: string; file?: string; prompt?: string; force?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {
   const p = await openProject(ctx.project);
   const a = await p.asset(inp.asset);
@@ -158,7 +191,7 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
     else throw new TmepError('E_ENGINE_MISSING', 'no local speech engine installed', 'install whisper.cpp (+ ggml model) or faster-whisper, or pass file:"subs.srt|.vtt|.json" to import a transcript; see `tmep doctor`');
   }
   const fileHash = inp.file ? mediaHash(path.resolve(ctx.project, inp.file)) : undefined;
-  const key = hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model: inp.model ?? null, prompt: inp.prompt ?? null, f: fileHash ?? null });
+  const key = transcriptKey(a, engine, inp, fileHash);
   const cacheFile = p.cachePath('tr', `${key}.json`);
   let tr = inp.force ? undefined : await readJsonOr<Transcript | undefined>(cacheFile, undefined);
   const cached = !!tr;
@@ -171,29 +204,139 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
       const parsed = isJson ? parseTranscriptJson(text) : { words: parseSubtitles(text), lang: undefined, approx: true };
       tr = makeTranscript('import', inp.lang && inp.lang !== 'auto' ? inp.lang : (parsed.lang ?? 'und'), parsed.words, { approx: parsed.approx });
     } else {
-      const wav = p.cachePath('wav', `${a.hash}.wav`);
-      if (!(await exists(wav))) await extractSpeechWav(a.path, wav, inp.signal);
+      const wav = await speechWav(p, a, inp.signal);
       if (engine === 'whisper.cpp') tr = await transcribeWhisperCpp(wav, p.workPath(`wcpp-${key}`), { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
       else if (engine === 'faster-whisper') tr = await transcribeFasterWhisper(wav, { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
       else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, import');
     }
-    if (!tr.words.length) throw new TmepError('E_ENGINE_FAILED', 'transcript is empty');
-    const last = tr.words[tr.words.length - 1]!;
-    if (last.s > a.dur + 1) throw new TmepError('E_INPUT', `transcript extends past media end (${r2(last.s)}s > ${r2(a.dur)}s)`, 'is this the right file?');
+    validateTranscript(tr, a);
     await writeJson(cacheFile, tr, false);
   }
   await p.updateAsset(a.id, { tr: key, lang: tr.lang });
-  // human-readable transcript for the user (never returned inline)
-  const txt = p.rendersPath('..', 'transcripts', `${a.id}.txt`);
-  await fsp.mkdir(path.dirname(txt), { recursive: true });
-  await fsp.writeFile(txt, sentences(tr.words).map((s) => `[${fmtTime(s.s)}] ${s.text}`).join('\n') + '\n');
+  const lines = sentences(tr.words);
+  const txt = await saveTranscriptText(p, a, lines);
   const st = speechStats(tr.words);
   return shape(
     ctx.detail,
     { ok: 1, id: a.id, words: st.words, lang: tr.lang, ...(cached ? { cached: true } : {}) },
-    { engine: tr.engine, speech: st.speech, pauses: st.pauses, fillers: st.fillers, wpm: st.wpm, sentences: sentences(tr.words).length, top: keywords(tr.words, 6).map((k) => k.k), ...(tr.approx ? { approx: true } : {}) },
+    { engine: tr.engine, speech: st.speech, pauses: st.pauses, fillers: st.fillers, wpm: st.wpm, sentences: lines.length, top: keywords(tr.words, 6).map((k) => k.k), ...(tr.approx ? { approx: true } : {}) },
     { file: path.relative(ctx.project, txt), cache: cacheFile, ms: Date.now() - t0, model: tr.model },
   );
+}
+
+/** Return only editing metadata, with full word timings in the existing transcript cache. */
+export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: string[] }) {
+  const engines = ['whisper.cpp', 'faster-whisper'] as const;
+  type Engine = typeof engines[number];
+  if (!Array.isArray(inp.assets) || inp.assets.length < 1 || inp.assets.length > 64 ||
+      inp.assets.some((id) => typeof id !== 'string' || !/^[vai]\d+$/.test(id))) {
+    throw new TmepError('E_INPUT', 'transcribe-batch needs 1–64 imported asset IDs');
+  }
+  if (inp.engine !== undefined && inp.engine !== 'auto' && !engines.includes(inp.engine as Engine)) {
+    throw new TmepError('E_INPUT', 'batch engines: auto, whisper.cpp, faster-whisper');
+  }
+  for (const value of [inp.lang, inp.model, inp.prompt]) {
+    if (value !== undefined && (typeof value !== 'string' || !value.trim())) {
+      throw new TmepError('E_INPUT', 'lang, model and prompt must be non-empty strings');
+    }
+  }
+  const p = await openProject(ctx.project, false);
+  const assets = new Map((await p.assets()).map((a) => [a.id, a]));
+  const ids = [...new Set(inp.assets)];
+  const summaries = new Map<string, Record<string, unknown>>();
+  const failures = new Map<string, Record<string, unknown>>();
+  const debug = ctx.detail === 'debug';
+  const fail = (id: string, error: unknown) => {
+    failures.set(id, { id, ...(assets.has(id) && { dur: assets.get(id)!.dur }), status: 'failed', err: asTmepError(error).toJSON(debug) });
+  };
+  const reference = (key: string) => p.cachePath('tr', key + '.json');
+  async function complete(a: Asset, key: string, tr: Transcript, cached: boolean) {
+    validateTranscript(tr, a);
+    const lines = sentences(tr.words);
+    if (!cached) {
+      await writeJson(reference(key), tr, false);
+      await saveTranscriptText(p, a, lines);
+    }
+    if (a.tr !== key || a.lang !== tr.lang) await p.updateAsset(a.id, { tr: key, lang: tr.lang });
+    summaries.set(a.id, {
+      id: a.id, dur: a.dur, status: cached ? 'cached' : 'done', lang: tr.lang,
+      tr: path.relative(p.root, reference(key)).split(path.sep).join('/'),
+      segments: lines.slice(0, debug ? lines.length : 8).map(({ s, e }) => [s, e]),
+      ...(lines.length > 8 && !debug && { remainingSegments: lines.length - 8 }),
+      top: keywords(tr.words, 3).map(({ k }) => k.slice(0, 32)),
+      ...(tr.approx && { approx: true }),
+      ...(debug && { engine: tr.engine, model: tr.model, words: tr.words.length }),
+    });
+  }
+  const auto = !inp.engine || inp.engine === 'auto';
+  const candidates: readonly Engine[] = auto ? engines : [inp.engine as Engine];
+  const pending: Asset[] = [];
+  for (const id of ids) {
+    try {
+      const a = assets.get(id);
+      if (!a) throw new TmepError('E_NOT_FOUND', `asset ${id} not found`, 'import it first');
+      if (a.kind === 'image') throw new TmepError('E_INPUT', `${id} is an image`);
+      if (!a.audio) throw new TmepError('E_MEDIA', `${id} has no audio stream`);
+      if (!inp.force) {
+        for (const engine of candidates) {
+          const key = transcriptKey(a, engine, inp);
+          let tr: Transcript | undefined;
+          try {
+            tr = await readJsonOr<Transcript | undefined>(reference(key), undefined);
+          } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+          }
+          if (tr?.v === 1 && tr.engine === engine && typeof tr.lang === 'string' && Array.isArray(tr.words) &&
+              tr.words.length && tr.words.every((w, i, all) => w && typeof w.w === 'string' && Number.isFinite(w.s) &&
+              Number.isFinite(w.e) && w.s >= (all[i - 1]?.e ?? 0) && w.e > w.s) &&
+              tr.words.at(-1)!.s <= a.dur + 1) {
+            await complete(a, key, tr, true);
+            break;
+          }
+        }
+      }
+      if (!summaries.has(id)) pending.push(a);
+    } catch (error) { fail(id, error); }
+  }
+  if (pending.length) {
+    let scratch: string | undefined;
+    try {
+      let engine = candidates[0]!;
+      if (auto && !((await findWhisperCpp()) && (await resolveGgmlModel(inp.model)))) {
+        engine = await hasFasterWhisper() ? 'faster-whisper' : 'whisper.cpp';
+      }
+      if (engine === 'whisper.cpp') {
+        if (!(await findWhisperCpp())) throw new TmepError('E_ENGINE_MISSING', 'whisper-cli not found', 'set TMEP_WHISPER_CPP to the executable path or install whisper.cpp');
+        if (!(await resolveGgmlModel(inp.model))) throw new TmepError('E_ENGINE_MISSING', 'whisper.cpp model not found', 'set TMEP_WHISPER_MODEL to a local GGML file or pass --model');
+      }
+      const ready: Asset[] = [];
+      const wavs: string[] = [];
+      for (const a of pending) {
+        try {
+          const wav = await speechWav(p, a, inp.signal);
+          ready.push(a);
+          wavs.push(wav);
+        } catch (error) { fail(a.id, error); }
+      }
+      if (ready.length) {
+        await fsp.mkdir(p.workPath(), { recursive: true });
+        scratch = await fsp.mkdtemp(p.workPath('speech-'));
+        const results = await (engine === 'whisper.cpp' ? whisperCppBatch : fasterWhisperBatch)(wavs, scratch, inp);
+        for (const [i, a] of ready.entries()) {
+          try {
+            const tr = results[i]!;
+            if (tr instanceof Error) throw tr;
+            await complete(a, transcriptKey(a, engine, inp), tr, false);
+          } catch (error) { fail(a.id, error); }
+        }
+      }
+    } catch (error) {
+      for (const { id } of pending) if (!failures.has(id) && !summaries.has(id)) fail(id, error);
+    } finally {
+      if (scratch) await fsp.rm(scratch, { recursive: true, force: true, maxRetries: 5 });
+    }
+  }
+  return { ok: failures.size ? 0 : 1, assets: ids.flatMap((id) => summaries.get(id) ?? []), failures: ids.flatMap((id) => failures.get(id) ?? []) };
 }
 
 // ---------------------------------------------------------------- plan
