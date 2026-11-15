@@ -47,6 +47,7 @@ import { transcribeWhisperCpp, transcribeFasterWhisper, findWhisperCpp, resolveG
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
 import { compileStoryboard, storyboardSchema, STORYBOARD_FPS } from '../../story/src/storyboard.ts';
+export { planScript } from '../../story/src/script.ts';
 import { TEMPLATES } from '../../story/src/templates.ts';
 import { PRESET_NAMES, presetCatalog } from '../../motion/src/presets.ts';
 import { compileScenes, diagnoseScenes, sceneRange } from '../../motion/src/scene.ts';
