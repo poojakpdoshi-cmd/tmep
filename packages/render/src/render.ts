@@ -26,6 +26,7 @@ import {
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
 import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
+import { rasterIdentity, rasterizeVectorRun, VECTOR_VERSION } from '../../motion/src/vector.ts';
 import { stageFonts } from '../../motion/src/fonts.ts';
 import { planUnits, unitArgs, outSize, type MediaRef, type EncParams, type Unit } from './graph.ts';
 import { renderAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
@@ -203,6 +204,13 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const layers: (Omit<SceneGraphic, 'z'> & { z?: number })[] = [...compiled.layers, ...(scenes?.layers ?? [])];
   const overlays = layers.map(({ ass, id, ...g }, i) => ({ ...g, file: `gfx-fx-${i}.ass` }));
   await Promise.all(layers.map((g, i) => fsp.writeFile(path.join(work, overlays[i]!.file), g.ass)));
+  // Path layers become content-addressed transparent frame sequences at the output size,
+  // rasterized below only when an uncached unit needs them.
+  const vectors = (scenes?.vectors ?? []).map((run) => {
+    const key = hashOf({ v: VECTOR_VERSION, W, H, run: rasterIdentity(run) });
+    return { run, key, overlay: { file: '', at: run.at, d: run.d, fx: [], z: run.z, seq: project.cachePath('vectors', key) } };
+  });
+  const gfxOverlays = [...overlays, ...vectors.map((v) => v.overlay)];
   const fonts = [...compiled.fonts, ...(scenes?.fonts ?? [])];
   const hasFonts = fonts.some((f) => f.file);
   if (hasFonts) stageFonts(fonts, work);
@@ -252,6 +260,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     const intervals = [
       ...scenes.layers.map(({ at, d }) => ({ at, d })),
       ...scenes.media.map(({ ref, d }) => ({ at: ref.at!, d })),
+      ...scenes.vectors.map(({ at, d }) => ({ at, d })),
     ];
     for (const unit of units) {
       const start = unit.startFrame / fps, end = (unit.startFrame + unit.frames) / fps;
@@ -260,6 +269,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       }
     }
   }
+  const overlaps = (g: { at: number; d: number }, u: Unit) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps;
   const unitDir = project.cachePath('units');
   await fsp.mkdir(unitDir, { recursive: true });
   const unitHash = (u: Unit) =>
@@ -275,10 +285,15 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
         .filter((x) => x.T !== undefined && x.T < (u.startFrame + u.frames) / fps && x.T + x.b.d > u.startFrame / fps)
         .map((x) => ({ ...x, T: r2(x.T! - u.startFrame / fps, 4) })),
       ass: sha256(assWindow(compiled.ass, u.startFrame / fps, (u.startFrame + u.frames) / fps)),
-      ...(layers.length ? {
-        gfxFx: layers
-          .filter((g) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps)
-          .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx, z: g.z ?? 10, ...(g.camera && { camera: g.camera }) })),
+      ...(layers.length || vectors.length ? {
+        gfxFx: [
+          ...layers
+            .filter((g) => g.at < (u.startFrame + u.frames) / fps && g.at + g.d > u.startFrame / fps)
+            .map((g) => ({ at: r2(g.at - u.startFrame / fps, 4), d: g.d, ass: sha256(g.ass), fx: g.fx, z: g.z ?? 10, ...(g.camera && { camera: g.camera }) })),
+          ...vectors
+            .filter(({ run }) => overlaps(run, u))
+            .map(({ run, key }) => ({ at: r2(run.at - u.startFrame / fps, 4), d: run.d, vec: key, z: run.z })),
+        ],
       } : {}),
       fonts: fontKey,
     });
@@ -357,6 +372,20 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       temps.delete(tmp);
     })().catch(fail);
 
+    for (const { run, overlay } of vectors) {
+      if (ctrl.signal.aborted || !todo.some((i) => overlaps(run, units[i]!)) || (await exists(overlay.seq))) continue;
+      const tmp = tmpFor(overlay.seq, '');
+      try {
+        await rasterizeVectorRun(run, W, H, tmp, ctrl.signal);
+        // A concurrent render may publish the same content-addressed sequence first.
+        await fsp.rename(tmp, overlay.seq).catch(async (e) => { if (!(await exists(overlay.seq))) throw e; });
+      } catch (e) {
+        fail(e);
+      } finally {
+        await fsp.rm(tmp, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+      }
+    }
+
     await pool(
       todo,
       par,
@@ -364,7 +393,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
         const u = units[i]!;
         const tmp = tmpFor(unitFiles[i]!, '.mp4');
         temps.add(tmp);
-        const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, overlays);
+        const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, gfxOverlays);
         await ffmpeg({
           args: await maybeScript(args, work),
           cwd: work,

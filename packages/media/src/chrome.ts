@@ -56,7 +56,15 @@ export class ChromePage {
     for (let i = 0; i < 200 && !port; i++) {
       await new Promise((r) => setTimeout(r, 50));
       const f = path.join(p.userDir, 'DevToolsActivePort');
-      if (existsSync(f)) port = Number(readFileSync(f, 'utf8').split('\n')[0]);
+      try {
+        port = Number(readFileSync(f, 'utf8').split('\n')[0]);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'EBUSY') {
+          p.close();
+          throw error;
+        }
+      }
       if (p.proc.exitCode !== null) break;
     }
     if (!port) {

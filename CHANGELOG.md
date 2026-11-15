@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Visual Engine V2 foundation: path layers
+
+- New Visual Scene layer kind `path`: SVG path data in a view box, stroke/fill/cap/glow from
+  reusable styles, and `draw` keys that trim the stroke along its length (draw-on, draw-off,
+  travelling segments) with the shared easings. Path layers use the existing box, timing,
+  groups, stagger, keyframes, camera and frame-level validation. Existing V1 scene specs remain supported.
+- Rendering: consecutive path layers of a scene are painted by a deterministic frame
+  rasterizer on the existing in-process Skia canvas (`@napi-rs/canvas`), with transforms and
+  opacity baked in, into one content-addressed transparent PNG sequence per run
+  (`.tmep/cache/vectors/`), composited as a single FFmpeg overlay and indexed by frame per
+  unit. No new dependency and no browser.
+- Example: `examples/path-reveal/scene.json`, an original 4 s synthetic animation, with
+  `bench/visual-scene-v2.ts` and `bench/visual-scene-v2-windows.ps1` (time, process-tree memory,
+  cached-frame equality, unit-boundary continuity). `bench/visual-scenes.ts` takes an optional
+  `rect|path` kind for a like-for-like comparison.
+
 ## Unreleased — Stabilization A5: long-timeline audio rendering (audit: new)
 
 - Fix: rendering a timeline of a few hundred clips failed on Windows with

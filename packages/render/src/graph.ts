@@ -7,6 +7,7 @@
  * re-encode the units they touch, previews can render a subset, and interrupted renders
  * resume. Audio is built separately, in bounded stages, and muxed in at the end (audio.ts).
  */
+import path from 'node:path';
 import { type Timeline, type Placed, type Clip, type BRoll, type Effect, resolveRef } from '../../core/src/index.ts';
 import { compileFx, compileOverlayFx, transformFilter } from './effects.ts';
 
@@ -41,6 +42,8 @@ export interface GfxOverlay {
   /** Explicit compositing order. Defaults to 10 for graphics. */
   z?: number;
   camera?: Effect[];
+  /** Directory of a pre-rasterized transparent PNG sequence (00000.png…) starting at `at`, used instead of `file`. */
+  seq?: string;
 }
 
 const n3 = (x: number) => String(Math.round(x * 1000) / 1000);
@@ -204,6 +207,15 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const len = e - s;
     const frames = Math.round(len * fps);
     const offset = s - layer.at;
+    if (layer.seq) {
+      // Frame-exact: the unit's first frame of the run is selected by index, not by seeking.
+      inputs.push('-framerate', String(fps), '-start_number', String(Math.round(offset * fps)), '-i', path.join(layer.seq, '%05d.png'));
+      g.push(`[${k}:v]setpts=PTS-STARTPTS,format=yuva420p,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${frames},setpts=PTS-STARTPTS+${n3(ls)}/TB[gfx${gi}]`);
+      g.push(`[${cur}][gfx${gi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[gc${gi}]`);
+      cur = `gc${gi}`;
+      k++;
+      return;
+    }
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
     const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset);
     const camera = layer.camera && transformFilter(layer.camera, W, H, fps, 'black', offset, true);

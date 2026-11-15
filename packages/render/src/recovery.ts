@@ -38,6 +38,7 @@ export async function recoverRenderFiles(project: Project, pid: number, out: unk
     removeMatching(project.cachePath('audio'), new RegExp(`^[a-f0-9]{20}\\.m4a${temp}\\.m4a$`)),
     removeMatching(project.cachePath('audio', 'stems'), new RegExp(`^[a-f0-9]{20}\\.wav${temp}\\.wav$`)),
     removeMatching(project.cachePath('sfx'), new RegExp(`^[a-z]+-v1\\.wav${temp}\\.wav$`)),
+    removeMatching(project.cachePath('vectors'), new RegExp(`^[a-f0-9]{20}${temp}$`), true),
     ...(typeof out === 'string' && path.isAbsolute(out)
       ? [removeMatching(path.dirname(out), new RegExp(`^${temp}\\.mp4$`), false, path.basename(out))]
       : []),

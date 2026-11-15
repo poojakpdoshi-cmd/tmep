@@ -36,6 +36,27 @@ A scene is a structured overlay on an existing TMEP timeline. The planning agent
 - Layer center and size are fractions of frame width and height. Camera offsets also use frame fractions. Camera rotation and zoom pivot around the frame center. Draw order follows the layer list within the scene. Scene `z` orders the scene relative to other overlays. Existing captions and shared ASS presets retain their top-layer behavior.
 - Text uses reusable color, font role and font size in reference pixels. Shapes include rectangles, ellipses and polygons with points expressed as fractions of their box. Image and video layers require imported assets and fit inside their box. Video `in` selects source seconds. Overlay audio is excluded.
 
+## Path layers
+
+A `path` layer draws SVG path data with a stroke reveal. It uses the same box, timing, groups, stagger, keys and camera as the other layers. A deterministic frame rasterizer paints it with the existing in-process Skia canvas (`@napi-rs/canvas`). No browser is used.
+
+```json
+{ "id": "wire", "kind": "path", "style": "accent", "x": 0.5, "y": 0.5, "w": 0.4, "h": 0.13,
+  "view": { "w": 432, "h": 250 }, "d": "M27 6 C27 140 405 110 405 244", "stroke": 6, "glow": 0,
+  "draw": [{ "t": 0, "to": 0 }, { "t": 0.6, "to": 1, "e": "out" }] }
+```
+
+- `d` is SVG path data in `view` units. It starts with a moveto and accepts all SVG commands, including minified arc flags. `view` defaults to 100 × 100. Like `preserveAspectRatio="xMidYMid meet"`, the view is scaled uniformly and centred in the layer box. A path whose bounds leave its view is reported as `clipping`.
+- The stroke color is the style color. `stroke` is the width in reference pixels (0 = none). `cap` is `round` (default), `butt` or `square`. Joins are round. `fill` is an optional fill color painted under the stroke, unaffected by `draw`. `glow` is a stroke-colored blur radius in reference pixels. Stroke width scales with layer and camera scale, but glow radius does not.
+- `draw` keys trim the stroke to the interval `from`–`to` of total path length, across subpaths in order. Defaults: `from` 0, `to` 1 (fully drawn). Keys use active-layer time, the shared easings and hold rules. Animate `to` for a draw-on, `from` for a draw-off, or both for a segment that travels along the path.
+- To fade a fill in after a draw-on, add a second path layer with `stroke: 0` and opacity keys.
+
+Consecutive path layers in a scene become one transparent PNG frame sequence and one FFmpeg overlay. Layer and camera transforms and opacity are painted into the frames. They use the same sampled keys and composition as the validator and the FFmpeg transform of other layers. A frame is a pure function of the scene spec, the frame index and the output size. The sequence is cached in `.tmep/cache/vectors/` by content. IDs, timeline position and compositing order are excluded from the key, so moving or re-adding a scene reuses its frames. A preview rasterizes at preview size. Rasterization happens only when an uncached video unit needs the run, and it rasterizes the whole run. Each unit selects its frames by index, which keeps animation frame-exact across unit boundaries.
+
+Example: [`examples/path-reveal/scene.json`](../examples/path-reveal/scene.json) is an original 4-second synthetic request/response animation. Render it with `node bench/visual-scene-v2.ts setup|cold|verify <new-dir> [preview|full]`.
+
+Limits: Skia antialiasing can differ slightly between platforms or `@napi-rs/canvas` versions, and cached frames are reused only on the same key (`VECTOR_VERSION`). Glow, fill and stroke extend past the path's geometric bounds and are not covered by the view-box check. Path layers are excluded from rectangle collision checks, like ellipses and polygons. There are no gradients, dashes, masks, morphing or text-on-path. A browser rasterizer (for GSAP or Three.js) is not part of this change. The Windows benchmark can compare Skia with headless Chrome. V2 performance remains unverified. V1 ASS shapes and path layers can render the same style color slightly differently.
+
 ## Validation and limits
 
 Input rejects unknown fields and effects, broken references, invalid timing, discontinuous hold keys and out-of-range assets. At each output frame, the checker tests transformed box bounds against the frame and explicit safe insets. It checks intersecting boxes for rectangle and text layers within a scene. Caption checks use a conservative full-width band while a caption page is active and check its vertical bounds against the requested safe area. Set `overlap: true` on an intentional background or overlap layer, and `bleed: true` on layers allowed to cross the frame or safe area.
