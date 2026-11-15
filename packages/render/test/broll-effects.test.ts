@@ -21,9 +21,13 @@ const mask = (extra: Partial<FxMask> = {}): FxMask => ({
 });
 
 /** An opaque white overlay, over a blue base. Return actual decoded RGB pixels. */
-function render(fx: Effect[], timeOffset = 0, preserveInputAlpha = false): Buffer[] {
-  const frag = compileOverlayFx(fx, S, S, FPS, FPS, 'b0', timeOffset);
+function render(fx: Effect[], timeOffset = 0, preserveInputAlpha = false, legacyOpacityPlane = false): Buffer[] {
+  let frag = compileOverlayFx(fx, S, S, FPS, FPS, 'b0', timeOffset);
   assert.ok(frag);
+  if (legacyOpacityPlane) {
+    assert.match(frag, /color=c=black:s=2x2:/);
+    frag = frag.replace('color=c=black:s=2x2:', `color=c=black:s=${S / 2}x${S / 2}:`);
+  }
   const alpha = preserveInputAlpha ? ',format=rgba,colorchannelmixer=aa=0.5' : '';
   const filter = `[0:v]${alpha ? 'format=rgba' + alpha : 'format=yuva420p'},${frag}[fg];` +
     `color=c=blue:s=${S}x${S}:r=${FPS}:d=1[bg];` +
@@ -94,4 +98,11 @@ test('ffmpeg: source alpha is multiplied by effect alpha, not overwritten', { sk
   const f = render([mask({ w: 1, h: 1 })], 0, true)[4]!;
   const c = px(f, 32, 32);
   assert.ok(c[0]! > 85 && c[0]! < 175, `source alpha should remain ~0.5: ${c}`);
+});
+
+test('ffmpeg: uniform opacity matches the old alpha plane before and across unit offsets', { skip: !hasFFmpeg }, () => {
+  for (const keyframes of ['0:o=0.47', '0:o=0;0.6:o=0.83,x=0.12,e=io;1.2:o=0.41,x=-0.1']) {
+    const fx: Effect[] = [{ type: 'kf', keys: parseKeys(keyframes) }];
+    for (const offset of [0, 0.5]) assert.deepEqual(render(fx, offset, true), render(fx, offset, true, true));
+  }
 });

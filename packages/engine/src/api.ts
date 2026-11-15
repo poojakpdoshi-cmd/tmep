@@ -35,6 +35,7 @@ import {
   RATIOS,
   VERSION,
   PROTOCOL,
+  visualSceneSchema,
 } from '../../core/src/index.ts';
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
@@ -44,6 +45,7 @@ import { sentences, speechStats, keywords, searchSentences } from '../../speech/
 import { planTimeline } from '../../story/src/planner.ts';
 import { TEMPLATES } from '../../story/src/templates.ts';
 import { PRESET_NAMES, presetCatalog } from '../../motion/src/presets.ts';
+import { compileScenes, diagnoseScenes, sceneRange } from '../../motion/src/scene.ts';
 import { ICON_NAMES } from '../../motion/src/icons.ts';
 import { SFX, SFX_KINDS } from '../../render/src/sfx.ts';
 import { renderTimeline, contactSheet, type RenderOptions } from '../../render/src/render.ts';
@@ -246,12 +248,29 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
     if (typeof src === 'string' && !(src in c.transcripts) && c.assets[src]) Object.assign(c.transcripts, await transcriptsFor(p, [src]));
   }
   const { tl, notes, created } = applyOps(base, inp.ops, c);
+  if (tl.scenes?.length) {
+    // Resolve scene cues against the final batch, including clips added by compact string ops.
+    const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
+    compileScenes(tl, timelineWords(tl, transcripts), new Map(Object.entries(c.assets)));
+  }
   const rev = await p.commit(tl, inp.ops, inp.note);
   return shape(ctx.detail, { ok: 1, rev, dur: r2(duration(tl)), ...(created.length ? { ids: created } : {}) }, { was: before, did: notes }, { diff: diffTimelines(base, tl) });
 }
 
 // ---------------------------------------------------------------- inspect
-export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number }): Promise<Record<string, unknown>> {
+export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown }): Promise<Record<string, unknown>> {
+  if (inp.what === 'scenes') {
+    const p = await openProject(ctx.project, false);
+    const tl = await p.timeline(inp.rev);
+    const words = timelineWords(tl, await transcriptsFor(p, tl.clips.map((c) => c.src)));
+    if (inp.spec !== undefined && inp.scene !== undefined) throw new TmepError('E_INPUT', 'choose scene or spec for diagnostics');
+    if (inp.spec !== undefined) tl.scenes = [{ id: 'draft', spec: inp.spec as never }];
+    if (inp.scene !== undefined) {
+      tl.scenes = tl.scenes?.filter(({ id }) => id === inp.scene);
+      if (!tl.scenes?.length) throw new TmepError('E_NOT_FOUND', `scene ${inp.scene} not found`);
+    }
+    return diagnoseScenes(tl, words, new Map((await p.assets()).map((a) => [a.id, a])));
+  }
   const p = await openProject(ctx.project);
   const what = inp.what ?? 'project';
   switch (what) {
@@ -292,7 +311,10 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
         .filter((x) => x.t !== undefined && x.t < b && x.t + x.d >= a)
         .sort((x, y) => x.t! - y.t!)
         .map((x) => `${x.id} ${x.k}@${r2(x.t!)}${x.d ? `+${r2(x.d)}` : ''}${x.extra}`);
-      return shape(ctx.detail, { rev: inp.rev ?? (await p.manifest()).head, dur: r2(duration(tl)), clips, items }, { cap: `${tl.captions.style}/${tl.captions.pos}`, fmt: `${tl.settings.ratio}@${tl.settings.fps}`, music: tl.music ? `${tl.music.src} ${tl.music.vol}dB${tl.music.duck ? ' duck' : ''}` : undefined, lufs: tl.loudness }, { settings: tl.settings, captions: tl.captions });
+      return shape(ctx.detail, { rev: inp.rev ?? (await p.manifest()).head, dur: r2(duration(tl)), clips, items,
+        ...(tl.scenes?.length && { scenes: tl.scenes.map(({ id }) => id) }) },
+        { cap: `${tl.captions.style}/${tl.captions.pos}`, fmt: `${tl.settings.ratio}@${tl.settings.fps}`, music: tl.music ? `${tl.music.src} ${tl.music.vol}dB${tl.music.duck ? ' duck' : ''}` : undefined, lufs: tl.loudness },
+        { settings: tl.settings, captions: tl.captions, ...(tl.scenes?.length && { sceneSpecs: tl.scenes }) });
     }
     case 'transcript': {
       let words: { w: string; s: number; e: number; k?: number }[];
@@ -372,22 +394,34 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
 }
 
 // ---------------------------------------------------------------- render
-export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { range?: (number | string)[]; wait?: number; frames?: number }): Promise<Record<string, unknown>> {
+export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { range?: (number | string)[]; wait?: number; frames?: number; scene?: string }): Promise<Record<string, unknown>> {
   if (inp.quality && !['draft', 'standard', 'high'].includes(inp.quality)) throw new TmepError('E_INPUT', 'quality must be draft|standard|high');
   if (inp.range && inp.range.length !== 2) throw new TmepError('E_INPUT', 'range needs [start, end]');
-  const p = await openProject(ctx.project);
+  const p = await openProject(ctx.project, inp.scene === undefined);
   const m = await p.manifest();
   const tl = await p.timeline();
   const transcripts = await transcriptsFor(p, tl.clips.map((c) => c.src));
   let range: [number, number] | undefined;
-  if (inp.range) {
+  if (inp.scene !== undefined) {
+    const scene = tl.scenes?.find(({ id }) => id === inp.scene);
+    if (!scene) throw new TmepError('E_NOT_FOUND', `scene ${inp.scene} not found`);
+    if (inp.alpha) throw new TmepError('E_INPUT', 'scene previews use normal compositing');
+    const [start, end] = sceneRange(tl, timelineWords(tl, transcripts), scene.spec);
+    const local = inp.range ?? [0, end - start];
+    if (local.some((v) => typeof v !== 'number' || !Number.isFinite(v)) ||
+        Number(local[0]) < 0 || Number(local[1]) <= Number(local[0]) || Number(local[1]) > end - start + 1e-9) {
+      throw new TmepError('E_RANGE', 'scene preview range must be increasing scene-local seconds within the scene');
+    }
+    range = [start + Number(local[0]), Math.min(end, start + Number(local[1]))];
+  } else if (inp.range) {
     const words = timelineWords(tl, transcripts);
     const a = resolveAnchor(tl, words, inp.range[0]).t;
     const b = resolveAnchor(tl, words, inp.range[1]);
     range = [a, b.endT !== undefined && typeof inp.range[1] === 'string' && !String(inp.range[1]).startsWith('w:') ? b.endT : b.t];
   }
-  const opts: RenderOptions = { preview: inp.preview, range, quality: inp.quality, out: inp.out ? path.resolve(ctx.project, inp.out) : undefined, alpha: inp.alpha, parallel: inp.parallel, encoder: inp.encoder };
-  if (!opts.out && !opts.alpha) opts.out = p.rendersPath(`r${m.head}${inp.preview ? '-preview' : ''}${range ? `-${range.map((x) => r2(x, 1)).join('-')}` : ''}.mp4`);
+  const preview = inp.scene !== undefined ? true : inp.preview;
+  const opts: RenderOptions = { preview, range, quality: inp.quality, out: inp.out ? path.resolve(ctx.project, inp.out) : undefined, alpha: inp.alpha, parallel: inp.parallel, encoder: inp.encoder };
+  if (!opts.out && !opts.alpha) opts.out = p.rendersPath(`r${m.head}${preview ? '-preview' : ''}${range ? `-${range.map((x) => r2(x, inp.scene !== undefined ? 3 : 1)).join('-')}` : ''}.mp4`);
   const job = await startJob(p, 'render', m.head, { ...opts }, async (signal, progress) => {
     const res = await renderTimeline(p, tl, transcripts, opts, { signal, onProgress: progress });
     const out: Record<string, unknown> = { ...res, out: path.relative(ctx.project, res.out) || res.out };
@@ -413,6 +447,8 @@ export async function status(ctx: Ctx, inp: { job: string; cancel?: boolean; wai
 // ---------------------------------------------------------------- help (on-demand docs keep tool schemas tiny)
 export function help(topic = 'workflow'): Record<string, unknown> {
   switch (topic) {
+    case 'scene':
+      return { op: { op: 'scene', spec: visualSceneSchema.json }, doc: 'docs/VISUAL_SCENE.md' };
     case 'workflow':
       return {
         steps: ['video_import {paths}', 'video_transcribe {asset}', 'video_plan {template, target?, title?}', 'video_render {preview:true}', 'video_edit {ops} (iterate)', 'video_render {}'],
@@ -437,7 +473,7 @@ export function help(topic = 'workflow'): Record<string, unknown> {
     case 'captions':
       return { styles: 'kinetic|karaoke|clean|boxed|none', fields: 'style,pos(lower|middle|upper),maxWords,upper,color,accent,size,font,emphasis,script(latin|native)', fix: 'op fix {find,replace} corrects transcript words in captions' };
     default:
-      throw new TmepError('E_INPUT', `unknown help topic "${topic}"`, 'topics: workflow,ops,anchors,presets,templates,sfx,icons,captions');
+      throw new TmepError('E_INPUT', `unknown help topic "${topic}"`, 'topics: workflow,ops,anchors,presets,templates,sfx,icons,captions,scene');
   }
 }
 

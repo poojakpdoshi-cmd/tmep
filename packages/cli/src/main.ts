@@ -57,10 +57,12 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   plan [--reference v2] [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
   edit <op> [<op>...]                ops as strings, e.g. "cut 3.2 4.0" "zoom @phrase to=1.2" "fx panleft c2"  (or --json '[...]')
   undo [n] | redo [n] | checkout <rev>
-  inspect [project|assets|timeline|transcript|silence|diff|log|jobs] [--asset v1] [--from s] [--to s] [--find q] [--words]
+  inspect [project|assets|timeline|transcript|silence|diff|log|jobs|scenes] [--asset v1] [--from s] [--to s] [--find q] [--words]
+  inspect scenes [--scene id | --spec json]
   render [--preview] [--range a,b] [--quality draft|standard|high] [--out file.mp4] [--alpha] [--frames n] [--detach]
   status <job> [--cancel] [--wait s] | jobs
-  help [workflow|ops|anchors|presets|templates|sfx|icons|captions]
+  render --scene id [--range localStart,localEnd]
+  help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene]
   doctor                             check ffmpeg, filters, speech engines
   mcp                                start the MCP server on stdio`;
 
@@ -145,7 +147,8 @@ export async function main(argv: string[]): Promise<number> {
         print(await api.edit(ctx, { checkout: Number(args._[0]) }), pretty);
         return 0;
       case 'inspect':
-        print(await api.inspect(ctx, { what: args._[0], asset: args.asset as string, from: args.from as number, to: args.to as number, find: args.find as string, words: !!args.words, max: args.max as number, rev: args.rev as number }), pretty);
+        print(await api.inspect(ctx, { what: args._[0], asset: args.asset as string, from: args.from as number, to: args.to as number, find: args.find as string, words: !!args.words, max: args.max as number, rev: args.rev as number,
+          ...(args._[0] === 'scenes' && { scene: args.scene as string, spec: args.spec === undefined ? undefined : JSON.parse(String(args.spec)) }) }), pretty);
         return 0;
       case 'render': {
         if (args.detach) {
@@ -160,7 +163,7 @@ export async function main(argv: string[]): Promise<number> {
           return 0;
         }
         const range = typeof args.range === 'string' ? (args.range.split(',').map((x) => (/^-?\d+(\.\d+)?$/.test(x) ? Number(x) : x)) as (number | string)[]) : undefined;
-        const res = await api.render(ctx, { preview: !!args.preview, range, quality: args.quality as never, out: args.out as string, alpha: !!args.alpha, frames: args.frames as number, wait: 1e9 });
+        const res = await api.render(ctx, { preview: !!args.preview, range, scene: args.scene as string, quality: args.quality as never, out: args.out as string, alpha: !!args.alpha, frames: args.frames as number, wait: 1e9 });
         if (process.stderr.isTTY) process.stderr.write('\n');
         print(res, pretty);
         return res.state === 'done' ? 0 : 1;

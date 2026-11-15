@@ -5,6 +5,7 @@ export * from './timeline.ts';
 export * from './project.ts';
 export * from './ops.ts';
 export * from './effects.ts';
+export * from './scene.ts';
 
 export type Detail = 'minimal' | 'standard' | 'debug';
 

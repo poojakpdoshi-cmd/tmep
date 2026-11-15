@@ -50,14 +50,14 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_inspect',
-    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs; narrow with from,to,find,words,max.',
-    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), ...project, ...detail }),
+    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes. For scene diagnostics pass scene ID or draft spec.',
+    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), ...project, ...detail }),
     annotations: { readOnlyHint: true },
   },
   {
     name: 'video_render',
-    description: 'Render current revision to MP4 (background job, cached segments). preview: fast half-res; range [s,e]; alpha: graphics-only overlay; frames: contact sheet.',
-    schema: obj({ preview: bool().optional(), range: arr(anchor).optional(), quality: str().optional(), out: str().optional(), alpha: bool().optional(), frames: num().optional(), wait: num().optional(), ...project, ...detail }),
+    description: 'Render MP4 with cached segments. preview: half-res; range [s,e]; scene: half-res with scene-local range; alpha: graphics-only; frames: contact sheet.',
+    schema: obj({ preview: bool().optional(), range: arr(anchor).optional(), scene: str().optional(), quality: str().optional(), out: str().optional(), alpha: bool().optional(), frames: num().optional(), wait: num().optional(), ...project, ...detail }),
   },
   {
     name: 'video_status',
@@ -66,7 +66,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_help',
-    description: 'Reference: workflow|ops|anchors|presets|templates|sfx|icons|captions.',
+    description: 'Reference: workflow|ops|anchors|presets|templates|sfx|icons|captions|scene.',
     schema: obj({ topic: str().optional() }),
     annotations: { readOnlyHint: true },
   },
