@@ -27,14 +27,7 @@ const layer = {
   overlap: bool().default(false), bleed: bool().default(false),
 };
 
-/** The same strict contract is used for runtime input and agent schema discovery. */
-export const visualSceneSchema = obj({
-  v: oneOf([1] as const),
-  at: timing,
-  offset: num({ min: -60, max: 60 }).default(0),
-  duration: num({ min: .01, max: 60 }),
-  ratio: oneOf(['9:16', '16:9', '1:1', '4:5'] as const).optional(),
-  z: num({ int: true, min: -100, max: 100 }).default(0),
+const content = {
   safe: obj({ left: inset.default(0), top: inset.default(0), right: inset.default(0), bottom: inset.default(0) }).optional(),
   styles: arr(obj({
     id, color: color.default('#FFFFFF'), font: oneOf(['regular', 'bold', 'heavy'] as const).default('regular'),
@@ -56,6 +49,19 @@ export const visualSceneSchema = obj({
       cap: oneOf(['round', 'butt', 'square'] as const).default('round'),
       draw: arr(drawKey, { min: 1, max: 12 }).optional() }),
   ]), { min: 1, max: 16 }),
+};
+
+export const visualSceneContent = obj(content);
+
+/** The same strict contract is used for runtime input and agent schema discovery. */
+export const visualSceneSchema = obj({
+  v: oneOf([1] as const),
+  at: timing,
+  offset: num({ min: -60, max: 60 }).default(0),
+  duration: num({ min: .01, max: 60 }),
+  ratio: oneOf(['9:16', '16:9', '1:1', '4:5'] as const).optional(),
+  z: num({ int: true, min: -100, max: 100 }).default(0),
+  ...content,
 });
 
 export type VisualScene = Infer<typeof visualSceneSchema>;

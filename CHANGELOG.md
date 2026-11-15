@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - Storyboard-to-video foundation (November 15, 2026)
+
+- Compile an ordered, frame-timed storyboard into an editable 9:16 video project. Includes animated process and explanation templates, custom Visual Scenes, cuts and fades, and optional imported narration. See [Storyboard](docs/STORYBOARD.md).
+
 ## Unreleased — Visual Engine V2 foundation: path layers
 
 - New Visual Scene layer kind `path`: SVG path data in a view box, stroke/fill/cap/glow from
