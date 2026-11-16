@@ -17,6 +17,9 @@ def main() -> int:
     ap.add_argument("--prompt", default=None)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--compute", default="default")
+    ap.add_argument("--vad", choices=["on", "off"], default="on")
+    ap.add_argument("--vad-threshold", type=float, default=0.5)
+    ap.add_argument("--vad-pad-ms", type=int, default=400)
     a = ap.parse_args()
 
     from faster_whisper import WhisperModel  # imported late so --help works without it
@@ -45,7 +48,8 @@ def transcribe(model, audio, a):
         language=a.lang or None,
         initial_prompt=a.prompt,
         word_timestamps=True,
-        vad_filter=True,
+        vad_filter=a.vad == "on",
+        vad_parameters={"threshold": a.vad_threshold, "speech_pad_ms": a.vad_pad_ms},
         beam_size=5,
     )
     words = []

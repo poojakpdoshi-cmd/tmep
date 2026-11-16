@@ -1,0 +1,180 @@
+{
+  "date": "2026-11-16",
+  "classification": "PRE-HACKATHON DEVELOPMENT",
+  "baseline": "bf16ae3 (merged PR #26)",
+  "environment": {
+    "os": "Linux",
+    "node": "24.22.1",
+    "ffmpeg": "7.1.5",
+    "whisperCpp": "v1.8.3",
+    "model": "ggml-base",
+    "vadModel": "silero-v6.2.0",
+    "threshold": 0.5,
+    "paddingMs": 400
+  },
+  "referenceText": [
+    "Keep the original files. Make a copy before editing.",
+    "Review the captions. Export the video after checking the sound."
+  ],
+  "silenceBeforeSeconds": 2,
+  "silenceAfterSeconds": 3,
+  "runs": [
+    {
+      "wallSeconds": 4.386428014999979,
+      "cpuSeconds": 13.570532,
+      "peakChildRssKiB": 291688,
+      "manifestBytes": 548,
+      "mode": "off",
+      "clips": [
+        {
+          "id": "v1",
+          "vad": null,
+          "referenceWords": 9,
+          "wordErrors": 5,
+          "firstWordSeconds": 0,
+          "approx": false
+        },
+        {
+          "id": "v2",
+          "vad": null,
+          "referenceWords": 10,
+          "wordErrors": 12,
+          "firstWordSeconds": 0,
+          "approx": true
+        }
+      ]
+    },
+    {
+      "wallSeconds": 6.133273823000081,
+      "cpuSeconds": 20.922988,
+      "peakChildRssKiB": 290448,
+      "manifestBytes": 860,
+      "mode": "on",
+      "clips": [
+        {
+          "id": "v1",
+          "vad": {
+            "status": "fallback",
+            "reason": "uncertain VAD transcript; full-audio fallback required",
+            "sourceSeconds": 8.704,
+            "processedSeconds": 12.824000000000002
+          },
+          "referenceWords": 9,
+          "wordErrors": 5,
+          "firstWordSeconds": 0,
+          "approx": false
+        },
+        {
+          "id": "v2",
+          "vad": {
+            "status": "unverified",
+            "processedSeconds": 5.02,
+            "sourceSeconds": 9.536,
+            "reason": "Speech selection can omit quiet speech; use --vad verify for a full-audio comparison"
+          },
+          "referenceWords": 10,
+          "wordErrors": 10,
+          "firstWordSeconds": 2.24,
+          "approx": false
+        }
+      ]
+    },
+    {
+      "wallSeconds": 7.491349543000069,
+      "cpuSeconds": 27.344358,
+      "peakChildRssKiB": 291840,
+      "manifestBytes": 847,
+      "mode": "verify",
+      "clips": [
+        {
+          "id": "v1",
+          "vad": {
+            "status": "fallback",
+            "reason": "uncertain VAD transcript; full-audio fallback required",
+            "sourceSeconds": 8.704,
+            "processedSeconds": 12.824000000000002
+          },
+          "referenceWords": 9,
+          "wordErrors": 5,
+          "firstWordSeconds": 0,
+          "approx": false
+        },
+        {
+          "id": "v2",
+          "vad": {
+            "status": "fallback",
+            "reason": "VAD text or timing differs; full-audio word data retained",
+            "sourceSeconds": 9.536,
+            "processedSeconds": 14.556
+          },
+          "referenceWords": 10,
+          "wordErrors": 12,
+          "firstWordSeconds": 0,
+          "approx": true
+        }
+      ]
+    },
+    {
+      "wallSeconds": 0.446278293999967,
+      "cpuSeconds": 0.6740379999999999,
+      "peakChildRssKiB": 152892,
+      "manifestBytes": 864,
+      "mode": "cached",
+      "clips": [
+        {
+          "id": "v1",
+          "vad": {
+            "status": "fallback",
+            "reason": "uncertain VAD transcript; full-audio fallback required",
+            "sourceSeconds": 8.704,
+            "processedSeconds": 12.824000000000002
+          },
+          "referenceWords": 9,
+          "wordErrors": 5,
+          "firstWordSeconds": 0,
+          "approx": false
+        },
+        {
+          "id": "v2",
+          "vad": {
+            "status": "unverified",
+            "processedSeconds": 5.02,
+            "sourceSeconds": 9.536,
+            "reason": "Speech selection can omit quiet speech; use --vad verify for a full-audio comparison"
+          },
+          "referenceWords": 10,
+          "wordErrors": 10,
+          "firstWordSeconds": 2.24,
+          "approx": false
+        }
+      ]
+    }
+  ],
+  "rawRender": {
+    "job": "j9a1553af",
+    "state": "done",
+    "out": "edited.mp4",
+    "dur": 18.167,
+    "size": "540x960",
+    "units": 2,
+    "cached": 1,
+    "s": 1.2
+  },
+  "streams": [
+    {
+      "codec_name": "h264",
+      "width": 540,
+      "height": 960
+    },
+    {
+      "codec_name": "aac"
+    }
+  ],
+  "limitations": [
+    "Single observed run per mode, not a statistical speed benchmark",
+    "RSS is maximum child RSS, not summed process-tree peak",
+    "Synthetic English only; Hindi/Hinglish and Faster-Whisper not measured",
+    "Provider billing usage not measured",
+    "Detector unit bug fixed; only affected modes repeated; original off measurement reused"
+  ]
+}

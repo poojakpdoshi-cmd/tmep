@@ -53,7 +53,7 @@ usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] 
   init [dir]                         create a project (default: current dir)
   import <files...>                  register media -> asset ids (v1, a1, i1)
   reference <asset> [--threshold 0.3] [--sampleFps 15] [--maxSeconds 120]  analyze reference cuts
-  transcribe-batch <asset...> [--engine auto|whisper.cpp|faster-whisper] [--lang en] [--model base] [--force]
+  transcribe-batch <asset...> [--engine auto|whisper.cpp|faster-whisper] [--lang en] [--model base] [--force] [--vad off|on|verify] [--vadModel path]
   transcribe <asset> [--engine auto|whisper.cpp|faster-whisper|import] [--lang auto|en|hi|hinglish] [--model base] [--file subs.srt] [--force]
   plan [--reference v2] [--template reel] [--src v1,v2] [--target 30] [--ratio 9:16] [--title "..."] [--music a1] [--no-sfx] [--no-graphics]
   script <file.txt> [--wpm 150] [--narration a1] [--compile-only | --render [--preview] [--out file.mp4]]
@@ -113,12 +113,12 @@ export async function main(argv: string[]): Promise<number> {
           maxSeconds: args.maxSeconds as number, minGapSec: args.minGapSec as number }), pretty);
         return 0;
       case 'transcribe-batch': {
-        const result = await api.transcribeBatch(ctx, { assets: args._, engine: args.engine as string, lang: args.lang as string, model: args.model as string, prompt: args.prompt as string, force: !!args.force });
+        const result = await api.transcribeBatch(ctx, { assets: args._, engine: args.engine as string, lang: args.lang as string, model: args.model as string, prompt: args.prompt as string, force: !!args.force, vad: args.vad as 'off' | 'on' | 'verify', vadModel: args.vadModel as string, vadThreshold: args.vadThreshold as number, vadPadMs: args.vadPadMs as number });
         print(result, pretty);
         return result.ok ? 0 : 1;
       }
       case 'transcribe':
-        print(await api.transcribe(ctx, { asset: String(args._[0] ?? ''), engine: args.engine as string, lang: args.lang as string, model: args.model as string, file: args.file as string, prompt: args.prompt as string, force: !!args.force }), pretty);
+        print(await api.transcribe(ctx, { asset: String(args._[0] ?? ''), engine: args.engine as string, lang: args.lang as string, model: args.model as string, file: args.file as string, prompt: args.prompt as string, force: !!args.force, vad: args.vad as 'off' | 'on' | 'verify', vadModel: args.vadModel as string, vadThreshold: args.vadThreshold as number, vadPadMs: args.vadPadMs as number }), pretty);
         return 0;
       case 'plan':
         print(
