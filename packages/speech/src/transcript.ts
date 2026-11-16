@@ -14,6 +14,7 @@ export interface Transcript {
   approx: boolean;
   words: Word[];
   createdAt: string;
+  vad?: { status: 'unverified' | 'verified' | 'fallback'; reason: string; processedSeconds?: number; sourceSeconds?: number };
 }
 
 export function makeTranscript(engine: string, lang: string, words: Word[], extra: { model?: string; approx?: boolean } = {}): Transcript {

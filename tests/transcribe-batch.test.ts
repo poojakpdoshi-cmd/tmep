@@ -4,7 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { hashOf, Project, writeJson } from '../packages/core/src/index.ts';
+import { mediaHash, Project, writeJson } from '../packages/core/src/index.ts';
+import { speechIdentity, speechCacheKey } from '../packages/speech/src/cache.ts';
 import { makeTranscript, parseWhisperCppJson } from '../packages/speech/src/transcript.ts';
 
 test('Whisper.cpp preserves usable token starts and flags reconstructed timing', () => {
@@ -35,9 +36,15 @@ test('batch preserves precise cached words, reports partial failures, and invali
   const inputs = [];
   for (let i = 0; i < 2; i++) {
     const media = path.join(root, `clip ${i}.wav`);
-    await writeFile(media, '');
-    const { asset } = await project.addAsset({ kind: 'audio', audio: true, path: media, dur: 2, hash: 'data' + i, name: media, size: 0 });
-    const key = hashOf({ a: asset.hash, engine: 'whisper.cpp', lang: 'en', model: null, prompt: null, f: null });
+    await writeFile(media, String(i));
+    const { asset } = await project.addAsset({ kind: 'audio', audio: true, path: media, dur: 2, hash: mediaHash(media), name: media, size: 0 });
+    const before = process.env.TMEP_WHISPER_MODEL;
+    const beforeBin = process.env.TMEP_WHISPER_CPP;
+    process.env.TMEP_WHISPER_CPP = binary;
+    process.env.TMEP_WHISPER_MODEL = model;
+    const key = speechCacheKey(asset.hash, 'whisper.cpp', { lang: 'en' }, await speechIdentity('whisper.cpp', { lang: 'en' }));
+    if (before === undefined) delete process.env.TMEP_WHISPER_MODEL; else process.env.TMEP_WHISPER_MODEL = before;
+    if (beforeBin === undefined) delete process.env.TMEP_WHISPER_CPP; else process.env.TMEP_WHISPER_CPP = beforeBin;
     const cache = project.cachePath('tr', key + '.json');
     const tr = makeTranscript('whisper.cpp', 'en', [
       { w: 'Green', s: .123, e: .501 },
@@ -60,7 +67,7 @@ test('batch preserves precise cached words, reports partial failures, and invali
   assert.equal(partial.failures[0].err.code, 'E_NOT_FOUND');
   assert.deepEqual(partial.assets[0].segments, [[.123, .994]]);
   assert.equal(partial.assets[0].tr, `.tmep/cache/tr/${inputs[0]!.key}.json`);
-  assert.ok(Buffer.byteLength(JSON.stringify(partial)) < 750);
+  assert.ok(Buffer.byteLength(JSON.stringify(partial)) < 1000);
   for (const { cache, tr } of inputs) assert.deepEqual(JSON.parse(await readFile(cache, 'utf8')), JSON.parse(JSON.stringify(tr)));
   assert.equal(cli(['transcribe', 'a1'], 0).cached, true);
 

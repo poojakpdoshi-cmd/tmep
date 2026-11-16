@@ -44,7 +44,10 @@ import {
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
 import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, transcriptText } from '../../speech/src/transcript.ts';
-import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
+import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus, type EngineOptions } from '../../speech/src/engines.ts';
+import { speechIdentity, speechCacheKey, assertSource } from '../../speech/src/cache.ts';
+import { validateVad } from '../../speech/src/vad.ts';
+export { TokenBudget, editingContext } from './token-budget.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
 import { compileStoryboard, storyboardSchema, STORYBOARD_FPS } from '../../story/src/storyboard.ts';
@@ -146,11 +149,7 @@ export async function transcriptsFor(p: Project, ids: Iterable<string>): Promise
   return out;
 }
 
-interface SpeechOptions { engine?: string; lang?: string; model?: string; prompt?: string; force?: boolean; signal?: AbortSignal }
-
-function transcriptKey(a: Asset, engine: string, inp: SpeechOptions, fileHash?: string): string {
-  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model: inp.model ?? null, prompt: inp.prompt ?? null, f: fileHash ?? null });
-}
+interface SpeechOptions extends EngineOptions { engine?: string; force?: boolean }
 
 async function speechWav(p: Project, a: Asset, signal?: AbortSignal): Promise<string> {
   const wav = p.cachePath('wav', `${a.hash}.wav`);
@@ -178,7 +177,7 @@ async function saveTranscriptText(p: Project, a: Asset, lines: ReturnType<typeof
   return txt;
 }
 
-export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string; lang?: string; model?: string; file?: string; prompt?: string; force?: boolean; signal?: AbortSignal }): Promise<Record<string, unknown>> {
+export async function transcribe(ctx: Ctx, inp: SpeechOptions & { asset: string; file?: string }): Promise<Record<string, unknown>> {
   const p = await openProject(ctx.project);
   const a = await p.asset(inp.asset);
   if (a.kind === 'image') throw new TmepError('E_INPUT', `${a.id} is an image`);
@@ -190,8 +189,10 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
     else if (await hasFasterWhisper()) engine = 'faster-whisper';
     else throw new TmepError('E_ENGINE_MISSING', 'no local speech engine installed', 'install whisper.cpp (+ ggml model) or faster-whisper, or pass file:"subs.srt|.vtt|.json" to import a transcript; see `tmep doctor`');
   }
+  validateVad(inp);
+  assertSource(a);
   const fileHash = inp.file ? mediaHash(path.resolve(ctx.project, inp.file)) : undefined;
-  const key = transcriptKey(a, engine, inp, fileHash);
+  const key = speechCacheKey(a.hash, engine, inp, await speechIdentity(engine, inp), fileHash);
   const cacheFile = p.cachePath('tr', `${key}.json`);
   let tr = inp.force ? undefined : await readJsonOr<Transcript | undefined>(cacheFile, undefined);
   const cached = !!tr;
@@ -205,8 +206,8 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
       tr = makeTranscript('import', inp.lang && inp.lang !== 'auto' ? inp.lang : (parsed.lang ?? 'und'), parsed.words, { approx: parsed.approx });
     } else {
       const wav = await speechWav(p, a, inp.signal);
-      if (engine === 'whisper.cpp') tr = await transcribeWhisperCpp(wav, p.workPath(`wcpp-${key}`), { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
-      else if (engine === 'faster-whisper') tr = await transcribeFasterWhisper(wav, { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
+      if (engine === 'whisper.cpp') tr = await transcribeWhisperCpp(wav, p.workPath(`wcpp-${key}`), inp);
+      else if (engine === 'faster-whisper') tr = await transcribeFasterWhisper(wav, inp);
       else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, import');
     }
     validateTranscript(tr, a);
@@ -218,7 +219,7 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
   const st = speechStats(tr.words);
   return shape(
     ctx.detail,
-    { ok: 1, id: a.id, words: st.words, lang: tr.lang, ...(cached ? { cached: true } : {}) },
+    { ok: 1, id: a.id, words: st.words, lang: tr.lang, ...(tr.vad && { vad: tr.vad }), ...(cached ? { cached: true } : {}) },
     { engine: tr.engine, speech: st.speech, pauses: st.pauses, fillers: st.fillers, wpm: st.wpm, sentences: lines.length, top: keywords(tr.words, 6).map((k) => k.k), ...(tr.approx ? { approx: true } : {}) },
     { file: path.relative(ctx.project, txt), cache: cacheFile, ms: Date.now() - t0, model: tr.model },
   );
@@ -226,6 +227,7 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
 
 /** Return only editing metadata, with full word timings in the existing transcript cache. */
 export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: string[] }) {
+  validateVad(inp);
   const engines = ['whisper.cpp', 'faster-whisper'] as const;
   type Engine = typeof engines[number];
   if (!Array.isArray(inp.assets) || inp.assets.length < 1 || inp.assets.length > 64 ||
@@ -263,6 +265,8 @@ export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: s
       tr: path.relative(p.root, reference(key)).split(path.sep).join('/'),
       segments: lines.slice(0, debug ? lines.length : 8).map(({ s, e }) => [s, e]),
       ...(lines.length > 8 && !debug && { remainingSegments: lines.length - 8 }),
+      cues: lines.slice(0, 8).map(({ s, e, text }) => ({ s, e, text: text.slice(0, 120), ...(text.length > 120 && { truncated: true }) })),
+      ...(tr.vad && { vad: tr.vad }),
       top: keywords(tr.words, 3).map(({ k }) => k.slice(0, 32)),
       ...(tr.approx && { approx: true }),
       ...(debug && { engine: tr.engine, model: tr.model, words: tr.words.length }),
@@ -270,6 +274,11 @@ export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: s
   }
   const auto = !inp.engine || inp.engine === 'auto';
   const candidates: readonly Engine[] = auto ? engines : [inp.engine as Engine];
+  const identities = new Map<string, Promise<unknown>>();
+  async function keyFor(a: Asset, engine: string) {
+    if (!identities.has(engine)) identities.set(engine, speechIdentity(engine, inp));
+    return speechCacheKey(a.hash, engine, inp, await identities.get(engine));
+  }
   const pending: Asset[] = [];
   for (const id of ids) {
     try {
@@ -277,9 +286,10 @@ export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: s
       if (!a) throw new TmepError('E_NOT_FOUND', `asset ${id} not found`, 'import it first');
       if (a.kind === 'image') throw new TmepError('E_INPUT', `${id} is an image`);
       if (!a.audio) throw new TmepError('E_MEDIA', `${id} has no audio stream`);
+      assertSource(a);
       if (!inp.force) {
         for (const engine of candidates) {
-          const key = transcriptKey(a, engine, inp);
+          const key = await keyFor(a, engine);
           let tr: Transcript | undefined;
           try {
             tr = await readJsonOr<Transcript | undefined>(reference(key), undefined);
@@ -326,7 +336,7 @@ export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: s
           try {
             const tr = results[i]!;
             if (tr instanceof Error) throw tr;
-            await complete(a, transcriptKey(a, engine, inp), tr, false);
+            await complete(a, await keyFor(a, engine), tr, false);
           } catch (error) { fail(a.id, error); }
         }
       }

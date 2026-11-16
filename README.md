@@ -123,14 +123,16 @@ Pre-hackathon development, November 16, 2026. After importing your clips, run on
 node bin/tmep.js transcribe-batch v1 a1 a2 -p "./my project" --engine whisper.cpp --lang en
 ```
 
-The command emits one JSON manifest with asset IDs, durations, languages, up to eight source-time speech spans per asset, and up to three deterministic keywords. `tr` points to the full word-level JSON relative to the project. Use `--detail debug` for all spans and engine diagnostics, or `inspect transcript --asset v1 --words` for word-level inspection. `approx: true` marks transcripts containing reconstructed timing.
+The command emits one JSON manifest with asset IDs, durations, languages, up to eight source-time speech spans and bounded extractive text cues per asset, and up to three deterministic keywords. Cues may be truncated; full text stays local. `tr` points to the full word-level JSON relative to the project. Use `--detail debug` for all spans and engine diagnostics, or `inspect transcript --asset v1 --words` for word-level inspection. `approx: true` marks transcripts containing reconstructed timing.
 
-Valid cached results for the same media and options are reused. `--force` bypasses transcript cache reads. Reimport media if source bytes change. Use an explicit `--model` or `--force` when replacing a model selected through the environment. Batch accepts up to 64 IDs. Failures appear separately, and any failure yields exit code 1 while successful transcripts remain saved. Retry just the failed IDs.
+Valid cached results for the same media and options are reused. `--force` bypasses transcript cache reads. Reimport media if source bytes change. Local model and native executable fingerprints, resolved model configuration and VAD settings now invalidate transcript caches. Old PR #26 transcript keys miss once; WAV caches remain reusable. Changed imported source identities require reimport. For named Faster-Whisper models, use `--force` after replacing the backend or its managed model snapshot; use a local model directory for content fingerprinting. Batch accepts up to 64 IDs. Failures appear separately, and any failure yields exit code 1 while successful transcripts remain saved. Retry just the failed IDs.
 
 Whisper.cpp processes each command-line-sized group in a single invocation. Faster-Whisper uses one Python worker for uncached inputs and requires a locally available model. Existing single-asset CLI and MCP calls still work.
 
-On two synthetic speech clips on Windows with Whisper.cpp 1.8.3 and GGML base, the cached batch took one CLI call and printed 393 bytes. Two single-asset calls printed 428 bytes. Adding two transcript inspections for timestamp context took four calls and printed 689 bytes total. These counts are CLI calls and stdout bytes, with no provider token measurement.
+Historical PR #26 measurement (before text cues were added): on two synthetic speech clips on Windows with Whisper.cpp 1.8.3 and GGML base, the cached batch took one CLI call and printed 393 bytes. Two single-asset calls printed 428 bytes. Adding two transcript inspections for timestamp context took four calls and printed 689 bytes total. These counts are CLI calls and stdout bytes, with no provider token measurement.
 
+
+Optional timestamp-safe native VAD, accuracy verification, compact editing context and the provider-neutral budget ledger are documented in [Transcription and token budgets](docs/transcription-budget.md), including measured limitations. Local Whisper inference consumes **zero provider API tokens**.
 
 ## Use it from an agent
 

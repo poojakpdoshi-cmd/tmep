@@ -19,7 +19,9 @@ import { TmepError, exists } from '../../core/src/index.ts';
 import { commandLineLength, run, WINDOWS_CMDLINE_MAX } from '../../media/src/exec.ts';
 import { parseWhisperCppJson, parseFasterWhisperJson, makeTranscript, type Transcript } from './transcript.ts';
 
-export interface EngineOptions {
+import { validateVad, detectChunks, joinChunks, compareVad, type VadOptions } from './vad.ts';
+
+export interface EngineOptions extends VadOptions {
   lang?: string;
   model?: string;
   prompt?: string;
@@ -67,7 +69,7 @@ export async function transcribeWhisperCpp(wav: string, workDir: string, o: Engi
   }
 }
 
-export async function whisperCppBatch(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
+async function whisperCppPass(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
   const bin = await findWhisperCpp();
   if (!bin) throw new TmepError('E_ENGINE_MISSING', 'whisper.cpp (whisper-cli) not found', 'download a release from github.com/ggml-org/whisper.cpp/releases and set TMEP_WHISPER_CPP, or use engine:"import"');
   const model = await resolveGgmlModel(o.model);
@@ -132,6 +134,14 @@ export async function hasFasterWhisper(): Promise<boolean> {
 }
 
 export async function transcribeFasterWhisper(wav: string, o: EngineOptions = {}): Promise<Transcript> {
+  if (o.vad !== undefined) {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'tmep speech '));
+    try {
+      const [tr] = await fasterWhisperBatch([wav], dir, o);
+      if (tr instanceof Error) throw tr;
+      return tr!;
+    } finally { await fsp.rm(dir, { recursive: true, force: true, maxRetries: 5 }); }
+  }
   const py = await findPython();
   if (!py || !(await hasFasterWhisper())) throw new TmepError('E_ENGINE_MISSING', 'faster-whisper is not installed', 'pip install faster-whisper (Python 3.9+), or use engine:"whisper.cpp"/"import"');
   const model = o.model ?? 'small';
@@ -147,14 +157,14 @@ export async function transcribeFasterWhisper(wav: string, o: EngineOptions = {}
 }
 
 /** One Python worker loads the model once and writes per-asset results to disk. */
-export async function fasterWhisperBatch(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
+async function fasterWhisperPass(wavs: string[], workDir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
   const py = await findPython();
   if (!py || !(await hasFasterWhisper())) throw new TmepError('E_ENGINE_MISSING', 'faster-whisper is not installed', 'install faster-whisper or select whisper.cpp');
   const model = o.model ?? 'small';
   const lang = !o.lang || o.lang === 'auto' ? '' : o.lang === 'hinglish' ? 'hi' : o.lang;
   const prompt = o.prompt ?? (o.lang === 'hinglish' ? HINGLISH_PROMPT : undefined);
   const manifest = path.join(workDir, 'inputs.json');
-  const args = [FW_SCRIPT, '--batch', manifest, '--model', model];
+  const args = [FW_SCRIPT, '--batch', manifest, '--model', model, '--vad', o.vad === 'off' ? 'off' : 'on', '--vad-threshold', String(o.vadThreshold ?? .5), '--vad-pad-ms', String(o.vadPadMs ?? 400)];
   if (lang) args.push('--lang', lang);
   if (prompt) args.push('--prompt', prompt);
   const items = wavs.map((wav, i) => ({ wav, out: path.join(workDir, `fw-${i}.json`) }));
@@ -182,4 +192,72 @@ export async function engineStatus(): Promise<Record<string, unknown>> {
     'faster-whisper': (await hasFasterWhisper()) ? 'ready' : 'not installed',
     import: 'ready',
   };
+}
+
+// Each pass still batches files in one model process where command-line limits permit.
+export async function whisperCppBatch(wavs: string[], dir: string, o: EngineOptions = {}): Promise<(Transcript | Error)[]> {
+  validateVad(o);
+  if (!o.vad || o.vad === 'off') return whisperCppPass(wavs, dir, o);
+  const bin = await findWhisperCpp();
+  if (!bin) return whisperCppPass(wavs, dir, { ...o, vad: 'off' });
+  const plans: (Awaited<ReturnType<typeof detectChunks>> | Error)[] = [];
+  for (const [i, wav] of wavs.entries()) {
+    try { plans.push(await detectChunks(wav, path.join(dir, `vad-${i}`), bin, o, o.signal)); }
+    catch (error) { if (o.signal?.aborted) throw error; plans.push(error as Error); }
+  }
+  const flat = plans.flatMap(p => p instanceof Error ? [] : p.chunks);
+  const parts = flat.length ? await whisperCppPass(flat.map(c => c.file), path.join(dir, 'parts'), { ...o, vad: 'off' }) : [];
+  let offset = 0;
+  const candidates = plans.map(p => {
+    if (p instanceof Error) return p;
+    const result = parts.slice(offset, offset += p.chunks.length);
+    try {
+      const error = result.find(r => r instanceof Error);
+      if (error) return error;
+      const tr = joinChunks(result as Transcript[], p.chunks);
+      tr.vad = { status: 'unverified', processedSeconds: p.processed, sourceSeconds: p.duration,
+        reason: 'Speech selection can omit quiet speech; use --vad verify for a full-audio comparison' };
+      return tr;
+    } catch (error) { return error as Error; }
+  });
+  const results = await finishVad(wavs, dir, o, candidates, whisperCppPass);
+  for (const [i, tr] of results.entries()) {
+    const p = plans[i]!;
+    if (!(tr instanceof Error) && tr.vad && !(p instanceof Error)) {
+      tr.vad.sourceSeconds = p.duration;
+      tr.vad.processedSeconds = p.processed + (tr.vad.status === 'unverified' ? 0 : p.duration);
+    }
+  }
+  return results;
+}
+
+type SpeechPass = typeof whisperCppPass;
+async function finishVad(wavs: string[], dir: string, o: EngineOptions, candidates: (Transcript | Error)[], pass: SpeechPass) {
+  const indices = candidates.flatMap((c, i) => c instanceof Error || o.vad === 'verify' ? [i] : []);
+  await fsp.mkdir(path.join(dir, 'full'), { recursive: true });
+  const refs = indices.length ? await pass(indices.map(i => wavs[i]!), path.join(dir, 'full'), { ...o, vad: 'off' }) : [];
+  for (const [j, i] of indices.entries()) {
+    const ref = refs[j]!, candidate = candidates[i]!;
+    if (ref instanceof Error) { candidates[i] = ref; continue; }
+    const agrees = !(candidate instanceof Error) && compareVad(ref, candidate);
+    // Verification always preserves the full-audio word data and probabilities.
+    ref.vad = { status: agrees ? 'verified' : 'fallback',
+      reason: agrees ? 'VAD agrees; full-audio word data retained' : candidate instanceof Error ? candidate.message.slice(0, 180) : 'VAD text or timing differs; full-audio word data retained' };
+    candidates[i] = ref;
+  }
+  return candidates;
+}
+export async function fasterWhisperBatch(wavs: string[], dir: string, o: EngineOptions = {}) {
+  validateVad(o);
+  await fsp.mkdir(dir, { recursive: true });
+  let candidates = await fasterWhisperPass(wavs, dir, o);
+  if (!o.vad || o.vad === 'off') return candidates; // Preserve legacy default behavior.
+  candidates = candidates.map(c => {
+    if (c instanceof Error) return c;
+    if (!c.words.length || c.words.some(w => w.p !== undefined && w.p < .2)) return new Error('uncertain VAD result');
+    c.vad = { status: 'unverified', reason: 'Speech selection can omit quiet speech; use --vad verify' };
+    return c;
+  });
+  await fsp.mkdir(path.join(dir, 'full'), { recursive: true });
+  return finishVad(wavs, dir, o, candidates, fasterWhisperPass);
 }
