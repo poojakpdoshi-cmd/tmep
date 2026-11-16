@@ -61,13 +61,14 @@ export function parseWhisperCppJson(json: string | WcppJson): { lang: string; wo
   let approx = false;
   for (const seg of j.transcription) {
     const toks = (seg.tokens ?? []).filter((t) => !/^\s*\[_[A-Z]+_?\d*\]\s*$/.test(t.text) && !/^\s*\[_/.test(t.text) && t.offsets);
+    const segment: Word[] = [];
     if (toks.length) {
       let cur: Word | undefined;
       const probs: number[] = [];
       const flush = () => {
         if (cur && cur.w.trim()) {
           if (probs.length) cur.p = r2(probs.reduce((a, b) => a + b, 0) / probs.length, 3);
-          words.push(cur);
+          segment.push(cur);
         }
         probs.length = 0;
       };
@@ -86,6 +87,14 @@ export function parseWhisperCppJson(json: string | WcppJson): { lang: string; wo
         if (typeof t.p === 'number') probs.push(t.p);
       }
       flush();
+    }
+    if (segment.length && segment.every((w, i) => Number.isFinite(w.s) && Number.isFinite(w.e) &&
+        w.s >= 0 && w.e >= w.s && w.s > (segment[i - 1]?.s ?? words.at(-1)?.s ?? -1))) {
+      for (const w of segment) {
+        // A quantized token can be zero-length even when its start is usable.
+        if (w.e === w.s) { w.e = w.s + .01; approx = true; }
+        words.push(w);
+      }
     } else if (seg.text.trim()) {
       approx = true;
       words.push(...spreadWords(seg.text, seg.offsets.from / 1000, seg.offsets.to / 1000));
@@ -94,7 +103,7 @@ export function parseWhisperCppJson(json: string | WcppJson): { lang: string; wo
   return { lang: j.result?.language ?? 'und', words, approx };
 }
 
-/** Proportional word timing by character length (used only when no word times exist). */
+/** Proportional word timing by character length (used only when no usable word times exist). */
 export function spreadWords(text: string, s: number, e: number): Word[] {
   const toks = text.trim().split(/\s+/).filter(Boolean);
   const total = toks.reduce((a, t) => a + t.length + 1, 0);
