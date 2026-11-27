@@ -35,18 +35,18 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_transcribe',
-    description: 'Local speech-to-text, word timestamps, cached. engine auto|whisper.cpp|faster-whisper|import(file=srt/vtt/json). lang auto|en|hi|hinglish|... Returns stats; text stays on disk.',
-    schema: obj({ asset: str(), engine: str().optional(), lang: str().optional(), model: str().optional(), file: str().optional(), prompt: str().optional(), force: bool().optional(), wait: num().optional(), ...project }),
+    description: 'Local speech-to-text, word timestamps, cached. Pass asset or assets[] (batch). engine auto|whisper.cpp|faster-whisper|import(file=srt/vtt/json).',
+    schema: obj({ asset: str().optional(), assets: arr(str()).optional(), engine: str().optional(), lang: str().optional(), model: str().optional(), file: str().optional(), prompt: str().optional(), force: bool().optional(), wait: num().optional(), ...project }),
   },
   {
     name: 'video_plan',
-    description: 'Optional reference asset guides safe sentence/pause cuts, preserving narration. Build a full edit from transcript+template: cuts, captions, graphics, zooms, SFX. template reel|short|talking_head|tutorial|product_demo|cinematic_explainer|youtube. off: features to skip (sfx,graphics,zooms,transitions).',
-    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), ...project }),
+    description: 'Build an edit from transcript+template, or compile script/storyboard JSON. off: sfx,graphics,zooms,transitions.',
+    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), script: str().optional(), storyboard: record(any()).optional(), wpm: num().optional(), narration: str().optional(), ...project }),
   },
   {
     name: 'video_edit',
-    description: 'Apply ops as one undoable revision. Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed", "fx zoomin c1 d=1.2", "fx mask c1 shape=ellipse reveal=0.5". Times: seconds|@phrase|w:N|c:ID|end. video_help ops.',
-    schema: obj({ ops: arr(union([str(), record(any())])).optional(), undo: num().optional(), redo: num().optional(), checkout: num().optional(), note: str().optional(), ...project, ...detail }),
+    description: 'Apply ops as one undoable revision. Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed", "fx zoomin c1 d=1.2". Times: seconds|@phrase|w:N|c:ID|end.',
+    schema: obj({ ops: arr(union([str(), record(any())])).optional(), undo: num().optional(), redo: num().optional(), checkout: num().optional(), note: str().optional(), ratio: str().optional(), expectedRev: num().optional(), ...project, ...detail }),
   },
   {
     name: 'video_inspect',
@@ -56,8 +56,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_render',
-    description: 'Render MP4 with cached segments. preview: half-res; range [s,e]; scene: half-res with scene-local range; alpha: graphics-only; frames: contact sheet.',
-    schema: obj({ preview: bool().optional(), range: arr(anchor).optional(), scene: str().optional(), quality: str().optional(), out: str().optional(), alpha: bool().optional(), frames: num().optional(), wait: num().optional(), ...project, ...detail }),
+    description: 'Render MP4 with cached segments. preview: half-res; range [s,e]; scene: half-res; alpha: graphics-only; frames: contact sheet.',
+    schema: obj({ preview: bool().optional(), range: arr(anchor).optional(), scene: str().optional(), quality: str().optional(), out: str().optional(), alpha: bool().optional(), frames: num().optional(), rev: num().optional(), parallel: num().optional(), encoder: str().optional(), wait: num().optional(), ...project, ...detail }),
   },
   {
     name: 'video_status',
@@ -66,8 +66,14 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_help',
-    description: 'Reference: workflow|ops|anchors|presets|templates|sfx|icons|captions|scene.',
-    schema: obj({ topic: str().optional() }),
+    description: 'Reference: workflow|ops|anchors|presets|templates|sfx|icons|captions|storyboard|scene.',
+    schema: obj({ topic: str().optional(), schema: bool().optional() }),
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'video_doctor',
+    description: 'Check FFmpeg, encoders, and local speech engines.',
+    schema: obj({}),
     annotations: { readOnlyHint: true },
   },
 ];

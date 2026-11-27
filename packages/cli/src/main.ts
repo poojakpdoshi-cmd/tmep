@@ -197,7 +197,7 @@ export async function main(argv: string[]): Promise<number> {
         if (args.out !== undefined && (typeof args.out !== 'string' || !/\.(mp4|mov|webm)$/i.test(args.out))) {
           throw new TmepError('E_INPUT', '--out must be an .mp4, .mov, or .webm path');
         }
-        const res = await api.render(ctx, { preview: !!args.preview, range, scene: args.scene as string, quality: args.quality as never, out: args.out as string, alpha: !!args.alpha, frames: args.frames as number, wait: 1e9 });
+        const res = await api.render(ctx, { preview: !!args.preview, range, scene: args.scene as string, quality: args.quality as never, out: args.out as string, alpha: !!args.alpha, frames: args.frames as number, rev: args.rev as number | undefined, parallel: args.parallel as number | undefined, encoder: args.encoder as never, wait: 1e9 });
         if (process.stderr.isTTY) process.stderr.write('\n');
         print(res, pretty);
         return res.state === 'done' ? 0 : 1;

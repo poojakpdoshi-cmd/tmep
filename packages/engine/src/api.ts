@@ -707,12 +707,27 @@ export async function status(ctx: Ctx, inp: { job: string; cancel?: boolean; wai
 }
 
 // ---------------------------------------------------------------- help (on-demand docs keep tool schemas tiny)
-export function help(topic = 'workflow'): Record<string, unknown> {
+export function help(topic = 'workflow', includeSchema = false): Record<string, unknown> {
   switch (topic) {
     case 'storyboard':
-      return { schema: storyboardSchema.json, doc: 'docs/STORYBOARD.md' };
+      return includeSchema
+        ? { schema: storyboardSchema.json, doc: 'docs/STORYBOARD.md' }
+        : {
+            templates: 'process|explanation|comparison|custom',
+            fields: 'script,narration?,scenes[{id?,template,title,subtitle?,steps?,claim?,counter?,spec?,frames?}]',
+            example: { scenes: [{ template: 'explanation', title: 'Topic', subtitle: 'Key point', frames: 90 }] },
+            note: 'pass schema:true for full JSON Schema',
+            doc: 'docs/STORYBOARD.md',
+          };
     case 'scene':
-      return { op: { op: 'scene', spec: visualSceneSchema.json }, doc: 'docs/VISUAL_SCENE.md' };
+      return includeSchema
+        ? { op: { op: 'scene', spec: visualSceneSchema.json }, doc: 'docs/VISUAL_SCENE.md' }
+        : {
+            op: 'scene',
+            fields: 'id?,at|anchor?,d,bg?,safe?,layers[{kind:text|rect|polygon|circle|path|media,id?,x,y,w?,h?,fx?,z?}]',
+            note: 'pass schema:true for full JSON Schema',
+            doc: 'docs/VISUAL_SCENE.md',
+          };
     case 'workflow':
       return {
         steps: ['video_import {paths}', 'video_transcribe {asset}', 'video_plan {template, target?, title?}', 'video_render {preview:true}', 'video_edit {ops} (iterate)', 'video_render {}'],

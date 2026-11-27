@@ -12,7 +12,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { TmepError, asTmepError, formatIssues, VERSION, resolveContainedPath, parseAllowedRoots, type Detail } from '../../core/src/index.ts';
 import * as api from '../../engine/src/api.ts';
-import { startJob, waitJob, jobView } from '../../render/src/jobs.ts';
+import { startJob, waitJob, cancelJob, jobView } from '../../render/src/jobs.ts';
 import { TOOLS, toolList } from './tools.ts';
 
 export const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -46,6 +46,7 @@ export class McpServer {
   private readonly mediaRoots: string[];
   private readonly detail: Detail;
   private readonly notify: (msg: Json) => void;
+  private readonly inFlight = new Map<string | number, { ctrl: AbortController; p?: Awaited<ReturnType<typeof api.openProject>>; jobId?: string }>();
 
   constructor(o: ServerOptions = {}) {
     this.cwd = path.resolve(o.cwd ?? process.env.FRAME_PROJECT ?? process.env.TMEP_PROJECT ?? process.cwd());
@@ -64,7 +65,17 @@ export class McpServer {
       return this.err(req.id ?? null, -32600, 'Invalid Request');
     }
     const isNotification = req.id === undefined || req.id === null;
-    if (isNotification) return undefined; // notifications/initialized, cancelled, etc.
+    if (isNotification) {
+      if (req.method === 'notifications/cancelled') {
+        const rid = req.params?.requestId as string | number | undefined;
+        const entry = rid !== undefined ? this.inFlight.get(rid) : undefined;
+        if (entry) {
+          entry.ctrl.abort();
+          if (entry.p && entry.jobId) await cancelJob(entry.p, entry.jobId).catch(() => {});
+        }
+      }
+      return undefined;
+    }
     const id = req.id!;
     const params = (req.params ?? {}) as Json;
     const meta = (params._meta ?? {}) as Json;
@@ -93,7 +104,7 @@ export class McpServer {
         case 'tools/list':
           return ok({ tools: toolList(), ...(modern ? { ttlMs: 3600000, cacheScope: 'public' } : {}) });
         case 'tools/call':
-          return ok(await this.callTool(params));
+          return ok(await this.callTool(params, id));
         case 'resources/list':
           return ok({ resources: [] });
         case 'prompts/list':
@@ -113,7 +124,7 @@ export class McpServer {
   }
 
   /** Tool execution. Input/business errors are tool results with isError (model can self-correct). */
-  async callTool(params: Json): Promise<Json> {
+  async callTool(params: Json, reqId?: string | number): Promise<Json> {
     const name = String(params.name ?? '');
     const tool = TOOLS.find((t) => t.name === name);
     if (!tool) throw new RpcError(-32602, `Unknown tool: ${name}`);
@@ -122,7 +133,13 @@ export class McpServer {
     const args = parsed.value as Json;
     const detail = (args.detail as Detail) ?? this.detail;
     const progressToken = ((params._meta ?? {}) as Json).progressToken;
+    const flight = { ctrl: new AbortController() } as { ctrl: AbortController; p?: Awaited<ReturnType<typeof api.openProject>>; jobId?: string };
+    if (reqId !== undefined) this.inFlight.set(reqId, flight);
     try {
+      if (name === 'video_doctor') {
+        const result = await api.doctor();
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
       const projectDir = await resolveContainedPath((args.project as string) ?? '.', this.allowedRoots, 'project');
       const ctx: api.Ctx = {
         project: projectDir,
@@ -131,10 +148,12 @@ export class McpServer {
         mediaRoots: [projectDir, ...this.allowedRoots, ...this.mediaRoots],
         outRoots: [projectDir],
       };
-      const result = await this.dispatch(name, args, ctx, progressToken);
+      const result = await this.dispatch(name, args, ctx, progressToken, flight);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (e) {
       return this.toolError(asTmepError(e), detail);
+    } finally {
+      if (reqId !== undefined) this.inFlight.delete(reqId);
     }
   }
 
@@ -142,21 +161,32 @@ export class McpServer {
     return { content: [{ type: 'text', text: JSON.stringify({ ok: 0, err: e.toJSON(detail === 'debug') }) }], isError: true };
   }
 
-  private async dispatch(name: string, a: Json, ctx: api.Ctx, progressToken: unknown): Promise<Json> {
+  private async dispatch(name: string, a: Json, ctx: api.Ctx, progressToken: unknown, flight?: { ctrl: AbortController; p?: Awaited<ReturnType<typeof api.openProject>>; jobId?: string }): Promise<Json> {
     switch (name) {
       case 'video_import':
         return api.importMedia(ctx, { paths: a.paths as string[] });
       case 'video_reference':
         return api.reference(ctx, a as never);
       case 'video_transcribe': {
+        if (Array.isArray(a.assets) && a.assets.length) {
+          return api.transcribeBatch(ctx, a as never);
+        }
+        if (typeof a.asset !== 'string' || !a.asset) throw new TmepError('E_INPUT', 'video_transcribe needs asset or assets[]');
         // speech recognition can exceed client tool timeouts: run as a job, wait briefly
-        const p = await api.openProject(ctx.project);
+        const p = await api.openProject(ctx.project, true, ctx.projectRoots);
         const job = await startJob(p, 'transcribe', 0, { asset: a.asset }, (signal) => api.transcribe(ctx, { ...(a as Record<string, unknown> as { asset: string }), signal }));
-        const j = await this.waitWithProgress(p, job.id, (a.wait as number) ?? 50, progressToken);
+        if (flight) { flight.p = p; flight.jobId = job.id; }
+        const j = await this.waitWithProgress(p, job.id, (a.wait as number) ?? 50, progressToken, flight?.ctrl.signal);
         if (j.state === 'done') return j.result!;
         return jobView(j, ctx.detail);
       }
       case 'video_plan': {
+        if (a.storyboard !== undefined) return api.storyboard(ctx, a.storyboard);
+        if (typeof a.script === 'string') {
+          const plan = api.planScript(a.script, { wpm: a.wpm as number | undefined, narration: a.narration as string | undefined });
+          const res = await api.storyboard(ctx, plan.storyboard);
+          return plan.warnings.length ? { ...res, warn: plan.warnings } : res;
+        }
         const off = new Set((a.off as string[] | undefined) ?? []);
         return api.plan(ctx, { ...(a as Record<string, unknown>), ...(off.has('sfx') && { sfx: false }), ...(off.has('graphics') && { graphics: false }), ...(off.has('zooms') && { zooms: false }), ...(off.has('transitions') && { transitions: false }) } as never);
       }
@@ -166,8 +196,9 @@ export class McpServer {
         return api.inspect(ctx, a as never);
       case 'video_render': {
         const res = await api.render(ctx, { ...(a as Record<string, unknown>), wait: 0 });
-        const p = await api.openProject(ctx.project);
-        const j = await this.waitWithProgress(p, String(res.job), (a.wait as number) ?? 50, progressToken);
+        const p = await api.openProject(ctx.project, false, ctx.projectRoots);
+        if (flight) { flight.p = p; flight.jobId = String(res.job); }
+        const j = await this.waitWithProgress(p, String(res.job), (a.wait as number) ?? 50, progressToken, flight?.ctrl.signal);
         const view = jobView(j, ctx.detail);
         if (j.result?.sheet) view.sheet = j.result.sheet;
         return view;
@@ -175,16 +206,20 @@ export class McpServer {
       case 'video_status':
         return api.status(ctx, { job: a.job as string, cancel: a.cancel as boolean, wait: a.wait as number });
       case 'video_help':
-        return api.help((a.topic as string) ?? 'workflow');
+        return api.help((a.topic as string) ?? 'workflow', Boolean(a.schema));
+      case 'video_doctor':
+        return api.doctor();
       default:
         throw new RpcError(-32602, `Unknown tool: ${name}`);
     }
   }
 
-  private async waitWithProgress(p: Awaited<ReturnType<typeof api.openProject>>, jobId: string, seconds: number, token: unknown) {
+  private async waitWithProgress(p: Awaited<ReturnType<typeof api.openProject>>, jobId: string, seconds: number, token: unknown, signal?: AbortSignal) {
+    if (signal?.aborted) return waitJob(p, jobId, 0);
     if (token === undefined) return waitJob(p, jobId, seconds);
     const deadline = Date.now() + seconds * 1000;
     for (;;) {
+      if (signal?.aborted) return waitJob(p, jobId, 0);
       const j = await waitJob(p, jobId, Math.min(1, Math.max(0, (deadline - Date.now()) / 1000)));
       if (j.state !== 'running' || Date.now() >= deadline) return j;
       this.notify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: j.progress, total: 1, message: j.phase } });
