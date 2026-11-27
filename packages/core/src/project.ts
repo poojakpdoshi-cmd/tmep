@@ -13,6 +13,7 @@
  */
 import { promises as fsp, openSync, closeSync, unlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { assertSafeId } from './security.ts';
 import { TmepError } from './errors.ts';
 import { readJsonOr, writeJson, readJson, exists } from './util.ts';
 import type { Timeline } from './timeline.ts';
@@ -99,7 +100,7 @@ export class Project {
     return path.join(this.dir, 'work', ...parts);
   }
   jobPath(id: string): string {
-    return path.join(this.dir, 'jobs', `${id}.json`);
+    return path.join(this.dir, 'jobs', `${assertSafeId(id, 'job id')}.json`);
   }
   rendersPath(...parts: string[]): string {
     return path.join(this.root, 'renders', ...parts);
@@ -198,8 +199,11 @@ export class Project {
   async revision(rev?: number): Promise<Revision> {
     const m = await this.manifest();
     const r = rev ?? m.head;
+    if (typeof r !== 'number' || !Number.isInteger(r) || r < 0) {
+      throw new TmepError('E_INPUT', `invalid revision "${String(rev)}"`, 'revision must be a non-negative integer');
+    }
     if (r === 0) throw new TmepError('E_STATE', 'project has no timeline yet', 'run video_plan (or `tmep plan`) or add clips with video_edit');
-    if (r < 0 || r > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${r} not found (head ${m.head})`);
+    if (r > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${r} not found (head ${m.head})`);
     return readJson<Revision>(this.revPath(r));
   }
 
@@ -250,9 +254,12 @@ export class Project {
   }
 
   async checkout(rev: number): Promise<number> {
+    if (typeof rev !== 'number' || !Number.isInteger(rev) || rev < 0) {
+      throw new TmepError('E_INPUT', `invalid revision "${String(rev)}"`, 'revision must be a non-negative integer');
+    }
     return this.withLock(async () => {
       const m = await this.manifest();
-      if (rev < 0 || rev > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${rev} not found`);
+      if (rev > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${rev} not found`);
       m.head = rev;
       m.redo = [];
       await writeJson(this.manifestPath, m);

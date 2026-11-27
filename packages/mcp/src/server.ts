@@ -10,7 +10,7 @@
  */
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { TmepError, asTmepError, formatIssues, VERSION, type Detail } from '../../core/src/index.ts';
+import { TmepError, asTmepError, formatIssues, VERSION, resolveContainedPath, parseAllowedRoots, type Detail } from '../../core/src/index.ts';
 import * as api from '../../engine/src/api.ts';
 import { startJob, waitJob, jobView } from '../../render/src/jobs.ts';
 import { TOOLS, toolList } from './tools.ts';
@@ -33,6 +33,8 @@ interface Request {
 
 export interface ServerOptions {
   cwd?: string;
+  allowedRoots?: string[];
+  mediaRoots?: string[];
   detail?: Detail;
   /** emit notifications (progress) */
   notify?: (msg: Json) => void;
@@ -40,12 +42,16 @@ export interface ServerOptions {
 
 export class McpServer {
   private readonly cwd: string;
+  private readonly allowedRoots: string[];
+  private readonly mediaRoots: string[];
   private readonly detail: Detail;
   private readonly notify: (msg: Json) => void;
 
   constructor(o: ServerOptions = {}) {
-    this.cwd = o.cwd ?? process.env.TMEP_PROJECT ?? process.cwd();
-    this.detail = o.detail ?? ((process.env.TMEP_DETAIL as Detail) || 'standard');
+    this.cwd = path.resolve(o.cwd ?? process.env.FRAME_PROJECT ?? process.env.TMEP_PROJECT ?? process.cwd());
+    this.allowedRoots = [this.cwd, ...(o.allowedRoots ?? []).map((r) => path.resolve(r))];
+    this.mediaRoots = [...(o.mediaRoots ?? []).map((r) => path.resolve(r)), ...parseAllowedRoots()];
+    this.detail = o.detail ?? ((process.env.FRAME_DETAIL ?? process.env.TMEP_DETAIL ?? 'standard') as Detail);
     this.notify = o.notify ?? (() => {});
   }
 
@@ -115,9 +121,16 @@ export class McpServer {
     if (!parsed.ok) return this.toolError(new TmepError('E_INPUT', formatIssues(parsed.issues)), 'minimal');
     const args = parsed.value as Json;
     const detail = (args.detail as Detail) ?? this.detail;
-    const ctx: api.Ctx = { project: path.resolve(this.cwd, (args.project as string) ?? '.'), detail };
     const progressToken = ((params._meta ?? {}) as Json).progressToken;
     try {
+      const projectDir = await resolveContainedPath((args.project as string) ?? '.', this.allowedRoots, 'project');
+      const ctx: api.Ctx = {
+        project: projectDir,
+        detail,
+        projectRoots: this.allowedRoots,
+        mediaRoots: [projectDir, ...this.allowedRoots, ...this.mediaRoots],
+        outRoots: [projectDir],
+      };
       const result = await this.dispatch(name, args, ctx, progressToken);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (e) {

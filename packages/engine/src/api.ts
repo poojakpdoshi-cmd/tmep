@@ -40,6 +40,11 @@ import {
   VERSION,
   PROTOCOL,
   visualSceneSchema,
+  assertSafeId,
+  canonicalPath,
+  isUncOrDevicePath,
+  parseAllowedRoots,
+  resolveContainedPath,
 } from '../../core/src/index.ts';
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
@@ -60,18 +65,30 @@ import { startJob, waitJob, cancelJob, jobView, readJob } from '../../render/src
 export interface Ctx {
   project: string;
   detail: Detail;
+  projectRoots?: string[];
+  mediaRoots?: string[];
+  outRoots?: string[];
 }
 
-export async function openProject(dir: string, create = true): Promise<Project> {
-  return Project.open(dir, { create });
+async function resolveSafePath(raw: string, base: string, roots: string[] | undefined, label: string): Promise<string> {
+  if (roots && roots.length) return resolveContainedPath(raw, roots, label);
+  if (isUncOrDevicePath(raw)) throw new TmepError('E_SECURITY', `${label} cannot use UNC or device paths: ${raw}`);
+  return canonicalPath(path.resolve(base, raw));
+}
+
+export async function openProject(dir: string, create = true, projectRoots?: string[]): Promise<Project> {
+  const safeDir = await resolveSafePath(dir, process.cwd(), projectRoots, 'project');
+  return Project.open(safeDir, { create });
 }
 
 // ---------------------------------------------------------------- import
 export async function importMedia(ctx: Ctx, inp: { paths: string[] }): Promise<Record<string, unknown>> {
-  const p = await openProject(ctx.project);
+  const p = await openProject(ctx.project, true, ctx.projectRoots);
+  const envRoots = parseAllowedRoots();
+  const allowed = ctx.mediaRoots ?? (envRoots.length ? [ctx.project, ...envRoots] : undefined);
   const out: Record<string, unknown>[] = [];
   for (const raw of inp.paths) {
-    const file = path.resolve(ctx.project, raw);
+    const file = await resolveSafePath(raw, ctx.project, allowed, 'import path');
     if (!(await exists(file))) throw new TmepError('E_NOT_FOUND', `file not found: ${raw}`);
     const pr = await probe(file);
     const { asset, existed } = await p.addAsset({
@@ -190,7 +207,10 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
     else if (await hasFasterWhisper()) engine = 'faster-whisper';
     else throw new TmepError('E_ENGINE_MISSING', 'no local speech engine installed', 'install whisper.cpp (+ ggml model) or faster-whisper, or pass file:"subs.srt|.vtt|.json" to import a transcript; see `tmep doctor`');
   }
-  const fileHash = inp.file ? mediaHash(path.resolve(ctx.project, inp.file)) : undefined;
+  const envRoots = parseAllowedRoots();
+  const allowed = ctx.mediaRoots ?? (envRoots.length ? [ctx.project, ...envRoots] : undefined);
+  const safeImportFile = inp.file ? await resolveSafePath(inp.file, ctx.project, allowed, 'transcript file') : undefined;
+  const fileHash = safeImportFile ? mediaHash(safeImportFile) : undefined;
   const key = transcriptKey(a, engine, inp, fileHash);
   const cacheFile = p.cachePath('tr', `${key}.json`);
   let tr = inp.force ? undefined : await readJsonOr<Transcript | undefined>(cacheFile, undefined);
@@ -198,8 +218,8 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
   const t0 = Date.now();
   if (!tr) {
     if (engine === 'import') {
-      if (!inp.file) throw new TmepError('E_INPUT', 'engine "import" needs file');
-      const text = await fsp.readFile(path.resolve(ctx.project, inp.file), 'utf8');
+      if (!safeImportFile || !inp.file) throw new TmepError('E_INPUT', 'engine "import" needs file');
+      const text = await fsp.readFile(safeImportFile, 'utf8');
       const isJson = /\.json$/i.test(inp.file) || text.trimStart().startsWith('{');
       const parsed = isJson ? parseTranscriptJson(text) : { words: parseSubtitles(text), lang: undefined, approx: true };
       tr = makeTranscript('import', inp.lang && inp.lang !== 'auto' ? inp.lang : (parsed.lang ?? 'und'), parsed.words, { approx: parsed.approx });
@@ -476,8 +496,17 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
     }
     return diagnoseScenes(tl, words, new Map((await p.assets()).map((a) => [a.id, a])));
   }
-  const p = await openProject(ctx.project);
   const what = inp.what ?? 'project';
+  const manifestFile = path.join(ctx.project, 'tmep.json');
+  if (what === 'project' && !(await exists(manifestFile))) {
+    return shape(
+      ctx.detail,
+      { name: path.basename(ctx.project), rev: 0, dur: 0, assets: [] },
+      {},
+      { root: ctx.project, revs: 0 },
+    );
+  }
+  const p = await openProject(ctx.project, false, ctx.projectRoots);
   switch (what) {
     case 'project': {
       const m = await p.manifest();
@@ -625,7 +654,14 @@ export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { ran
     range = [a, b.endT !== undefined && typeof inp.range[1] === 'string' && !String(inp.range[1]).startsWith('w:') ? b.endT : b.t];
   }
   const preview = inp.scene !== undefined ? true : inp.preview;
-  const opts: RenderOptions = { preview, range, quality: inp.quality, out: inp.out ? path.resolve(ctx.project, inp.out) : undefined, alpha: inp.alpha, parallel: inp.parallel, encoder: inp.encoder };
+  let safeOut: string | undefined;
+  if (inp.out) {
+    if (!/\.(mp4|mov|webm)$/i.test(inp.out)) {
+      throw new TmepError('E_INPUT', 'render out must end in .mp4, .mov, or .webm');
+    }
+    safeOut = await resolveSafePath(inp.out, ctx.project, ctx.outRoots, 'render output');
+  }
+  const opts: RenderOptions = { preview, range, quality: inp.quality, out: safeOut, alpha: inp.alpha, parallel: inp.parallel, encoder: inp.encoder };
   if (!opts.out && !opts.alpha) opts.out = p.rendersPath(`r${rev}${preview ? '-preview' : ''}${range ? `-${range.map((x) => r2(x, inp.scene !== undefined ? 3 : 1)).join('-')}` : ''}.mp4`);
   const job = await startJob(p, 'render', rev, { ...opts }, async (signal, progress) => {
     const res = await renderTimeline(p, tl, transcripts, opts, { signal, onProgress: progress });
@@ -644,7 +680,8 @@ export async function render(ctx: Ctx, inp: Omit<RenderOptions, 'range'> & { ran
 }
 
 export async function status(ctx: Ctx, inp: { job: string; cancel?: boolean; wait?: number }): Promise<Record<string, unknown>> {
-  const p = await openProject(ctx.project, false);
+  assertSafeId(inp.job, 'job id');
+  const p = await openProject(ctx.project, false, ctx.projectRoots);
   const j = inp.cancel ? await cancelJob(p, inp.job) : await waitJob(p, inp.job, inp.wait ?? 0);
   return jobView(j, ctx.detail);
 }
