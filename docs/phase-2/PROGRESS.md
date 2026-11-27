@@ -5,11 +5,11 @@
 
 | Step | Description | Status |
 |---|---|---|
-| **1** | Close Phase 1 (`16c7575` unit/E2E verified, CI checked, PR #28 ready) | Verifying CI log |
-| **2** | AI Workload Offloading architecture & Phase 2 docs | In progress |
-| **3** | Generalize professional Canvas composition engine (`CanvasRun` / `VisualScene`) | Pending |
-| **4** | Initial FRAME Compiler (declarative intent → validated ops + dry-run) | Pending |
-| **5** | Caption & layout quality (measured widths, stable highlights, safe zones, collisions) | Pending |
-| **6** | Initial automatic quality correction & diagnostics | Pending |
-| **7** | 5 practical reusable composition demonstrations + QA + before/after comparison | Pending |
-| **8** | Controlled conventional-vs-FRAME workload benchmark & draft PR | Pending |
+| **1** | Close Phase 1 (`16c7575` unit/E2E verified, 5/6 CI jobs passed + 1 Windows timing flake documented, PR #28 ready) | Complete |
+| **2** | AI Workload Offloading architecture & Phase 2 docs | Complete |
+| **3** | Generalize professional Canvas composition engine (`rrect`, `gradient`, `shadow`, `clip`, `chart`, measured `text`, `image`, `spring`) | Complete |
+| **4** | Initial FRAME Compiler (`compileIntent`, `api.compile`, `dryRun`, MCP/CLI wiring) | Complete |
+| **5** | Caption & layout quality (measured glyph widths, phrase-aware breaks, zero-reflow kinetic, safe zones, presenter reserve) | Complete |
+| **6** | Initial automatic quality correction (`autoCorrectScenes`) | Complete |
+| **7** | 5 practical reusable composition demonstrations + contact sheets + QA report | Complete |
+| **8** | Controlled conventional-vs-FRAME workload benchmark & draft PR | Complete |

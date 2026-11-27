@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-11-27T20:43:25.101Z",
+  "syntheticNote": "All media and telemetry in these 5 demos are synthetic fixtures for deterministic verification.",
+  "demos": [
+    {
+      "name": "01-tech-explainer",
+      "state": "done",
+      "dur": 4,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 832,
+      "out": "examples/phase-2-demos/out/01-tech-explainer.mp4"
+    },
+    {
+      "name": "02-product-demo",
+      "state": "done",
+      "dur": 4,
+      "w": 1920,
+      "h": 1080,
+      "audio": true,
+      "ms": 3209,
+      "out": "examples/phase-2-demos/out/02-product-demo.mp4"
+    },
+    {
+      "name": "03-sports-stats",
+      "state": "done",
+      "dur": 4,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 580,
+      "out": "examples/phase-2-demos/out/03-sports-stats.mp4"
+    },
+    {
+      "name": "04-educational-diagram",
+      "state": "done",
+      "dur": 4,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 4161,
+      "out": "examples/phase-2-demos/out/04-educational-diagram.mp4"
+    },
+    {
+      "name": "05-talking-head-captions",
+      "state": "done",
+      "dur": 4,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 3111,
+      "out": "examples/phase-2-demos/out/05-talking-head-captions.mp4"
+    }
+  ]
+}

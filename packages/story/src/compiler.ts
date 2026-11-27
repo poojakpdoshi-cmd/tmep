@@ -294,11 +294,16 @@ export function compileIntent(raw: unknown, defaults: { ratio?: Ratio; captionPo
         maxLines: 2,
         ellipsis: true,
         overlap: true,
-        keys: [
-          { t: 0, o: 0 },
-          { t: delay, x: -0.02, o: 0 },
-          { t: Math.min(delay + 0.3, inp.duration * 0.8), x: 0, o: 1, e: 'out' },
-        ],
+        keys: delay > 0.01
+          ? [
+              { t: 0, o: 0 },
+              { t: delay, x: -0.02, o: 0 },
+              { t: Math.min(delay + 0.3, inp.duration * 0.8), x: 0, o: 1, e: 'out' },
+            ]
+          : [
+              { t: 0, x: -0.02, o: 0 },
+              { t: Math.min(0.3, inp.duration * 0.8), x: 0, o: 1, e: 'out' },
+            ],
       });
     });
   } else if (inp.subtitle) {

@@ -454,13 +454,13 @@ export async function storyboard(ctx: Ctx, input: unknown) {
 
 // ---------------------------------------------------------------- edit
 async function opContext(p: Project, tl: Timeline) {
-  const assets: Record<string, { dur: number; kind: string }> = {};
-  for (const a of await p.assets()) assets[a.id] = { dur: a.dur, kind: a.kind };
+  const assets: Record<string, { dur: number; kind: string; path?: string }> = {};
+  for (const a of await p.assets()) assets[a.id] = { dur: a.dur, kind: a.kind, path: a.path };
   const transcripts = await transcriptsFor(p, tl.clips.map((c) => c.src));
   return { assets, transcripts, presets: PRESET_NAMES, sfxKinds: SFX_KINDS };
 }
 
-export async function compile(ctx: Ctx, input: unknown & { dryRun?: boolean; expectedRev?: number }): Promise<Record<string, unknown>> {
+export async function compile(ctx: Ctx, input: Record<string, unknown> & { dryRun?: boolean; expectedRev?: number }): Promise<Record<string, unknown>> {
   const p = await openProject(ctx.project, !(input as { dryRun?: boolean })?.dryRun, ctx.projectRoots);
   const hasTl = await exists(path.join(p.dir, 'revs', 'r0001.json')).catch(() => false) ? await p.hasTimeline() : false;
   const base = hasTl ? await p.timeline() : emptyTimeline('9:16');
