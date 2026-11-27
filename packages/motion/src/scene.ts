@@ -7,11 +7,11 @@ import { AssDoc, escapeText, tagColor } from './ass.ts';
 import { captionLayout, paginate } from './captions.ts';
 import { resolveFont, type ResolvedFont } from './fonts.ts';
 import { poly, rect, signedArea } from './icons.ts';
-import { pathBounds, type DrawKey, type VectorLayer, type VectorRun } from './vector.ts';
+import { pathBounds, wrapMeasuredText, type DrawKey, type VectorLayer, type VectorRun } from './vector.ts';
 
 export interface SceneGraphic { id: string; at: number; d: number; ass: string; fx: Effect[]; z: number; camera?: Effect[] }
 export interface CompiledScenes { layers: SceneGraphic[]; media: BRoll[]; fonts: ResolvedFont[]; vectors: VectorRun[] }
-export type SceneAssets = ReadonlyMap<string, { kind: string; dur: number }>;
+export type SceneAssets = ReadonlyMap<string, { kind: string; dur: number; path?: string }>;
 export interface SceneDiagnostic {
   code: 'invalid' | 'clipping' | 'safe-area' | 'collision' | 'caption' | 'discontinuity';
   severity: 'error';
@@ -24,8 +24,8 @@ type Report = (code: SceneDiagnostic['code'], layers: string[], t: number | null
 type Point = [number, number];
 type Layer = VisualScene['layers'][number];
 type Sample = { x: number; y: number; s: number; r: number; o: number };
-type Parent = { x: number; y: number; opacity: number };
-const origin: Parent = { x: 0, y: 0, opacity: 1 };
+type Parent = { x: number; y: number; s: number; r: number; opacity: number };
+const origin: Parent = { x: 0, y: 0, s: 1, r: 0, opacity: 1 };
 const require = createRequire(import.meta.url);
 const bad = (message: string): never => { throw new TmepError('E_INPUT', message); };
 
@@ -139,8 +139,14 @@ function layerKeys(keys: Key[], x: number, y: number, o: number): Key[] {
 }
 
 const metricFonts = new Set<string>();
-function textFits(text: string, font: ResolvedFont, size: number, w: number, h: number): boolean {
-  // Use the existing optional Canvas installation for glyph metrics, never to paint video frames.
+function textFits(
+  text: string,
+  font: ResolvedFont,
+  size: number,
+  w: number,
+  h: number,
+  opts: { wrap?: boolean; lineHeight?: number; pad?: number; hasBg?: boolean; maxLines?: number } = {},
+): boolean {
   let canvas: typeof import('@napi-rs/canvas');
   try {
     canvas = require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
@@ -153,9 +159,16 @@ function textFits(text: string, font: ResolvedFont, size: number, w: number, h: 
   }
   const ctx = canvas.createCanvas(1, 1).getContext('2d');
   ctx.font = `${size}px "${font.name}"`;
+  const availW = Math.max(8, w - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
+  const availH = Math.max(8, h - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
+  if (opts.wrap) {
+    const wrapped = wrapMeasuredText(ctx, text, availW, opts.maxLines, false);
+    const totalH = wrapped.length * size * (opts.lineHeight ?? 1.22);
+    return totalH <= availH + 1;
+  }
   const lines = text.split('\n').map((line) => ctx.measureText(line));
-  return lines.every((m) => Math.max(m.width, m.actualBoundingBoxLeft + m.actualBoundingBoxRight) <= w)
-    && lines.reduce((sum, m) => sum + Math.max(size, m.fontBoundingBoxAscent + m.fontBoundingBoxDescent), 0) <= h;
+  return lines.every((m) => Math.max(m.width, m.actualBoundingBoxLeft + m.actualBoundingBoxRight) <= availW)
+    && lines.reduce((sum, m) => sum + Math.max(size, m.fontBoundingBoxAscent + m.fontBoundingBoxDescent), 0) <= availH;
 }
 
 /** Compile agent scene specs to existing ASS layer and media overlay inputs. Throws before queueing edits on invalid scenes. */
@@ -206,7 +219,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
         const g = groups.get(id) ?? bad(`unknown group ${id}`);
         if (stack.includes(id)) bad(`cyclic group ${id}`);
         const p = parent(g.parent, [...stack, id]);
-        const value = { x: p.x + g.x, y: p.y + g.y, opacity: p.opacity * g.opacity };
+        const value = { x: p.x + g.x, y: p.y + g.y, s: p.s * (g.s ?? 1), r: p.r + (g.r ?? 0), opacity: p.opacity * g.opacity };
         parents.set(id, value);
         return value;
       }
@@ -239,12 +252,19 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           const keys = keysFor(layer.keys, (to - from) / fps, name,
             (t, msg) => report('discontinuity', [layer.id], layerStart + t, msg));
           const fx = layerKeys(keys, layer.x - .5 + p.x, layer.y - .5 + p.y, layer.opacity * p.opacity);
-          if (layer.rotation) {
+          if (p.s !== 1) {
+            if (!fx.some((k) => k.s !== undefined)) {
+              if (fx[0]?.t === 0) fx[0].s = p.s;
+              else fx.unshift({ t: 0, s: p.s });
+            } else for (const key of fx) if (key.s !== undefined) key.s *= p.s;
+          }
+          const totalRot = (layer.rotation ?? 0) + p.r;
+          if (totalRot) {
             if (!fx.some((k) => k.r !== undefined)) {
-              if (fx[0]?.t === 0) fx[0].r = layer.rotation;
-              else fx.unshift({ t: 0, r: layer.rotation });
+              if (fx[0]?.t === 0) fx[0].r = totalRot;
+              else fx.unshift({ t: 0, r: totalRot });
             }
-            else for (const key of fx) if (key.r !== undefined) key.r += layer.rotation;
+            else for (const key of fx) if (key.r !== undefined) key.r += totalRot;
           }
           const style = layer.style ? styles.get(layer.style) ?? bad(`${name}: unknown style ${layer.style}`) : undefined;
           const width = layer.w * w, height = layer.h * h;
@@ -254,7 +274,28 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           const effects: Effect[] = fx.length ? [{ type: 'kf', keys: fx }] : [];
           // The camera clock is scene-local, including time before this layer starts.
           const cameraFx: Effect[] | undefined = camera.length ? [{ type: 'kf', keys: camera.map((key) => ({ ...key, t: key.t - from / fps })) }] : undefined;
-          if (layer.kind === 'image' || layer.kind === 'video') {
+          const usesCanvas = layer.render === 'canvas'
+            || layer.kind === 'path'
+            || layer.kind === 'rrect'
+            || layer.kind === 'chart'
+            || Boolean(layer.shadow || layer.clip)
+            || (layer.kind === 'text' && Boolean(layer.wrap || layer.bg || layer.gradient || layer.align !== 'center'))
+            || ((layer.kind === 'rect' || layer.kind === 'ellipse' || layer.kind === 'polygon') && Boolean(layer.gradient || layer.strokeWidth > 0))
+            || (layer.kind === 'image' && layer.radius > 0);
+
+          if (layer.kind === 'image' && usesCanvas) {
+            const asset = assets.get(layer.asset);
+            if (!asset || asset.kind !== 'image' || !asset.path) bad(`${name}: expected a registered image asset ${layer.asset}`);
+            paths.set(layerIndex, {
+              id, z,
+              layer: {
+                id: layer.id, kind: 'image', from, to, keys: fx, draw: [], box: [width, height],
+                stroke: 0, glow: 0, color: '#FFFFFF', cap: 'round',
+                imagePath: asset!.path!, imageFit: layer.fit, radius: layer.radius,
+                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+              },
+            });
+          } else if (layer.kind === 'image' || layer.kind === 'video') {
             const asset = assets.get(layer.asset);
             if (asset?.kind !== layer.kind) bad(`${name}: expected a registered ${layer.kind} asset ${layer.asset}`);
             if (layer.kind === 'video' && layer.in + d > asset!.dur + .001) bad(`${name}: overlay exceeds source duration`);
@@ -268,9 +309,61 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
               report('clipping', [layer.id], at, `${name}: path leaves its view box`);
             }
             if (layer.draw) drawKeysFor(layer.draw, d, name, (kt, msg) => report('discontinuity', [layer.id], at + kt, msg));
-            paths.set(layerIndex, { id, z, layer: { id: layer.id, from, to, keys: fx, draw: layer.draw ?? [], d: layer.d, view,
+            paths.set(layerIndex, { id, z, layer: { id: layer.id, kind: 'path', from, to, keys: fx, draw: layer.draw ?? [], d: layer.d, view,
               box: [width, height], stroke: layer.stroke, glow: layer.glow, color: style?.color ?? '#FFFFFF',
-              ...(layer.fill && { fill: layer.fill }), cap: layer.cap } });
+              ...(layer.fill && { fill: layer.fill }), cap: layer.cap,
+              ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }) } });
+          } else if (layer.kind === 'chart') {
+            if (layer.draw) drawKeysFor(layer.draw, d, name, (kt, msg) => report('discontinuity', [layer.id], at + kt, msg));
+            paths.set(layerIndex, {
+              id, z,
+              layer: {
+                id: layer.id, kind: 'chart', from, to, keys: fx, draw: layer.draw ?? [],
+                box: [width, height], stroke: 0, glow: 0, color: style?.color ?? '#FFFFFF', cap: 'round',
+                chartSpec: { chartType: layer.chartType, data: layer.data, max: layer.max, unit: layer.unit, accent: layer.accent, trackColor: layer.trackColor },
+                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+              },
+            });
+          } else if (usesCanvas) {
+            if (layer.kind === 'text') {
+              const font = resolveFont(style?.font ?? 'regular');
+              const fontSize = Math.round(style?.size ?? 48);
+              if (!textFits(layer.text, font, fontSize, width, height, { wrap: layer.wrap, lineHeight: layer.lineHeight, pad: layer.pad, hasBg: Boolean(layer.bg), maxLines: layer.maxLines })) {
+                report('clipping', [layer.id], at, `${name}: text clips its box`);
+              }
+              paths.set(layerIndex, {
+                id, z,
+                layer: {
+                  id: layer.id, kind: 'text', from, to, keys: fx, draw: [], box: [width, height],
+                  stroke: 0, glow: 0, color: style?.color ?? '#FFFFFF', cap: 'round',
+                  ...(layer.gradient && { gradient: layer.gradient }),
+                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                  textSpec: {
+                    text: layer.text, fontName: font.name, fontFile: font.file, fontSize,
+                    bold: style?.font !== 'regular', align: layer.align, valign: layer.valign,
+                    lineHeight: layer.lineHeight, wrap: layer.wrap, maxLines: layer.maxLines, ellipsis: layer.ellipsis,
+                    bg: layer.bg, pad: layer.pad, radius: layer.radius,
+                  },
+                },
+              });
+            } else if (layer.kind === 'rect' || layer.kind === 'rrect' || layer.kind === 'ellipse' || layer.kind === 'polygon') {
+              if (layer.kind === 'polygon') {
+                const points = layer.points.map(({ x, y }): Point => [x * width, y * height]);
+                if (Math.abs(signedArea(points)) < .1) bad(`${name}: degenerate polygon`);
+              }
+              paths.set(layerIndex, {
+                id, z,
+                layer: {
+                  id: layer.id, kind: layer.kind, from, to, keys: fx, draw: [], box: [width, height],
+                  stroke: layer.strokeWidth, glow: 0, color: layer.strokeColor ?? style?.color ?? '#FFFFFF',
+                  fill: layer.fill ?? style?.color, cap: 'round',
+                  ...(layer.kind === 'rrect' && { radius: layer.radius }),
+                  ...(layer.kind === 'polygon' && { points: layer.points.map(({ x, y }): [number, number] => [x, y]) }),
+                  ...(layer.gradient && { gradient: layer.gradient }),
+                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                },
+              });
+            }
           } else {
             const doc = new AssDoc(w, h);
             const font = layer.kind === 'text' ? resolveFont(style?.font ?? 'regular') : { name: 'Arial' };
@@ -322,6 +415,87 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
     }
   }
   return out;
+}
+
+/** Deterministically auto-correct safe layout defects (safe-area, caption overlap, text overflow) without silently altering intent. */
+export function autoCorrectScenes(
+  tl: Timeline,
+  words: TlWord[],
+  assets: SceneAssets,
+): {
+  tl: Timeline;
+  corrections: { scene: string; layer: string; code: string; msg: string }[];
+  unresolved: SceneDiagnostic[];
+} {
+  const cloned = JSON.parse(JSON.stringify(tl)) as Timeline;
+  const corrections: { scene: string; layer: string; code: string; msg: string }[] = [];
+  if (!cloned.scenes?.length) return { tl: cloned, corrections, unresolved: [] };
+
+  const { w, h } = cloned.settings;
+  const cap = captionLayout(cloned.captions, w, h);
+  const capHalf = cap.size * (cloned.captions.style === 'kinetic' ? 1.6 : 1.4);
+
+  for (let pass = 0; pass < 5; pass++) {
+    const diag = diagnoseScenes(cloned, words, assets);
+    if (diag.ok) return { tl: cloned, corrections, unresolved: [] };
+    let changed = false;
+    for (const issue of diag.issues) {
+      const entry = cloned.scenes.find((s) => s.id === issue.scene);
+      if (!entry) continue;
+      const spec = entry.spec;
+      const safe = spec.safe ?? { left: 0, top: 0, right: 0, bottom: 0 };
+      for (const lid of issue.layers) {
+        const layer = spec.layers.find((l) => l.id === lid);
+        if (!layer) continue;
+        if (issue.code === 'safe-area') {
+          const minX = safe.left + layer.w / 2 + 0.005;
+          const maxX = 1 - safe.right - layer.w / 2 - 0.005;
+          const minY = safe.top + layer.h / 2 + 0.005;
+          const maxY = 1 - safe.bottom - layer.h / 2 - 0.005;
+          const nx = minX <= maxX ? Math.min(maxX, Math.max(minX, layer.x)) : layer.x;
+          const ny = minY <= maxY ? Math.min(maxY, Math.max(minY, layer.y)) : layer.y;
+          if (nx !== layer.x || ny !== layer.y) {
+            layer.x = nx;
+            layer.y = ny;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'safe-area', msg: `clamped ${lid} inside safe area` });
+          }
+        } else if (issue.code === 'caption') {
+          const capNormY = cap.y / h;
+          const capNormH = capHalf / h;
+          const aboveY = capNormY - capNormH - layer.h / 2 - 0.02;
+          const belowY = capNormY + capNormH + layer.h / 2 + 0.02;
+          const minY = safe.top + layer.h / 2 + 0.005;
+          const maxY = 1 - safe.bottom - layer.h / 2 - 0.005;
+          if (aboveY >= minY) {
+            layer.y = aboveY;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'caption', msg: `shifted ${lid} above caption band` });
+          } else if (belowY <= maxY) {
+            layer.y = belowY;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'caption', msg: `shifted ${lid} below caption band` });
+          }
+        } else if (issue.code === 'clipping' && layer.kind === 'text') {
+          if (!layer.wrap) {
+            layer.wrap = true;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'clipping', msg: `enabled measured text wrap on ${lid}` });
+          } else if (layer.style && spec.styles) {
+            const st = spec.styles.find((s) => s.id === layer.style);
+            if (st && st.size > 18) {
+              st.size = Math.max(18, Math.round(st.size * 0.85));
+              changed = true;
+              corrections.push({ scene: entry.id, layer: lid, code: 'clipping', msg: `reduced style ${st.id} size to ${st.size}px` });
+            }
+          }
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  const finalDiag = diagnoseScenes(cloned, words, assets);
+  return { tl: cloned, corrections, unresolved: finalDiag.issues };
 }
 
 function validateFrames(

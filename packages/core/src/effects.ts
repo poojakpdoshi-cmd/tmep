@@ -14,7 +14,7 @@
  */
 import { TmepError } from './errors.ts';
 
-export const EASES = ['linear', 'in', 'out', 'io', 'back', 'hold'] as const;
+export const EASES = ['linear', 'in', 'out', 'io', 'back', 'spring', 'hold'] as const;
 export type Ease = (typeof EASES)[number];
 export const KEY_PROPS = ['s', 'x', 'y', 'r', 'o'] as const;
 export type KeyProp = (typeof KEY_PROPS)[number];
@@ -73,6 +73,8 @@ export function ease(e: Ease, p: number): number {
       return p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2;
     case 'back':
       return 1 + 2.70158 * (p - 1) ** 3 + 1.70158 * (p - 1) ** 2;
+    case 'spring':
+      return p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-6 * p) * Math.cos(p * Math.PI * 2.5);
     case 'hold':
       return p >= 1 ? 1 : 0;
   }

@@ -18,6 +18,7 @@ import {
   totalFrames,
   resolveRef,
   hashOf,
+  mediaHash,
   exists,
   r2,
   sha256,
@@ -97,14 +98,26 @@ async function mediaMap(project: Project, tl: Timeline): Promise<Record<string, 
   for (const id of ids) {
     const a = await project.asset(id);
     if (!(await exists(a.path))) throw new TmepError('E_NOT_FOUND', `media for ${id} is missing: ${a.path}`, 're-import the file (same content keeps the same ID)');
-    out[id] = { path: a.path, kind: a.kind, hash: a.hash, audio: a.audio, dur: a.dur };
+    const st = await fsp.stat(a.path);
+    let hash = a.hash;
+    const addedMs = Date.parse(a.added);
+    // Re-hash only when file size changed or mtime advanced past import time
+    if (st.size !== a.size || (Number.isFinite(addedMs) && st.mtimeMs > addedMs + 1000)) {
+      const fresh = mediaHash(a.path);
+      if (fresh !== a.hash) {
+        hash = fresh;
+        await project.updateAsset(id, { hash: fresh, size: st.size }).catch(() => {});
+      }
+    }
+    out[id] = { path: a.path, kind: a.kind, hash, audio: a.audio, dur: a.dur };
   }
   return out;
 }
 
 /** Filter ASS dialogue lines overlapping a time window (for unit hashing). */
 function assWindow(ass: string, s: number, e: number): string {
-  const head = ass.slice(0, ass.indexOf('[Events]'));
+  const evIdx = ass.indexOf('[Events]');
+  const head = evIdx >= 0 ? ass.slice(0, evIdx) : ass;
   const toSec = (t: string) => {
     const [h, m, x] = t.split(':');
     return Number(h) * 3600 + Number(m) * 60 + Number(x);
@@ -311,7 +324,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   let cachedUnits = 0;
   const todo: number[] = [];
   for (let i = 0; i < units.length; i++) {
-    if (await exists(unitFiles[i]!)) cachedUnits++;
+    if ((await exists(unitFiles[i]!)) && (await validVideo(unitFiles[i]!))) cachedUnits++;
     else todo.push(i);
   }
 
@@ -335,15 +348,27 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     range: audioRange ?? null,
   });
   const audioFile = project.cachePath('audio', `${audioHash}.m4a`);
-  const audioCached = await exists(audioFile);
+  const audioCached = (await exists(audioFile)) && (await validAudio(audioFile));
 
   const finalKey = hashOf({ hashes, audioHash });
   const outPath = opts.out ? path.resolve(opts.out) : project.rendersPath(`${baseName}${opts.preview ? '-preview' : ''}.mp4`);
   const markerFile = `${outPath}.tmep`;
+  const expect = span ? span[1] - span[0] : frames / fps;
+  const verifyOutput = async (file: string) => {
+    const v = await probe(file);
+    if (Math.abs(v.dur - expect) > 2 / fps + 0.06 || v.w !== W || v.h !== H || !v.audio) {
+      throw new TmepError('E_INTERNAL', `output verification failed: got ${v.dur}s ${v.w}x${v.h} audio=${v.audio}, expected ${r2(expect, 3)}s ${W}x${H}`);
+    }
+    return v;
+  };
   if ((await exists(outPath)) && (await fsp.readFile(markerFile, 'utf8').catch(() => '')) === finalKey) {
-    const v = await probe(outPath);
-    progress(1, 'cached');
-    return { out: outPath, dur: v.dur, w: W, h: H, fps, units: units.length, unitsCached: units.length, audioCached: true, cacheHit: true, ms: Date.now() - t0, span, verified: { dur: v.dur, w: v.w ?? 0, h: v.h ?? 0, audio: v.audio } };
+    try {
+      const v = await verifyOutput(outPath);
+      progress(1, 'cached');
+      return { out: outPath, dur: v.dur, w: W, h: H, fps, units: units.length, unitsCached: units.length, audioCached: true, cacheHit: true, ms: Date.now() - t0, span, verified: { dur: v.dur, w: v.w ?? 0, h: v.h ?? 0, audio: v.audio } };
+    } catch {
+      await fsp.rm(markerFile, { force: true }).catch(() => {});
+    }
   }
 
   const totalWork = todo.reduce((a, i) => a + units[i]!.frames, 0) + 1;
@@ -436,17 +461,19 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     await ffmpeg({ args: ['-f', 'concat', '-safe', '0', '-i', list, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-movflags', '+faststart', tmpOut], signal: ctrl.signal });
     await fsp.rename(tmpOut, outPath);
     temps.delete(tmpOut);
-    await fsp.writeFile(markerFile, finalKey);
   } finally {
     hooks.signal?.removeEventListener('abort', onCallerAbort);
     await Promise.all([...temps].map((f) => fsp.rm(f, { force: true }).catch(() => {})));
   }
 
-  // ---- verify ----
-  const v = await probe(outPath);
-  const expect = span ? span[1] - span[0] : frames / fps;
-  if (Math.abs(v.dur - expect) > 2 / fps + 0.06 || v.w !== W || v.h !== H || !v.audio) {
-    throw new TmepError('E_INTERNAL', `output verification failed: got ${v.dur}s ${v.w}x${v.h} audio=${v.audio}, expected ${r2(expect, 3)}s ${W}x${H}`);
+  // ---- verify before writing cache marker ----
+  let v: Awaited<ReturnType<typeof probe>>;
+  try {
+    v = await verifyOutput(outPath);
+    await fsp.writeFile(markerFile, finalKey);
+  } catch (e) {
+    await fsp.rm(markerFile, { force: true }).catch(() => {});
+    throw e;
   }
   progress(1, 'done');
   return {

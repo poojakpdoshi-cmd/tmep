@@ -33,6 +33,8 @@ export function easeExpr(e: Ease, p: string): string {
       return `if(lt(${p},0.5),4*pow(${p},3),1-pow(2-2*${p},3)/2)`;
     case 'back':
       return `(1+2.70158*pow(${p}-1,3)+1.70158*pow(${p}-1,2))`;
+    case 'spring':
+      return `if(lte(${p},0),0,if(gte(${p},1),1,1-exp(-6*${p})*cos(${p}*2.5*PI)))`;
     case 'hold':
       return `gte(${p},1)`;
   }

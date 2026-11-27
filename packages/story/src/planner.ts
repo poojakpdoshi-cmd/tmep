@@ -68,8 +68,15 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
   let keptSentences = 0;
   let totalSentences = 0;
 
-  // 1) rough cut every source (target split by source speech share)
-  const speechTotal = inp.sources.reduce((a, s) => a + (s.words?.length ? s.words[s.words.length - 1]!.e - s.words[0]!.s : 0), 0) || 1;
+  // 1) rough cut every source (target split across all non-image sources)
+  const imageCount = inp.sources.filter((s) => s.kind === 'image').length;
+  const nonImageBudget = target ? Math.max(1, target - imageCount * 3) : 0;
+  const weightOf = (s: PlanInput['sources'][number]): number => {
+    if (s.kind === 'image') return 0;
+    if (s.words?.length) return s.words.reduce((acc, w) => acc + Math.max(0.05, w.e - w.s), 0);
+    return Math.min(s.dur, nonImageBudget || s.dur);
+  };
+  const totalWeight = inp.sources.reduce((a, s) => a + weightOf(s), 0) || 1;
   for (const src of inp.sources) {
     if (inp.referenceShotSec !== undefined && src.kind !== 'image') {
       totalSentences += countSentences(src.words ?? []);
@@ -83,16 +90,28 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
       tl.clips.push(newClip(tl, src.id, 0, 3, { fit: tpl.fit }));
       continue;
     }
+    const share = weightOf(src) / totalWeight;
+    const srcTarget = nonImageBudget ? nonImageBudget * share : 0;
     if (!src.words?.length) {
-      // no transcript: keep the whole source (or target length)
-      const out = target ? Math.min(src.dur, target) : src.dur;
-      tl.clips.push(newClip(tl, src.id, 0, out, { fit: tpl.fit }));
+      // no transcript: sample representative mid-clip window(s) rather than blindly truncating from 0s
+      const want = srcTarget ? Math.min(src.dur, Math.max(1, srcTarget)) : src.dur;
+      if (want >= src.dur - 0.1) {
+        tl.clips.push(newClip(tl, src.id, 0, src.dur, { fit: tpl.fit }));
+      } else if (src.dur >= want * 1.8 && want >= 3) {
+        const seg = want / 2;
+        const s1 = Math.max(0, src.dur * 0.15);
+        const s2 = Math.min(src.dur - seg, Math.max(s1 + seg + 0.1, src.dur * 0.55));
+        tl.clips.push(newClip(tl, src.id, s1, s1 + seg, { fit: tpl.fit }));
+        tl.clips.push(newClip(tl, src.id, s2, s2 + seg, { fit: tpl.fit }));
+      } else {
+        const s0 = Math.max(0, Math.min(src.dur - want, (src.dur - want) * 0.35));
+        tl.clips.push(newClip(tl, src.id, s0, s0 + want, { fit: tpl.fit }));
+      }
       continue;
     }
-    const share = (src.words[src.words.length - 1]!.e - src.words[0]!.s) / speechTotal;
     const lastText = src.words.slice(-14).map((w) => w.w.toLowerCase()).join(' ');
     const ctaLast = tpl.gfx.cta && /\b(follow|subscribe|link in (the )?bio|comment|save this)\b/.test(lastText.split(/[.!?]\s/).pop() ?? '');
-    const rc = roughCut(src.words, { target: target ? target * share : 0, maxGap: tpl.maxGap, pad: tpl.pad, dropFillers: true, keepFirst: true, keepLast: ctaLast });
+    const rc = roughCut(src.words, { target: srcTarget, maxGap: tpl.maxGap, pad: tpl.pad, dropFillers: true, keepFirst: true, keepLast: ctaLast });
     keptSentences += rc.kept.length;
     totalSentences += countSentences(src.words);
     for (const [s, e] of rc.ranges) tl.clips.push(newClip(tl, src.id, s, Math.min(e, src.dur), { fit: tpl.fit }));
@@ -100,14 +119,15 @@ export function planTimeline(inp: PlanInput): { tl: Timeline; summary: PlanSumma
   if (!tl.clips.length) throw new TmepError('E_STATE', 'rough cut produced no clips (is the transcript empty?)');
 
   // 2) framing: crop centre, jump-cut alternation, push-ins
+  const allowZooms = inp.zooms !== false;
   let alt = false;
   tl.clips.forEach((c, i) => {
-    c.push = inp.referenceShotSec === undefined ? tpl.push : 0;
+    c.push = allowZooms && inp.referenceShotSec === undefined ? tpl.push : 0;
     const prev = tl.clips[i - 1];
     const isJump = prev && prev.src === c.src && c.in - prev.out > 0.05;
-    if (tpl.jumpZoom && isJump) alt = !alt;
-    else if (!isJump) alt = false;
-    c.base = inp.referenceShotSec !== undefined ? (i % 2 ? 1.06 : 1) : alt ? 1.08 : 1;
+    if (allowZooms && tpl.jumpZoom && isJump) alt = !alt;
+    else if (!isJump || !allowZooms) alt = false;
+    c.base = !allowZooms ? 1 : inp.referenceShotSec !== undefined ? (i % 2 ? 1.06 : 1) : alt ? 1.08 : 1;
   });
 
   // 3) captions

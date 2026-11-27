@@ -1,6 +1,12 @@
-# TMEP: video editing engine for AI agents
+# FRAME — Footage Reasoning and Agent-driven Media Editing
 
-## New: focused text-to-image explainer
+> **Product Identity**: **FRAME** (*Footage Reasoning and Agent-driven Media Editing*, formerly TMEP).
+> **Internal Protocol**: **Token-Minimal Editing Protocol (`tmep/1`)**.
+> Both `frame` / `frame-mcp` and legacy `tmep` / `tmep-mcp` commands and `.tmep/` project directories are supported for full backward compatibility.
+
+See [AGENTS.md](AGENTS.md), [INSTRUCTIONS.md](INSTRUCTIONS.md), [QUALITY_STANDARDS.md](QUALITY_STANDARDS.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [ROADMAP.md](ROADMAP.md) for canonical agent instructions and quality gates.
+
+## Focused text-to-image explainer preview
 
 [Download the 1080×1920, 60 fps silent preview](preview/trial-visual-only.mp4) · [View the contact sheet](preview/contact-sheet.png)
 

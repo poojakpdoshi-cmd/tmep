@@ -1,25 +1,39 @@
-# Explainer rendering architecture
+# ARCHITECTURE.md — FRAME System Architecture
 
-The existing TMEP 0.1.0 engine, CLI/MCP, timeline, storage, legacy renderer and presets remain available. The new focused workflow lives inside the same repository and is invoked with `npm run explainer -- config.json`. It is not yet exposed as a separate MCP tool.
+**FRAME** (*Footage Reasoning and Agent-driven Media Editing*, formerly TMEP) is a local-first, workspace-based TypeScript/Node.js media-production engine using the **Token-Minimal Editing Protocol (TMEP)**.
 
-## Pipeline
+## AI Workload Offloading Responsibilities
 
-1. `examples/explainer/render.mjs` reads JSON configuration and probes narration with the existing FFmpeg adapter.
-2. Import a measured words JSON transcript, or use the existing local whisper.cpp/faster-whisper adapters. Segment-only/approximate words are rejected in this route. A supplied script is compared to transcript content; a mismatch stops rendering. It is not silently treated as forced alignment.
-3. `explainer-plan.ts` validates words, derives sentence/phrase and pause boundaries, and creates five scene boundaries from spoken cues or explicit source-second anchors. Duration is rounded UP to a 60 fps frame boundary, preserving the entire narration. Speech and pauses are not automatically cut.
-4. `explainer-canvas.mjs` draws at integer frame indices with Skia Canvas. Smootherstep easing has zero endpoint velocity and acceleration. Typography uses measured font widths; caption groups have at most two lines, no page overlap, and no scale animation. Word emphasis changes color only. No artificial frame interpolation is used.
-5. FFmpeg receives RGBA frames through a backpressured pipe, encodes H.264/yuv420p, and muxes one continuous AAC narration track. Both caption-free and captioned versions are generated when audio exists. Without audio, a visible preview label is mandatory and no subtitles or audio are fabricated.
-6. Optional presenter composition uses a reserved lower-right area above captions. Visual content is reduced to the top band first. The facecam's audio is ignored. Alpha is accepted only when the input declares a compatible pixel format or alpha metadata; no background removal is implied.
-7. `qa.mjs` decodes the exported MP4, checks dimensions/rate/frame count, measures adjacent downsampled frame differences, and extracts scene, first/last and transition frames for visual inspection.
+FRAME reduces external agent work by delegating deterministic computation locally across six architectural responsibilities:
 
-## Why Canvas plus FFmpeg
+- **FRAME Intelligence**: Local footage analysis (transcripts, silence, shot-cut pacing; multimodal video understanding is future Phase 4).
+- **FRAME Director**: Context-aware creative direction, restraint profiles, and pacing selection.
+- **FRAME Compiler**: Declarative intent-to-edit compilation (layout, measured text wrapping, alignment, keyframes, easing, safe zones, dry-run validation).
+- **FRAME Engine**: Deterministic timeline ops, revisions, and FFmpeg/Canvas/libass rendering.
+- **FRAME Inspector**: Automated quality checks and safe deterministic layout corrections (overflow, collisions, safe zones, timing, blank frames).
+- **FRAME Optimizer**: Content-addressed caching, decision reuse, compact DSL, and minimal tool calls.
 
-ASS remains well suited to legacy captions, but its centisecond events, preset transforms and approximate text sizing are awkward for a persistent image-generation illustration. Canvas adds one pinned runtime dependency, `@napi-rs/canvas@0.1.100`, and retains FFmpeg. The final 1200-frame export demonstrates native 60 fps at 1080×1920; a browser/React migration is unnecessary for this composition. Font rendering may vary across platforms; use the same font, Canvas and FFmpeg versions for reproducible pixels. Rendering is deterministic for those fixed inputs, not guaranteed byte-identical across different encoders/platforms.
+## Package Dependency Graph
 
-## Boundaries and remaining work
+```
+packages/mcp (stdio JSON-RPC) ─┐
+packages/cli (CLI commands)   ─┼─▶ packages/engine (orchestration API)
+                               │       ├──▶ packages/core (timeline, ops, project, effects, scene, schema)
+                               │       ├──▶ packages/speech (whisper.cpp, faster-whisper, analyze, hinglish)
+                               │       ├──▶ packages/story (planner, templates, rules, storyboard, script, reference)
+                               │       └──▶ packages/render (render, graph, effects, audio, sfx, stage, jobs, recovery)
+                               │               ├──▶ packages/motion (ass, captions, presets, scene, vector, fonts, icons)
+                               │               └──▶ packages/media (ffmpeg, exec, chrome, reference)
+```
 
-This is one text-to-image explainer, not a general autonomous scene designer. The artwork is an original procedural vector landscape, explicitly labeled as an illustration; no AI image-generation inference runs. Automatic cue matching is intentionally narrow and requests explicit sceneStarts when it cannot find cues. Arbitrary subjects need a new storyboard/composition.
+## Core Subsystems
 
-Forced alignment is not installed. Imported timestamps carry provenance only as provided by the user/recognizer; frame precision does not prove ASR accuracy. Caption quantization is under one 60 fps frame (16.67 ms) relative to valid input timestamps, while real speech alignment remains to be measured. Local Whisper adapters are retained but could not be exercised because their binaries/models are absent.
-
-Transparent presenter videos may need codec-specific decoder support (notably VP9 alpha); real user assets require validation. The renderer does not do masking, face tracking or audio offset detection. Presenter inputs must already align to narration time zero and cover its full duration.
+- **Timeline & Revisions (`packages/core`)**: Frame-quantized clip layout (`fps`-aligned), deterministic `TimeRef` anchoring, 23 atomic TMEP ops, and immutable JSON revisions (`revs/rNNNN.json`) with file locking.
+- **Engine (`packages/engine`)**: Unified `api.ts` entrypoint shared by MCP and CLI, enforcing workspace boundaries, project locking, and job orchestration.
+- **Rendering (`packages/render`)**:
+  - **Video**: Unit-based FFmpeg filtergraph compilation (`graph.ts`) splitting at hard cuts, joining transitions with `xfade`, compositing z-ordered `broll` + `gfxOverlays` (`overlay`), and burning top-level `gfx.ass` (`subtitles`).
+  - **Audio**: 3-stage bounded pipeline (`audio.ts`) producing sample-exact speech chunks, windowed synthesized SFX (`sfx.ts`), sidechain-ducked music, and conditional `loudnorm`.
+  - **Staging & Recovery**: Worker pool (`stage.ts`), atomic `publish()`, filter-script fallback (`-/filter_complex` / `-filter_complex_script`), PID-scoped crash recovery (`recovery.ts`), and `.cancel` marker polling (`jobs.ts`).
+- **Motion (`packages/motion`)**: Dual path—`libass` (`ass.ts`, `captions.ts`, `presets.ts`, `icons.ts`) and `@napi-rs/canvas` Skia rasterization (`vector.ts`, `scene.ts`) with SAT collision & safe-area validation.
+- **Media (`packages/media`)**: Safe `spawn(..., { shell: false })` runner (`exec.ts`), FFmpeg/ffprobe wrappers (`ffmpeg.ts`), shot-cut reference analyzer (`reference.ts`), and headless Chrome CDP driver (`chrome.ts`).
+- **Speech & Story (`packages/speech`, `packages/story`)**: Local `whisper.cpp` / `faster-whisper` adapters, transcript normalization, Hinglish transliteration, BM25 search, and deterministic rule/template planners.
