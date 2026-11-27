@@ -2,6 +2,17 @@
 
 **FRAME** (*Footage Reasoning and Agent-driven Media Editing*, formerly TMEP) is a local-first, workspace-based TypeScript/Node.js media-production engine using the **Token-Minimal Editing Protocol (TMEP)**.
 
+## AI Workload Offloading Responsibilities
+
+FRAME reduces external agent work by delegating deterministic computation locally across six architectural responsibilities:
+
+- **FRAME Intelligence**: Local footage analysis (transcripts, silence, shot-cut pacing; multimodal video understanding is future Phase 4).
+- **FRAME Director**: Context-aware creative direction, restraint profiles, and pacing selection.
+- **FRAME Compiler**: Declarative intent-to-edit compilation (layout, measured text wrapping, alignment, keyframes, easing, safe zones, dry-run validation).
+- **FRAME Engine**: Deterministic timeline ops, revisions, and FFmpeg/Canvas/libass rendering.
+- **FRAME Inspector**: Automated quality checks and safe deterministic layout corrections (overflow, collisions, safe zones, timing, blank frames).
+- **FRAME Optimizer**: Content-addressed caching, decision reuse, compact DSL, and minimal tool calls.
+
 ## Package Dependency Graph
 
 ```
