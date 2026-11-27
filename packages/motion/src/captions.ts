@@ -1,9 +1,11 @@
 /**
  * Caption compiler: timeline words -> animated ASS events.
- * Styles: kinetic (word pop + highlight), karaoke (colour sweep), clean, boxed.
+ * Uses measured glyph widths, phrase-aware line breaking, safe-zone clamping,
+ * and zero-reflow active-word highlighting.
  */
 import type { Captions, TlWord } from '../../core/src/index.ts';
 import { AssDoc, tagColor, escapeText, ms } from './ass.ts';
+import { canvasModule } from './vector.ts';
 import { transliterateWord, hasDevanagari } from '../../speech/src/hinglish.ts';
 
 export interface CaptionPage {
@@ -17,17 +19,68 @@ export interface CaptionLayout {
   y: number;
   size: number;
   maxChars: number;
+  maxWidthPx: number;
 }
 
-export function captionLayout(c: Captions, w: number, h: number): CaptionLayout {
+export interface CaptionLayoutOptions {
+  safeTop?: number;
+  safeBottom?: number;
+  reservePresenter?: { x: number; y: number; w: number; h: number };
+}
+
+export function captionLayout(c: Captions, w: number, h: number, opts: CaptionLayoutOptions = {}): CaptionLayout {
   const portrait = h > w * 1.2;
   const square = !portrait && h > w * 0.9;
-  const base = portrait ? w * 0.08 : square ? w * 0.072 : h * 0.065;
-  const y = c.pos === 'upper' ? h * (portrait ? 0.24 : 0.16) : c.pos === 'middle' ? h * 0.5 : h * (portrait ? 0.7 : 0.84);
-  return { x: w / 2, y, size: Math.round(base * c.size), maxChars: portrait ? 16 : square ? 20 : 34 };
+  const base = portrait ? w * 0.076 : square ? w * 0.068 : h * 0.062;
+  const size = Math.round(base * c.size);
+  const halfH = size * 1.35;
+  const safeTop = (opts.safeTop ?? (portrait ? 0.08 : 0.06)) * h;
+  const safeBottom = (opts.safeBottom ?? (portrait ? 0.21 : 0.10)) * h;
+
+  let y = c.pos === 'upper'
+    ? h * (portrait ? 0.22 : 0.16)
+    : c.pos === 'middle'
+      ? h * 0.5
+      : h * (portrait ? 0.70 : 0.84);
+
+  // Clamp within platform safe zones
+  y = Math.max(safeTop + halfH, Math.min(h - safeBottom - halfH, y));
+
+  // Avoid reserved presenter region if provided
+  if (opts.reservePresenter) {
+    const rp = opts.reservePresenter;
+    const rpTop = (rp.y - rp.h / 2) * h;
+    const rpBot = (rp.y + rp.h / 2) * h;
+    if (y + halfH > rpTop && y - halfH < rpBot) {
+      const above = rpTop - halfH - 12;
+      const below = rpBot + halfH + 12;
+      if (above >= safeTop + halfH) y = above;
+      else if (below <= h - safeBottom - halfH) y = below;
+    }
+  }
+
+  return {
+    x: w / 2,
+    y,
+    size,
+    maxChars: portrait ? 16 : square ? 20 : 34,
+    maxWidthPx: Math.round(w * (portrait ? 0.72 : 0.68)),
+  };
+}
+
+export function makeWidthMeasurer(font: string, size: number): (text: string) => number {
+  try {
+    const { createCanvas } = canvasModule();
+    const ctx = createCanvas(1, 1).getContext('2d');
+    ctx.font = `700 ${size}px "${font}"`;
+    return (text: string) => ctx.measureText(text).width;
+  } catch {
+    return (text: string) => text.length * size * 0.56;
+  }
 }
 
 const FILLER = /^(um+|uh+|erm|er|ah|hmm+|mm+|uhm)$/i;
+const SHORT_FUNC = new Set(['a', 'an', 'the', 'to', 'of', 'in', 'on', 'for', 'and', 'or', 'is', 'at', 'by', 'with']);
 
 export function displayWord(w: string, c: Captions): string {
   let t = w;
@@ -39,8 +92,14 @@ export function displayWord(w: string, c: Captions): string {
   return c.upper ? t.toLocaleUpperCase() : t;
 }
 
-/** Group words into short caption pages (break on pauses, punctuation, length). */
-export function paginate(words: TlWord[], c: Captions, maxChars: number): CaptionPage[] {
+/** Group words into short caption pages (break on pauses, punctuation, measured width). */
+export function paginate(
+  words: TlWord[],
+  c: Captions,
+  maxChars: number,
+  measure?: (text: string) => number,
+  maxWidthPx?: number,
+): CaptionPage[] {
   const pages: CaptionPage[] = [];
   let cur: TlWord[] = [];
   let chars = 0;
@@ -52,15 +111,19 @@ export function paginate(words: TlWord[], c: Captions, maxChars: number): Captio
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!;
     if (FILLER.test(w.w.replace(/[^\w]/g, ''))) continue;
-    const len = displayWord(w.w, c).length;
+    const disp = displayWord(w.w, c);
+    const len = disp.length;
     const prev = cur[cur.length - 1];
-    if (cur.length && (cur.length >= c.maxWords || chars + len + 1 > maxChars * 2 || (prev && w.s - prev.e > 0.45) || w.s - cur[0]!.s > 2.6)) flush();
+    const nextToks = [...cur.map((x) => displayWord(x.w, c)), disp];
+    const tooWide = measure && maxWidthPx
+      ? measure(nextToks.join(' ')) > maxWidthPx * 1.9
+      : chars + len + 1 > maxChars * 2;
+    if (cur.length && (cur.length >= c.maxWords || tooWide || (prev && w.s - prev.e > 0.45) || w.s - cur[0]!.s > 2.6)) flush();
     cur.push(w);
     chars += len + 1;
-    if (/[.!?,;:]$/.test(w.w) && cur.length >= Math.min(2, c.maxWords)) flush();
+    if (/[.!?,;:।]$/.test(w.w) && cur.length >= Math.min(2, c.maxWords)) flush();
   }
   flush();
-  // Extend each page to the next page start (max +0.6s) so captions don't flicker off.
   for (let i = 0; i < pages.length; i++) {
     const next = pages[i + 1];
     const p = pages[i]!;
@@ -69,26 +132,43 @@ export function paginate(words: TlWord[], c: Captions, maxChars: number): Captio
   return pages;
 }
 
-function lineBreak(tokens: string[], maxChars: number): number | undefined {
-  const total = tokens.reduce((a, t) => a + t.length + 1, 0);
-  if (total <= maxChars || tokens.length < 2) return undefined;
+function lineBreak(tokens: string[], rawWords: string[], maxWidthPx: number, measure: (t: string) => number): number | undefined {
+  if (tokens.length < 2) return undefined;
+  const full = tokens.join(' ');
+  if (measure(full) <= maxWidthPx) return undefined;
+
   let best = 1;
-  let bestDiff = Infinity;
-  let acc = 0;
+  let bestScore = Infinity;
   for (let i = 0; i < tokens.length - 1; i++) {
-    acc += tokens[i]!.length + 1;
-    const diff = Math.abs(total / 2 - acc);
-    if (diff < bestDiff) {
-      bestDiff = diff;
+    const left = tokens.slice(0, i + 1).join(' ');
+    const right = tokens.slice(i + 1).join(' ');
+    const w1 = measure(left);
+    const w2 = measure(right);
+    let penalty = Math.abs(w1 - w2);
+    if (w1 > maxWidthPx) penalty += (w1 - maxWidthPx) * 3;
+    if (w2 > maxWidthPx) penalty += (w2 - maxWidthPx) * 3;
+    // Prefer breaking after punctuation, discourage stranding short function words at line end
+    if (/[,;:।]$/.test(rawWords[i] ?? '')) penalty -= maxWidthPx * 0.25;
+    if (SHORT_FUNC.has((tokens[i] ?? '').toLowerCase())) penalty += maxWidthPx * 0.18;
+    if (penalty < bestScore) {
+      bestScore = penalty;
       best = i + 1;
     }
   }
   return best;
 }
 
-export function compileCaptions(doc: AssDoc, words: TlWord[], c: Captions, font: string, dur: number): number {
+export function compileCaptions(
+  doc: AssDoc,
+  words: TlWord[],
+  c: Captions,
+  font: string,
+  dur: number,
+  opts: CaptionLayoutOptions = {},
+): number {
   if (c.style === 'none' || !words.length) return 0;
-  const L = captionLayout(c, doc.w, doc.h);
+  const L = captionLayout(c, doc.w, doc.h, opts);
+  const measure = makeWidthMeasurer(font, L.size);
   const outline = Math.max(3, Math.round(L.size * 0.075));
   const boxed = c.style === 'boxed';
   doc.style({
@@ -105,14 +185,14 @@ export function compileCaptions(doc: AssDoc, words: TlWord[], c: Captions, font:
     align: 5,
     spacing: c.upper ? 1 : 0,
   });
-  const pages = paginate(words, c, L.maxChars);
+  const pages = paginate(words, c, L.maxChars, measure, L.maxWidthPx);
   const accent = tagColor(c.accent);
   const base = tagColor(c.color);
   const pos = `\\an5\\pos(${Math.round(L.x)},${Math.round(L.y)})`;
   let n = 0;
   for (const p of pages) {
     const toks = p.words.map((w) => displayWord(w.w, c));
-    const br = lineBreak(toks, L.maxChars);
+    const br = lineBreak(toks, p.words.map((w) => w.w), L.maxWidthPx, measure);
     const join = (parts: string[]) => parts.map((t, i) => (br !== undefined && i === br ? `\\N${t}` : i === 0 ? t : ` ${t}`)).join('');
     const end = Math.min(p.e, dur);
     if (c.style === 'karaoke') {
@@ -131,14 +211,18 @@ export function compileCaptions(doc: AssDoc, words: TlWord[], c: Captions, font:
       n++;
       continue;
     }
-    // kinetic: one event per active word; active word pops and takes the accent colour
+    // kinetic: zero-reflow active-word emphasis (no inline font scaling that shifts neighboring words)
     p.words.forEach((w, i) => {
       const s = i === 0 ? p.s : w.s;
       const e = i === p.words.length - 1 ? end : p.words[i + 1]!.s;
       if (e <= s) return;
-      const enter = i === 0 ? '\\fad(70,0)' : '';
+      const fadeIn = i === 0 ? 70 : 0;
+      const fadeOut = i === p.words.length - 1 ? 70 : 0;
+      const enter = fadeIn || fadeOut ? `\\fad(${fadeIn},${fadeOut})` : '';
       const parts = toks.map((t, j) =>
-        j === i ? `{\\c${accent}\\fscx100\\fscy100\\t(0,${ms(0.09)},0.5,\\fscx114\\fscy114)\\t(${ms(0.09)},${ms(0.2)},\\fscx106\\fscy106)}${escapeText(t)}{\\c${base}\\fscx100\\fscy100}` : escapeText(t),
+        j === i
+          ? `{\\c${accent}\\bord${outline + 2}\\t(0,${ms(0.12)},\\bord${outline})}${escapeText(t)}{\\c${base}\\bord${outline}}`
+          : escapeText(t),
       );
       doc.add({ start: s, end: e, style: 'Cap', text: `{${pos}${enter}}${join(parts)}`, layer: 2 });
       n++;

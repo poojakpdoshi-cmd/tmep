@@ -417,6 +417,87 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
   return out;
 }
 
+/** Deterministically auto-correct safe layout defects (safe-area, caption overlap, text overflow) without silently altering intent. */
+export function autoCorrectScenes(
+  tl: Timeline,
+  words: TlWord[],
+  assets: SceneAssets,
+): {
+  tl: Timeline;
+  corrections: { scene: string; layer: string; code: string; msg: string }[];
+  unresolved: SceneDiagnostic[];
+} {
+  const cloned = JSON.parse(JSON.stringify(tl)) as Timeline;
+  const corrections: { scene: string; layer: string; code: string; msg: string }[] = [];
+  if (!cloned.scenes?.length) return { tl: cloned, corrections, unresolved: [] };
+
+  const { w, h } = cloned.settings;
+  const cap = captionLayout(cloned.captions, w, h);
+  const capHalf = cap.size * (cloned.captions.style === 'kinetic' ? 1.6 : 1.4);
+
+  for (let pass = 0; pass < 5; pass++) {
+    const diag = diagnoseScenes(cloned, words, assets);
+    if (diag.ok) return { tl: cloned, corrections, unresolved: [] };
+    let changed = false;
+    for (const issue of diag.issues) {
+      const entry = cloned.scenes.find((s) => s.id === issue.scene);
+      if (!entry) continue;
+      const spec = entry.spec;
+      const safe = spec.safe ?? { left: 0, top: 0, right: 0, bottom: 0 };
+      for (const lid of issue.layers) {
+        const layer = spec.layers.find((l) => l.id === lid);
+        if (!layer) continue;
+        if (issue.code === 'safe-area') {
+          const minX = safe.left + layer.w / 2 + 0.005;
+          const maxX = 1 - safe.right - layer.w / 2 - 0.005;
+          const minY = safe.top + layer.h / 2 + 0.005;
+          const maxY = 1 - safe.bottom - layer.h / 2 - 0.005;
+          const nx = minX <= maxX ? Math.min(maxX, Math.max(minX, layer.x)) : layer.x;
+          const ny = minY <= maxY ? Math.min(maxY, Math.max(minY, layer.y)) : layer.y;
+          if (nx !== layer.x || ny !== layer.y) {
+            layer.x = nx;
+            layer.y = ny;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'safe-area', msg: `clamped ${lid} inside safe area` });
+          }
+        } else if (issue.code === 'caption') {
+          const capNormY = cap.y / h;
+          const capNormH = capHalf / h;
+          const aboveY = capNormY - capNormH - layer.h / 2 - 0.02;
+          const belowY = capNormY + capNormH + layer.h / 2 + 0.02;
+          const minY = safe.top + layer.h / 2 + 0.005;
+          const maxY = 1 - safe.bottom - layer.h / 2 - 0.005;
+          if (aboveY >= minY) {
+            layer.y = aboveY;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'caption', msg: `shifted ${lid} above caption band` });
+          } else if (belowY <= maxY) {
+            layer.y = belowY;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'caption', msg: `shifted ${lid} below caption band` });
+          }
+        } else if (issue.code === 'clipping' && layer.kind === 'text') {
+          if (!layer.wrap) {
+            layer.wrap = true;
+            changed = true;
+            corrections.push({ scene: entry.id, layer: lid, code: 'clipping', msg: `enabled measured text wrap on ${lid}` });
+          } else if (layer.style && spec.styles) {
+            const st = spec.styles.find((s) => s.id === layer.style);
+            if (st && st.size > 18) {
+              st.size = Math.max(18, Math.round(st.size * 0.85));
+              changed = true;
+              corrections.push({ scene: entry.id, layer: lid, code: 'clipping', msg: `reduced style ${st.id} size to ${st.size}px` });
+            }
+          }
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  const finalDiag = diagnoseScenes(cloned, words, assets);
+  return { tl: cloned, corrections, unresolved: finalDiag.issues };
+}
+
 function validateFrames(
   layers: { layer: Layer; from: number; to: number; fx: Key[]; box: Point[] }[], camera: Key[],
   frames: number, fps: number, w: number, h: number, safe: { l: number; r: number; t: number; b: number },
