@@ -41,7 +41,6 @@ import {
   PROTOCOL,
   visualSceneSchema,
   assertSafeId,
-  canonicalPath,
   isUncOrDevicePath,
   parseAllowedRoots,
   resolveContainedPath,
@@ -73,7 +72,7 @@ export interface Ctx {
 async function resolveSafePath(raw: string, base: string, roots: string[] | undefined, label: string): Promise<string> {
   if (roots && roots.length) return resolveContainedPath(raw, roots, label);
   if (isUncOrDevicePath(raw)) throw new TmepError('E_SECURITY', `${label} cannot use UNC or device paths: ${raw}`);
-  return canonicalPath(path.resolve(base, raw));
+  return path.resolve(base, raw);
 }
 
 export async function openProject(dir: string, create = true, projectRoots?: string[]): Promise<Project> {
