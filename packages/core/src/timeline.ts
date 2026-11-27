@@ -67,9 +67,10 @@ export interface Clip {
   fx?: Effect[];
 }
 
-/** A point in time: either absolute timeline time (`at`) or a source anchor (`src` + `t`). */
+/** A point in time: either absolute timeline time (`at`) or a source anchor (`src` + `t`, optionally scoped to `clip` id). */
 export interface TimeRef {
   at?: number;
+  clip?: string;
   src?: string;
   t?: number;
 }
@@ -263,7 +264,10 @@ export const duration = (tl: Timeline): number => totalFrames(tl) / tl.settings.
 export function srcToTl(placed: Placed[], src: string, t: number): number | undefined {
   for (const p of placed) {
     const c = p.clip;
-    if (c.src === src && t >= c.in - 1e-6 && t < c.out + 1e-6) return p.start + (Math.min(t, c.out) - c.in) / c.speed;
+    if (c.src === src && t >= c.in - 1e-6 && t <= c.out + 1e-6) {
+      const offset = Math.min(p.dur, Math.max(0, (Math.min(t, c.out) - c.in) / c.speed));
+      return p.start + offset;
+    }
   }
   return undefined;
 }
@@ -273,13 +277,23 @@ export function tlToSrc(placed: Placed[], t: number): { p: Placed; srcT: number 
   for (let i = placed.length - 1; i >= 0; i--) {
     const p = placed[i]!;
     if (t >= p.start - 1e-6 && t < p.start + p.dur + 1e-6) {
-      return { p, srcT: p.clip.in + (t - p.start) * p.clip.speed };
+      const raw = p.clip.in + (t - p.start) * p.clip.speed;
+      const srcT = Math.min(p.clip.out, Math.max(p.clip.in, raw));
+      return { p, srcT };
     }
   }
   return undefined;
 }
 
 export function resolveRef(placed: Placed[], ref: TimeRef): number | undefined {
+  if (ref.clip !== undefined && ref.t !== undefined) {
+    const exact = placed.find((p) => p.clip.id === ref.clip && ref.t! >= p.clip.in - 1e-6 && ref.t! <= p.clip.out + 1e-6);
+    if (exact) {
+      const c = exact.clip;
+      const offset = Math.min(exact.dur, Math.max(0, (Math.min(ref.t, c.out) - c.in) / c.speed));
+      return exact.start + offset;
+    }
+  }
   if (ref.src !== undefined && ref.t !== undefined) return srcToTl(placed, ref.src, ref.t);
   return ref.at;
 }
@@ -371,10 +385,12 @@ export function resolveAnchor(tl: Timeline, words: TlWord[], a: unknown, placed 
   throw new TmepError('E_ANCHOR', `unrecognized anchor "${s}"`, 'use seconds, "@phrase", "w:N", "c:ID" or "end"');
 }
 
-/** Convert a resolved timeline time into a durable source anchor (falls back to absolute). */
+/** Convert a resolved timeline time into a durable clip-scoped source anchor (falls back to absolute). */
 export function anchorAt(placed: Placed[], t: number): TimeRef {
   const hit = tlToSrc(placed, t);
-  return hit ? { src: hit.p.clip.src, t: Math.round(hit.srcT * 1000) / 1000 } : { at: t };
+  if (!hit) return { at: t };
+  const clamped = Math.min(hit.p.clip.out, Math.max(hit.p.clip.in, hit.srcT));
+  return { clip: hit.p.clip.id, src: hit.p.clip.src, t: Math.round(clamped * 1e6) / 1e6 };
 }
 
 /** Remove a source range from every clip that uses it, splitting clips as needed. */
@@ -395,7 +411,14 @@ function splitClip(tl: Timeline, c: Clip, s: number, e: number): Clip[] {
   if (keepLeft) out.push(withFx({ ...c, out: s, zoom: c.zoom.filter((z) => z.s < s) }, 0));
   if (keepRight) {
     const right: Clip = withFx({ ...c, in: e, zoom: c.zoom.filter((z) => z.s >= e), trans: keepLeft ? undefined : c.trans }, (e - c.in) / c.speed);
-    if (keepLeft) right.id = nextId(tl, 'c');
+    if (keepLeft) {
+      right.id = nextId(tl, 'c');
+      for (const item of [...tl.gfx, ...tl.broll, ...tl.sfx]) {
+        if (item.ref.clip === c.id && item.ref.t !== undefined && item.ref.t >= e - 1e-6) {
+          item.ref.clip = right.id;
+        }
+      }
+    }
     out.push(right);
   }
   return out;

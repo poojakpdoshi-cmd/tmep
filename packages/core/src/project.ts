@@ -11,7 +11,9 @@
  *   <root>/.tmep/jobs/<id>.json      render job state (progress, result, errors)
  *   <root>/renders/                  user-facing outputs
  */
-import { promises as fsp, openSync, closeSync, unlinkSync, statSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { promises as fsp, openSync, closeSync, unlinkSync, statSync, writeSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { assertSafeId } from './security.ts';
 import { TmepError } from './errors.ts';
@@ -110,17 +112,34 @@ export class Project {
     return readJson<Manifest>(this.manifestPath);
   }
 
-  /** Cross-process lock (CLI and MCP server may touch the same project). */
+  private static readonly lockContext = new AsyncLocalStorage<Set<string>>();
+
+  /** Cross-process lock (CLI and MCP server may touch the same project). Reentrant in-process. */
   async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const held = Project.lockContext.getStore();
+    if (held?.has(this.dir)) return fn();
+
     const lock = path.join(this.dir, 'lock');
+    const token = `${process.pid}:${randomUUID()}`;
     const deadline = Date.now() + 15000;
     for (;;) {
       try {
-        closeSync(openSync(lock, 'wx'));
+        const fd = openSync(lock, 'wx');
+        try {
+          writeSync(fd, token);
+        } finally {
+          closeSync(fd);
+        }
         break;
       } catch {
         try {
-          if (Date.now() - statSync(lock).mtimeMs > 60000) unlinkSync(lock); // stale lock
+          const st = statSync(lock);
+          if (Date.now() - st.mtimeMs > 60000) {
+            const content = readFileSync(lock, 'utf8');
+            if (statSync(lock).mtimeMs === st.mtimeMs && readFileSync(lock, 'utf8') === content) {
+              unlinkSync(lock); // stale lock
+            }
+          }
         } catch {
           /* raced */
         }
@@ -128,11 +147,13 @@ export class Project {
         await new Promise((r) => setTimeout(r, 40));
       }
     }
+    const nextHeld = new Set(held ?? []);
+    nextHeld.add(this.dir);
     try {
-      return await fn();
+      return await Project.lockContext.run(nextHeld, fn);
     } finally {
       try {
-        unlinkSync(lock);
+        if (readFileSync(lock, 'utf8') === token) unlinkSync(lock);
       } catch {
         /* ignore */
       }

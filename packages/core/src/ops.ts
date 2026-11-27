@@ -20,6 +20,7 @@ import {
   timelineWords,
   resolveAnchor,
   anchorAt,
+  tlToSrc,
   cutTimeline,
   removeSrcRange,
   findClip,
@@ -421,11 +422,11 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'zoom': {
       const at = t(op.at).t;
-      const hit = anchorAt(placed(), at);
-      const c = tl.clips.find((x) => x.src === hit.src && hit.t !== undefined && hit.t >= x.in && hit.t < x.out);
-      if (!c || hit.t === undefined) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
-      c.zoom = c.zoom.filter((z) => Math.abs(z.s - hit.t!) > 0.05);
-      c.zoom.push({ s: hit.t, d: op.d as number, to: op.to as number, mode: op.mode as 'punch' | 'smooth' });
+      const hit = tlToSrc(placed(), at);
+      if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
+      const c = hit.p.clip;
+      c.zoom = (c.zoom ?? []).filter((z) => Math.abs(z.s - hit.srcT) > 0.05);
+      c.zoom.push({ s: hit.srcT, d: op.d as number, to: op.to as number, mode: op.mode as 'punch' | 'smooth' });
       c.zoom.sort((x, y) => x.s - y.s);
       return `zoom ${c.id}@${r2(at)}`;
     }

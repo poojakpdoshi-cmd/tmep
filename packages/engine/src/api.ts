@@ -362,40 +362,43 @@ export async function transcribeBatch(ctx: Ctx, inp: SpeechOptions & { assets: s
 // ---------------------------------------------------------------- plan
 export async function plan(ctx: Ctx, inp: { reference?: string; src?: string | string[]; template?: string; target?: number; ratio?: Ratio; captions?: Record<string, unknown>; title?: string; sub?: string; music?: string; sfx?: boolean; graphics?: boolean; zooms?: boolean; transitions?: boolean }): Promise<Record<string, unknown>> {
   if (inp.ratio && !(inp.ratio in RATIOS)) throw new TmepError('E_INPUT', `ratio must be one of ${Object.keys(RATIOS).join('|')}`);
-  const p = await openProject(ctx.project);
-  const all = await p.assets();
-  let ids = typeof inp.src === 'string' ? [inp.src] : inp.src;
-  if (!ids?.length) ids = all.filter((a) => a.kind === 'video' && a.id !== inp.reference).map((a) => a.id).slice(0, 1);
-  if (!ids.length) throw new TmepError('E_STATE', 'no video assets imported', 'call video_import first');
-  const sources = [];
-  const warn: string[] = [];
-  for (const id of ids) {
-    const a = await p.asset(id);
-    const tr = await loadTranscript(p, a);
-    if (inp.reference && (!tr?.words.length || tr.approx)) throw new TmepError('E_INPUT', 'reference planning requires measured word timestamps for each source');
-    if (!tr && a.kind !== 'image') warn.push(`${id}: no transcript (kept raw footage; run transcribe for smart cuts/captions)`);
-    if (tr?.approx) warn.push(`${id}: word timing is approximate (imported subtitles)`);
-    sources.push({ id, dur: a.dur, kind: a.kind, w: a.w, h: a.h, words: tr?.words });
-  }
-  const ref = inp.reference ? await reference({ ...ctx, detail: 'standard' }, { asset: inp.reference }) : undefined;
-  if (ref?.truncated) warn.push('reference analysis limited to the first 120 seconds');
-  if (ref) warn.push('reference pace is advisory; narration is preserved, target duration ignored; no style replication');
-  if (inp.music) await p.asset(inp.music);
-  const { tl, summary } = planTimeline({ referenceShotSec: ref ? Number(ref.medianShotSec) : undefined, template: inp.template ?? 'reel', sources, target: inp.target, ratio: inp.ratio, captions: inp.captions as never, title: inp.title, sub: inp.sub, music: inp.music, sfx: inp.sfx, graphics: inp.graphics, zooms: inp.zooms, transitions: inp.transitions });
-  const rev = await p.commit(tl, [{ op: 'plan', ...inp }], `plan ${inp.template ?? 'reel'}`);
-  return shape(
-    ctx.detail,
-    { ok: 1, rev, dur: summary.dur, ...(ref ? { reference: inp.reference, shot: ref.medianShotSec } : {}), ...(warn.length ? { warn } : {}) },
-    { clips: summary.clips, gfx: summary.gfx, zooms: summary.zooms, sfx: summary.sfx, trans: summary.trans, cap: tl.captions.style, ratio: tl.settings.ratio },
-    { kept: summary.kept, sentences: summary.sentences, rejected: summary.rejected },
-  );
+  const p = await openProject(ctx.project, true, ctx.projectRoots);
+  return p.withLock(async () => {
+    const all = await p.assets();
+    let ids = typeof inp.src === 'string' ? [inp.src] : inp.src;
+    if (!ids?.length) ids = all.filter((a) => a.kind === 'video' && a.id !== inp.reference).map((a) => a.id).slice(0, 1);
+    if (!ids.length) throw new TmepError('E_STATE', 'no video assets imported', 'call video_import first');
+    const sources = [];
+    const warn: string[] = [];
+    for (const id of ids) {
+      const a = await p.asset(id);
+      const tr = await loadTranscript(p, a);
+      if (inp.reference && (!tr?.words.length || tr.approx)) throw new TmepError('E_INPUT', 'reference planning requires measured word timestamps for each source');
+      if (!tr && a.kind !== 'image') warn.push(`${id}: no transcript (kept raw footage; run transcribe for smart cuts/captions)`);
+      if (tr?.approx) warn.push(`${id}: word timing is approximate (imported subtitles)`);
+      sources.push({ id, dur: a.dur, kind: a.kind, w: a.w, h: a.h, words: tr?.words });
+    }
+    const ref = inp.reference ? await reference({ ...ctx, detail: 'standard' }, { asset: inp.reference }) : undefined;
+    if (ref?.truncated) warn.push('reference analysis limited to the first 120 seconds');
+    if (ref) warn.push('reference pace is advisory; narration is preserved, target duration ignored; no style replication');
+    if (inp.music) await p.asset(inp.music);
+    const { tl, summary } = planTimeline({ referenceShotSec: ref ? Number(ref.medianShotSec) : undefined, template: inp.template ?? 'reel', sources, target: inp.target, ratio: inp.ratio, captions: inp.captions as never, title: inp.title, sub: inp.sub, music: inp.music, sfx: inp.sfx, graphics: inp.graphics, zooms: inp.zooms, transitions: inp.transitions });
+    const rev = await p.commit(tl, [{ op: 'plan', ...inp }], `plan ${inp.template ?? 'reel'}`);
+    return shape(
+      ctx.detail,
+      { ok: 1, rev, dur: summary.dur, ...(ref ? { reference: inp.reference, shot: ref.medianShotSec } : {}), ...(warn.length ? { warn } : {}) },
+      { clips: summary.clips, gfx: summary.gfx, zooms: summary.zooms, sfx: summary.sfx, trans: summary.trans, cap: tl.captions.style, ratio: tl.settings.ratio },
+      { kept: summary.kept, sentences: summary.sentences, rejected: summary.rejected },
+    );
+  });
 }
 
 /** Compile one storyboard into one editable project revision. */
 export async function storyboard(ctx: Ctx, input: unknown) {
   const plan = compileStoryboard(input);
-  const p = await openProject(ctx.project);
-  const assets = new Map((await p.assets()).map((asset) => [asset.id, asset]));
+  const p = await openProject(ctx.project, true, ctx.projectRoots);
+  return p.withLock(async () => {
+    const assets = new Map((await p.assets()).map((asset) => [asset.id, asset]));
   const narration = plan.narration ? await p.asset(plan.narration) : undefined;
   if (narration && (narration.kind !== 'audio' || !narration.audio || !Number.isFinite(narration.dur) || narration.dur <= 0)) {
     throw new TmepError('E_INPUT', 'narration must be an imported audio asset');
@@ -444,8 +447,9 @@ export async function storyboard(ctx: Ctx, input: unknown) {
     for (const clip of tl.clips) if (clip.src === placeholder) clip.src = asset.id;
     for (const op of ops as { src?: string }[]) if (op.src === placeholder) op.src = asset.id;
   }
-  const rev = await p.commit(tl, ops, 'compile storyboard');
-  return { ok: 1, rev, frames: plan.frames, dur: plan.frames / STORYBOARD_FPS, scenes: plan.scenes.length };
+    const rev = await p.commit(tl, ops, 'compile storyboard');
+    return { ok: 1, rev, frames: plan.frames, dur: plan.frames / STORYBOARD_FPS, scenes: plan.scenes.length };
+  });
 }
 
 // ---------------------------------------------------------------- edit
@@ -456,30 +460,46 @@ async function opContext(p: Project, tl: Timeline) {
   return { assets, transcripts, presets: PRESET_NAMES, sfxKinds: SFX_KINDS };
 }
 
-export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo?: number; checkout?: number; note?: string; ratio?: Ratio }): Promise<Record<string, unknown>> {
-  const p = await openProject(ctx.project);
+export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo?: number; checkout?: number; note?: string; ratio?: Ratio; expectedRev?: number }): Promise<Record<string, unknown>> {
+  const p = await openProject(ctx.project, true, ctx.projectRoots);
   if (inp.undo || inp.redo || inp.checkout !== undefined) {
-    const rev = inp.undo ? await p.undo(inp.undo) : inp.redo ? await p.redo(inp.redo) : await p.checkout(inp.checkout!);
-    const dur = rev > 0 ? r2(duration(await p.timeline(rev))) : 0;
-    return { ok: 1, rev, dur };
+    return p.withLock(async () => {
+      if (inp.expectedRev !== undefined) {
+        const m = await p.manifest();
+        if (m.head !== inp.expectedRev) {
+          throw new TmepError('E_CONFLICT', `expected revision ${inp.expectedRev}, but head is ${m.head}`, 're-read timeline with video_inspect and retry');
+        }
+      }
+      const rev = inp.undo ? await p.undo(inp.undo) : inp.redo ? await p.redo(inp.redo) : await p.checkout(inp.checkout!);
+      const dur = rev > 0 ? r2(duration(await p.timeline(rev))) : 0;
+      return { ok: 1, rev, dur };
+    });
   }
   if (!inp.ops?.length) throw new TmepError('E_INPUT', 'edit needs ops[] (or undo/redo/checkout)');
-  const base = (await p.hasTimeline()) ? await p.timeline() : emptyTimeline(inp.ratio ?? '9:16');
-  const before = r2(duration(base));
-  const c = await opContext(p, base);
-  // transcripts for sources introduced by this batch
-  for (const raw of inp.ops) {
-    const src = typeof raw === 'object' && raw ? (raw as Record<string, unknown>).src : undefined;
-    if (typeof src === 'string' && !(src in c.transcripts) && c.assets[src]) Object.assign(c.transcripts, await transcriptsFor(p, [src]));
-  }
-  const { tl, notes, created } = applyOps(base, inp.ops, c);
-  if (tl.scenes?.length) {
-    // Resolve scene cues against the final batch, including clips added by compact string ops.
-    const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
-    compileScenes(tl, timelineWords(tl, transcripts), new Map(Object.entries(c.assets)));
-  }
-  const rev = await p.commit(tl, inp.ops, inp.note);
-  return shape(ctx.detail, { ok: 1, rev, dur: r2(duration(tl)), ...(created.length ? { ids: created } : {}) }, { was: before, did: notes }, { diff: diffTimelines(base, tl) });
+  return p.withLock(async () => {
+    if (inp.expectedRev !== undefined) {
+      const m = await p.manifest();
+      if (m.head !== inp.expectedRev) {
+        throw new TmepError('E_CONFLICT', `expected revision ${inp.expectedRev}, but head is ${m.head}`, 're-read timeline with video_inspect and retry');
+      }
+    }
+    const base = (await p.hasTimeline()) ? await p.timeline() : emptyTimeline(inp.ratio ?? '9:16');
+    const before = r2(duration(base));
+    const c = await opContext(p, base);
+    // transcripts for sources introduced by this batch
+    for (const raw of inp.ops!) {
+      const src = typeof raw === 'object' && raw ? (raw as Record<string, unknown>).src : undefined;
+      if (typeof src === 'string' && !(src in c.transcripts) && c.assets[src]) Object.assign(c.transcripts, await transcriptsFor(p, [src]));
+    }
+    const { tl, notes, created } = applyOps(base, inp.ops!, c);
+    if (tl.scenes?.length) {
+      // Resolve scene cues against the final batch, including clips added by compact string ops.
+      const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
+      compileScenes(tl, timelineWords(tl, transcripts), new Map(Object.entries(c.assets)));
+    }
+    const rev = await p.commit(tl, inp.ops!, inp.note);
+    return shape(ctx.detail, { ok: 1, rev, dur: r2(duration(tl)), ...(created.length ? { ids: created } : {}) }, { was: before, did: notes }, { diff: diffTimelines(base, tl) });
+  });
 }
 
 // ---------------------------------------------------------------- inspect
