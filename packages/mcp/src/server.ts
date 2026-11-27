@@ -19,7 +19,7 @@ export const LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-
 export const MODERN_VERSIONS = ['2026-07-28'];
 const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_CAPS = 'io.modelcontextprotocol/clientCapabilities';
-const SERVER_INFO = { name: 'tmep', title: 'TMEP video engine', version: VERSION };
+const SERVER_INFO = { name: 'tmep', title: 'FRAME video engine (TMEP)', version: VERSION };
 const INSTRUCTIONS =
   'Video editing engine. Flow: video_import -> video_transcribe -> video_plan(template) -> video_render(preview) -> video_edit(ops) -> video_render. Reference media by asset id; never paste transcripts or write ffmpeg/animation code. video_help for references.';
 
