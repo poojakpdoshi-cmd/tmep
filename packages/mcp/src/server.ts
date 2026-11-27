@@ -181,6 +181,9 @@ export class McpServer {
         return jobView(j, ctx.detail);
       }
       case 'video_plan': {
+        if (a.intent !== undefined) {
+          return api.compile(ctx, { ...(a.intent as Record<string, unknown>), ...(a.dryRun !== undefined && { dryRun: Boolean(a.dryRun) }) });
+        }
         if (a.storyboard !== undefined) return api.storyboard(ctx, a.storyboard);
         if (typeof a.script === 'string') {
           const plan = api.planScript(a.script, { wpm: a.wpm as number | undefined, narration: a.narration as string | undefined });

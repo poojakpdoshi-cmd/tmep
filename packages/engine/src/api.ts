@@ -51,6 +51,7 @@ import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, t
 import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
+import { compileIntent } from '../../story/src/compiler.ts';
 import { compileStoryboard, storyboardSchema, STORYBOARD_FPS } from '../../story/src/storyboard.ts';
 export { planScript } from '../../story/src/script.ts';
 import { TEMPLATES } from '../../story/src/templates.ts';
@@ -459,8 +460,25 @@ async function opContext(p: Project, tl: Timeline) {
   return { assets, transcripts, presets: PRESET_NAMES, sfxKinds: SFX_KINDS };
 }
 
-export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo?: number; checkout?: number; note?: string; ratio?: Ratio; expectedRev?: number }): Promise<Record<string, unknown>> {
-  const p = await openProject(ctx.project, true, ctx.projectRoots);
+export async function compile(ctx: Ctx, input: unknown & { dryRun?: boolean; expectedRev?: number }): Promise<Record<string, unknown>> {
+  const p = await openProject(ctx.project, !(input as { dryRun?: boolean })?.dryRun, ctx.projectRoots);
+  const hasTl = await exists(path.join(p.dir, 'revs', 'r0001.json')).catch(() => false) ? await p.hasTimeline() : false;
+  const base = hasTl ? await p.timeline() : emptyTimeline('9:16');
+  const compiled = compileIntent(input, { ratio: base.settings.ratio, captionPos: base.captions.pos });
+  const rawDry = Boolean((input as { dryRun?: boolean })?.dryRun);
+  if (rawDry) {
+    const c = await opContext(p, base);
+    const { tl } = applyOps(base, compiled.ops, c);
+    const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
+    const diag = diagnoseScenes(tl, timelineWords(tl, transcripts), new Map((await p.assets()).map((a) => [a.id, a])));
+    return { ok: diag.ok ? 1 : 0, dryRun: true, ops: compiled.ops, corrections: compiled.corrections, diagnostics: diag.issues };
+  }
+  const res = await edit(ctx, { ops: compiled.ops, note: `compile ${compiled.spec.layers.map((l) => l.kind).join('+')}`, expectedRev: (input as { expectedRev?: number })?.expectedRev });
+  return { ...res, ops: compiled.ops, corrections: compiled.corrections };
+}
+
+export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo?: number; checkout?: number; note?: string; ratio?: Ratio; expectedRev?: number; dryRun?: boolean }): Promise<Record<string, unknown>> {
+  const p = await openProject(ctx.project, !inp.dryRun, ctx.projectRoots);
   if (inp.undo || inp.redo || inp.checkout !== undefined) {
     return p.withLock(async () => {
       if (inp.expectedRev !== undefined) {
@@ -494,7 +512,14 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
     if (tl.scenes?.length) {
       // Resolve scene cues against the final batch, including clips added by compact string ops.
       const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
-      compileScenes(tl, timelineWords(tl, transcripts), new Map(Object.entries(c.assets)));
+      const diag = diagnoseScenes(tl, timelineWords(tl, transcripts), new Map(Object.entries(c.assets)));
+      if (inp.dryRun) {
+        return { ok: diag.ok ? 1 : 0, dryRun: true, dur: r2(duration(tl)), did: notes, diagnostics: diag.issues, diff: diffTimelines(base, tl) };
+      }
+      if (!diag.ok) throw new TmepError('E_INPUT', diag.issues[0]!.msg);
+    }
+    if (inp.dryRun) {
+      return { ok: 1, dryRun: true, dur: r2(duration(tl)), did: notes, diff: diffTimelines(base, tl) };
     }
     const rev = await p.commit(tl, inp.ops!, inp.note);
     return shape(ctx.detail, { ok: 1, rev, dur: r2(duration(tl)), ...(created.length ? { ids: created } : {}) }, { was: before, did: notes }, { diff: diffTimelines(base, tl) });

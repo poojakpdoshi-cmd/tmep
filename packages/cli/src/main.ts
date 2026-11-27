@@ -140,6 +140,12 @@ export async function main(argv: string[]): Promise<number> {
           pretty,
         );
         return 0;
+      case 'compile': {
+        if (args._.length !== 1) throw new TmepError('E_INPUT', 'compile needs one JSON file');
+        const raw = JSON.parse(readFileSync(path.resolve(args._[0]!), 'utf8').replace(/^\uFEFF/, ''));
+        print(await api.compile(ctx, { ...raw, ...(args['dry-run'] ? { dryRun: true } : {}) }), pretty);
+        return 0;
+      }
       case 'script':
       case 'storyboard': {
         if (args._.length !== 1) throw new TmepError('E_INPUT', `${cmd} needs one input file`);

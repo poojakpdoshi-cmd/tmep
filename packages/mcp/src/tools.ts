@@ -40,13 +40,13 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_plan',
-    description: 'Build an edit from transcript+template, or compile script/storyboard JSON. off: sfx,graphics,zooms,transitions.',
-    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), script: str().optional(), storyboard: record(any()).optional(), wpm: num().optional(), narration: str().optional(), ...project }),
+    description: 'Build an edit from transcript+template, compile high-level intent, or compile script/storyboard JSON. off: sfx,graphics,zooms,transitions.',
+    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), script: str().optional(), storyboard: record(any()).optional(), intent: record(any()).optional(), dryRun: bool().optional(), wpm: num().optional(), narration: str().optional(), ...project }),
   },
   {
     name: 'video_edit',
-    description: 'Apply ops as one undoable revision. Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed", "fx zoomin c1 d=1.2". Times: seconds|@phrase|w:N|c:ID|end.',
-    schema: obj({ ops: arr(union([str(), record(any())])).optional(), undo: num().optional(), redo: num().optional(), checkout: num().optional(), note: str().optional(), ratio: str().optional(), expectedRev: num().optional(), ...project, ...detail }),
+    description: 'Apply ops as one undoable revision (or dryRun:true to validate). Op = object or string: "cut 3.2 4", "delete fillers=true", "zoom @phrase to=1.2", "gfx stat @phrase props.value=90%", "captions boxed", "fx zoomin c1 d=1.2".',
+    schema: obj({ ops: arr(union([str(), record(any())])).optional(), undo: num().optional(), redo: num().optional(), checkout: num().optional(), note: str().optional(), ratio: str().optional(), expectedRev: num().optional(), dryRun: bool().optional(), ...project, ...detail }),
   },
   {
     name: 'video_inspect',
