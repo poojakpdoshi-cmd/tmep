@@ -11,8 +11,11 @@
  *   <root>/.tmep/jobs/<id>.json      render job state (progress, result, errors)
  *   <root>/renders/                  user-facing outputs
  */
-import { promises as fsp, openSync, closeSync, unlinkSync, statSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { promises as fsp, openSync, closeSync, unlinkSync, statSync, writeSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { assertSafeId } from './security.ts';
 import { TmepError } from './errors.ts';
 import { readJsonOr, writeJson, readJson, exists } from './util.ts';
 import type { Timeline } from './timeline.ts';
@@ -99,7 +102,7 @@ export class Project {
     return path.join(this.dir, 'work', ...parts);
   }
   jobPath(id: string): string {
-    return path.join(this.dir, 'jobs', `${id}.json`);
+    return path.join(this.dir, 'jobs', `${assertSafeId(id, 'job id')}.json`);
   }
   rendersPath(...parts: string[]): string {
     return path.join(this.root, 'renders', ...parts);
@@ -109,17 +112,34 @@ export class Project {
     return readJson<Manifest>(this.manifestPath);
   }
 
-  /** Cross-process lock (CLI and MCP server may touch the same project). */
+  private static readonly lockContext = new AsyncLocalStorage<Set<string>>();
+
+  /** Cross-process lock (CLI and MCP server may touch the same project). Reentrant in-process. */
   async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const held = Project.lockContext.getStore();
+    if (held?.has(this.dir)) return fn();
+
     const lock = path.join(this.dir, 'lock');
+    const token = `${process.pid}:${randomUUID()}`;
     const deadline = Date.now() + 15000;
     for (;;) {
       try {
-        closeSync(openSync(lock, 'wx'));
+        const fd = openSync(lock, 'wx');
+        try {
+          writeSync(fd, token);
+        } finally {
+          closeSync(fd);
+        }
         break;
       } catch {
         try {
-          if (Date.now() - statSync(lock).mtimeMs > 60000) unlinkSync(lock); // stale lock
+          const st = statSync(lock);
+          if (Date.now() - st.mtimeMs > 60000) {
+            const content = readFileSync(lock, 'utf8');
+            if (statSync(lock).mtimeMs === st.mtimeMs && readFileSync(lock, 'utf8') === content) {
+              unlinkSync(lock); // stale lock
+            }
+          }
         } catch {
           /* raced */
         }
@@ -127,11 +147,13 @@ export class Project {
         await new Promise((r) => setTimeout(r, 40));
       }
     }
+    const nextHeld = new Set(held ?? []);
+    nextHeld.add(this.dir);
     try {
-      return await fn();
+      return await Project.lockContext.run(nextHeld, fn);
     } finally {
       try {
-        unlinkSync(lock);
+        if (readFileSync(lock, 'utf8') === token) unlinkSync(lock);
       } catch {
         /* ignore */
       }
@@ -198,8 +220,11 @@ export class Project {
   async revision(rev?: number): Promise<Revision> {
     const m = await this.manifest();
     const r = rev ?? m.head;
+    if (typeof r !== 'number' || !Number.isInteger(r) || r < 0) {
+      throw new TmepError('E_INPUT', `invalid revision "${String(rev)}"`, 'revision must be a non-negative integer');
+    }
     if (r === 0) throw new TmepError('E_STATE', 'project has no timeline yet', 'run video_plan (or `tmep plan`) or add clips with video_edit');
-    if (r < 0 || r > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${r} not found (head ${m.head})`);
+    if (r > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${r} not found (head ${m.head})`);
     return readJson<Revision>(this.revPath(r));
   }
 
@@ -250,9 +275,12 @@ export class Project {
   }
 
   async checkout(rev: number): Promise<number> {
+    if (typeof rev !== 'number' || !Number.isInteger(rev) || rev < 0) {
+      throw new TmepError('E_INPUT', `invalid revision "${String(rev)}"`, 'revision must be a non-negative integer');
+    }
     return this.withLock(async () => {
       const m = await this.manifest();
-      if (rev < 0 || rev > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${rev} not found`);
+      if (rev > m.revs) throw new TmepError('E_NOT_FOUND', `revision ${rev} not found`);
       m.head = rev;
       m.redo = [];
       await writeJson(this.manifestPath, m);

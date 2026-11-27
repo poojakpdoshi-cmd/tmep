@@ -1,7 +1,7 @@
 {
   "name": "tmep",
   "version": "0.1.0",
-  "description": "AI-agent-native video editing engine with the Token-Minimal Editing Protocol (TMEP): local transcription, deterministic editing, motion graphics and FFmpeg rendering behind compact MCP/CLI tools.",
+  "description": "FRAME (Footage Reasoning and Agent-driven Media Editing): local-first AI-agent video production infrastructure powered by the Token-Minimal Editing Protocol (TMEP).",
   "license": "MIT",
   "type": "module",
   "private": true,
@@ -9,6 +9,8 @@
     "node": ">=22.18.0"
   },
   "bin": {
+    "frame": "bin/frame.js",
+    "frame-mcp": "bin/frame-mcp.js",
     "tmep": "bin/tmep.js",
     "tmep-mcp": "bin/tmep-mcp.js"
   },

@@ -46,56 +46,88 @@ export class ChromePage {
   private pending = new Map<number, Pending>();
   readonly events: { method: string; params: unknown }[] = [];
 
-  static async launch(): Promise<ChromePage> {
+  static async launch(opts: { signal?: AbortSignal } = {}): Promise<ChromePage> {
+    if (opts.signal?.aborted) throw new TmepError('E_CANCELLED', 'browser launch cancelled');
     const bin = findChrome();
     if (!bin) throw new TmepError('E_ENGINE_MISSING', 'no Chromium-based browser found for the web compositor', 'install Chrome/Edge or set TMEP_CHROME; or use captions engine "ass"');
     const p = new ChromePage();
     p.userDir = mkdtempSync(path.join(os.tmpdir(), 'tmep-chrome-'));
     p.proc = spawn(bin, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${p.userDir}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--metrics-recording-only', '--disable-domain-reliability', '--disable-background-timer-throttling', '--allow-file-access-from-files', '--font-render-hinting=none', 'about:blank'], { stdio: 'ignore', windowsHide: true });
-    let port = 0;
-    for (let i = 0; i < 200 && !port; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      const f = path.join(p.userDir, 'DevToolsActivePort');
-      try {
-        port = Number(readFileSync(f, 'utf8').split('\n')[0]);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT' && code !== 'EBUSY') {
-          p.close();
-          throw error;
+    try {
+      let port = 0;
+      for (let i = 0; i < 200 && !port; i++) {
+        if (opts.signal?.aborted) throw new TmepError('E_CANCELLED', 'browser launch cancelled');
+        await new Promise((r) => setTimeout(r, 50));
+        const f = path.join(p.userDir, 'DevToolsActivePort');
+        try {
+          port = Number(readFileSync(f, 'utf8').split('\n')[0]);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'ENOENT' && code !== 'EBUSY') throw error;
         }
+        if (p.proc.exitCode !== null) break;
       }
-      if (p.proc.exitCode !== null) break;
-    }
-    if (!port) {
+      if (!port) throw new TmepError('E_ENGINE_FAILED', `browser did not start (${bin})`);
+      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: opts.signal })).json()) as { type: string; webSocketDebuggerUrl: string }[];
+      const page = targets.find((t) => t.type === 'page');
+      if (!page) throw new TmepError('E_ENGINE_FAILED', 'no page target');
+      p.ws = new WebSocket(page.webSocketDebuggerUrl);
+      await new Promise<void>((res, rej) => {
+        p.ws.onopen = () => res();
+        p.ws.onerror = () => rej(new TmepError('E_ENGINE_FAILED', 'CDP websocket failed'));
+      });
+      const failPending = (reason: string) => {
+        for (const [id, pd] of p.pending) {
+          p.pending.delete(id);
+          pd.reject(new TmepError('E_ENGINE_FAILED', reason));
+        }
+      };
+      p.ws.onclose = () => failPending('CDP websocket closed unexpectedly');
+      p.ws.onerror = () => failPending('CDP websocket error');
+      p.ws.onmessage = (m) => {
+        const d = JSON.parse(String(m.data)) as { id?: number; result?: Record<string, unknown>; error?: { message: string }; method?: string; params?: unknown };
+        if (d.id !== undefined) {
+          const pd = p.pending.get(d.id);
+          if (!pd) return;
+          p.pending.delete(d.id);
+          if (d.error) pd.reject(new TmepError('E_ENGINE_FAILED', `CDP: ${d.error.message}`));
+          else pd.resolve(d.result ?? {});
+        } else if (d.method) {
+          if (p.events.length >= 200) p.events.shift();
+          p.events.push({ method: d.method, params: d.params });
+        }
+      };
+      return p;
+    } catch (e) {
       p.close();
-      throw new TmepError('E_ENGINE_FAILED', `browser did not start (${bin})`);
+      throw e;
     }
-    const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
-    const page = targets.find((t) => t.type === 'page');
-    if (!page) throw new TmepError('E_ENGINE_FAILED', 'no page target');
-    p.ws = new WebSocket(page.webSocketDebuggerUrl);
-    await new Promise<void>((res, rej) => {
-      p.ws.onopen = () => res();
-      p.ws.onerror = () => rej(new TmepError('E_ENGINE_FAILED', 'CDP websocket failed'));
-    });
-    p.ws.onmessage = (m) => {
-      const d = JSON.parse(String(m.data)) as { id?: number; result?: Record<string, unknown>; error?: { message: string }; method?: string; params?: unknown };
-      if (d.id !== undefined) {
-        const pd = p.pending.get(d.id);
-        if (!pd) return;
-        p.pending.delete(d.id);
-        if (d.error) pd.reject(new TmepError('E_ENGINE_FAILED', `CDP: ${d.error.message}`));
-        else pd.resolve(d.result ?? {});
-      } else if (d.method) p.events.push({ method: d.method, params: d.params });
-    };
-    return p;
   }
 
-  send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  send(method: string, params: Record<string, unknown> = {}, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
+    const timeoutMs = opts.timeoutMs ?? 15_000;
+    if (opts.signal?.aborted) return Promise.reject(new TmepError('E_CANCELLED', 'CDP command cancelled'));
     return new Promise((resolve, reject) => {
       const id = ++this.seq;
-      this.pending.set(id, { resolve, reject });
+      const cleanup = () => {
+        clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
+      };
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        cleanup();
+        reject(new TmepError('E_ENGINE_FAILED', `CDP timeout after ${timeoutMs}ms (${method})`));
+      }, timeoutMs);
+      const onAbort = () => {
+        if (!this.pending.delete(id)) return;
+        cleanup();
+        reject(new TmepError('E_CANCELLED', `CDP command cancelled (${method})`));
+      };
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
+      this.pending.set(id, {
+        resolve: (v) => { cleanup(); resolve(v); },
+        reject: (e) => { cleanup(); reject(e); },
+      });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -113,7 +145,7 @@ export class ChromePage {
     await this.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
     await this.send('Page.navigate', { url });
     for (let i = 0; i < 200; i++) {
-      if (await this.eval<boolean>('!!(window.TMEP && window.TMEP.ready)').catch(() => false)) return;
+      if (await this.eval<boolean>('!!((window.FRAME && window.FRAME.ready) || (window.TMEP && window.TMEP.ready))').catch(() => false)) return;
       await new Promise((r) => setTimeout(r, 50));
     }
     const errs = this.events.filter((e) => e.method === 'Runtime.exceptionThrown').map((e) => JSON.stringify(e.params).slice(0, 400));

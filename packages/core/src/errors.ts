@@ -18,6 +18,8 @@ export const ERROR_CODES = {
   E_CANCELLED: 'Job was cancelled',
   E_INTERRUPTED: 'Job stopped because its process exited or stopped responding',
   E_IO: 'File system error',
+  E_SECURITY: 'Path or identifier violates workspace security boundary',
+  E_CONFLICT: 'Concurrent modification conflict; re-read timeline and retry',
   E_INTERNAL: 'Unexpected internal error',
 } as const;
 
@@ -47,7 +49,7 @@ export class TmepError extends Error {
 export function asTmepError(e: unknown): TmepError {
   if (e instanceof TmepError) return e;
   const err = e as NodeJS.ErrnoException;
-  if (err && typeof err.code === 'string' && /^E[A-Z]+$/.test(err.code)) {
+  if (err && typeof err.code === 'string' && /^E[A-Z0-9_]+$/.test(err.code)) {
     return new TmepError('E_IO', `${err.code}: ${err.message}`);
   }
   return new TmepError('E_INTERNAL', e instanceof Error ? e.message : String(e), undefined, e instanceof Error ? e.stack : undefined);
