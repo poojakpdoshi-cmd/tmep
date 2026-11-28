@@ -118,31 +118,37 @@ test('a failing read in the cross-process cancel poll does not crash the job pro
  * budget) and for a raw tmp+rename / readFile WITHOUT retries (the pre-A3 behaviour), which shows
  * whether this OS really raises sharing violations under concurrent reads.
  */
-async function contention(readers: number, everyMs: number, attempts: number | undefined, ms = 4000) {
+async function contention(readers: number, everyMs: number, attempts: number | undefined, ms = 4000, minWrites = 6) {
   const d = mkdtempSync(path.join(os.tmpdir(), 'tmep-share-'));
   const file = path.join(d, 'jobs', 'jshare.json');
+  const stopFile = path.join(d, 'stop');
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, '{"state":"running","n":0}');
   const until = Date.now() + ms;
-  const procs = Array.from({ length: readers }, () => run(READER, [file, String(until), String(everyMs)]));
+  const readerUntil = until + 30_000;
+  const procs = Array.from({ length: readers }, () => run(READER, [file, String(readerUntil), String(everyMs), stopFile]));
   let writes = 0;
   let rawWrites = 0;
   const failures: string[] = [];
   const rawFailures: string[] = [];
-  while (Date.now() < until) {
-    try {
-      await writeJson(file, { state: 'running', n: ++writes, pad: 'x'.repeat(2000) }, true, attempts ? { attempts } : {});
-    } catch (e) {
-      failures.push((e as NodeJS.ErrnoException).code ?? String(e));
+  try {
+    while (writes < minWrites || Date.now() < until) {
+      try {
+        await writeJson(file, { state: 'running', n: ++writes, pad: 'x'.repeat(2000) }, true, attempts ? { attempts } : {});
+      } catch (e) {
+        failures.push((e as NodeJS.ErrnoException).code ?? String(e));
+      }
+      const tmp = `${file}.raw.tmp`;
+      writeFileSync(tmp, JSON.stringify({ state: 'running', n: ++rawWrites, pad: 'y'.repeat(2000) }));
+      try {
+        await fsp.rename(tmp, file);
+      } catch (e) {
+        rawFailures.push((e as NodeJS.ErrnoException).code ?? String(e));
+        rmSync(tmp, { force: true });
+      }
     }
-    const tmp = `${file}.raw.tmp`;
-    writeFileSync(tmp, JSON.stringify({ state: 'running', n: ++rawWrites, pad: 'y'.repeat(2000) }));
-    try {
-      await fsp.rename(tmp, file);
-    } catch (e) {
-      rawFailures.push((e as NodeJS.ErrnoException).code ?? String(e));
-      rmSync(tmp, { force: true });
-    }
+  } finally {
+    writeFileSync(stopFile, '1');
   }
   const rs = await Promise.all(procs);
   for (const r of rs) assert.equal(r.code, 0, r.stderr.slice(-800));
@@ -160,7 +166,7 @@ async function contention(readers: number, everyMs: number, attempts: number | u
 test('job-record writes succeed while other processes poll the record (status/cancel polling)', { timeout: 300_000 }, async (t) => {
   if (skip) return t.skip(skip);
   // 3 processes polling every 10 ms: far more aggressive than MCP/CLI status polling
-  const r = await contention(3, 10, undefined);
+  const r = await contention(3, 10, undefined, 4000, 51);
   t.diagnostic(r.line);
   assert.ok(r.writes > 50 && r.reads > 50, r.line);
   assert.deepEqual(r.failures, [], `no write failed: ${r.line}`);
@@ -174,7 +180,7 @@ test('under saturating tight-loop readers, failures are bounded, reported and le
   // be exhausted here (Windows refuses to replace a file while any reader has it open); the
   // contract is that every failure is thrown (never silently accepted) and leaves no temp file.
   for (const attempts of [undefined, 30]) {
-    const r = await contention(3, 0, attempts, 3000);
+    const r = await contention(3, 0, attempts, 3000, 8);
     t.diagnostic(r.line);
     assert.ok(r.writes > 5, r.line);
     for (const f of r.failures) assert.ok(['EPERM', 'EACCES', 'EBUSY'].includes(f), `only transient codes surface: ${f}`);
