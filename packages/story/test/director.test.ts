@@ -1,0 +1,48 @@
+/** Phase 6 Director: genre policy, explicit constraints win, approximate transcripts do not burn captions, reference style is clamped. */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { direct } from '../src/director.ts';
+import { fitRanges, itemsFor, prioritize } from '../../engine/src/production.ts';
+
+const a = { asset: { audio: true }, observed: { shots: [], tracks: [], audio: [] }, inferred: { moments: [], subjects: undefined } } as never;
+const words = [{ w: 'hello', s: 0, e: 0.4 }];
+
+test('genre policies are restrained and explicit constraints win', () => {
+  const cin = direct({ genre: 'cinematic' }, a, words);
+  assert.equal(cin.zooms.allowed, false); assert.equal(cin.captions.burn, false); assert.equal(cin.effectBudgetPerMinute, 1);
+  const inf = direct({ genre: 'informative' }, a, words);
+  assert.ok(inf.zooms.allowed && inf.captions.burn && inf.graphics.kinds.includes('stat'));
+  const off = direct({ genre: 'informative', constraints: { zooms: false, captions: false } }, a, words);
+  assert.equal(off.zooms.perMinute, 0); assert.equal(off.captions.burn, false);
+  assert.ok(off.decisions.filter((d) => d.source === 'user').length >= 2);
+  assert.ok(off.decisions.some((d) => /no background change/.test(d.what)));
+  const forced = direct({ genre: 'cinematic', constraints: { captions: true } }, a, words);
+  assert.equal(forced.captions.burn, true, 'a user can ask for captions on any genre');
+});
+
+test('approximate transcripts do not burn captions unless confirmed; no transcript, no captions', () => {
+  const s = direct({ genre: 'podcast' }, a, words, { transcriptApprox: true });
+  assert.equal(s.captions.burn, false); assert.ok(s.open.some((o) => /approximate/.test(o)));
+  assert.equal(direct({ genre: 'podcast', constraints: { captions: true } }, a, words, { transcriptApprox: true }).captions.burn, true);
+  assert.equal(direct({ genre: 'podcast' }, a, []).captions.burn, false);
+});
+
+test('reference style informs, clamped to the genre; looks need permission', () => {
+  const ref = { schema: 'frame.style/1', pacing: { cutsPerMinute: 90, medianShotSec: 0.7, gradualShare: 0 }, motion: { meanMotion: 5, cameraMovingShare: 0.5, cameraPanSpeed: 0.2 }, colour: { luma: 0.5, saturation: 0.6, contrast: 0.7, warmth: 0.1 }, methods: {} } as never;
+  const s = direct({ genre: 'educational' }, a, words, { reference: ref });
+  assert.equal(s.pacing.cutsPerMinuteGoal, 15, 'clamped to the educational range, not copied');
+  assert.equal(s.colour.look, undefined); assert.ok(s.open.some((o) => /colour look/.test(o)));
+  const l = direct({ genre: 'educational', constraints: { allowLook: true } }, a, words, { reference: ref });
+  assert.ok(l.colour.look && Math.abs(l.colour.look.saturation!) <= 0.2);
+});
+
+test('rough cut fits a target by dropping the weakest sentences; keep/avoid honoured; effect budget; priorities', () => {
+  const ws = 'One. Two words here. The key result is 40 percent growth. Filler sentence here.'.split(' ').map((w, i) => ({ w, s: i, e: i + 0.8 }));
+  const f = fitRanges([[0, 14]], ws, { target: 8, avoid: [[0, 1]] }, [8]);
+  const len = f.ranges.reduce((s, [x, y]) => s + y - x, 0);
+  assert.ok(len <= 8 && f.ranges.every(([x]) => x >= 1), JSON.stringify(f));
+  const plan = { items: Array.from({ length: 6 }, (_, i) => ({ id: `moment-${i}`, kind: 'moment', status: 'proposed', confidence: i / 10, ops: [{ op: 'punch' }] })) } as never;
+  const s = direct({ genre: 'informative' }, a, words);
+  assert.equal(itemsFor('fine', plan, s, 1).filter((i) => i.kind === 'moment').length, 3, 'at most 3 zooms per minute');
+  assert.equal(prioritize([{ code: 'repetitive-zoom', severity: 'advisory', msg: '' }, { code: 'caption-overlap', severity: 'defect', msg: '' }, { code: 'crop-cuts-subject', severity: 'advisory', msg: '' }])[1]!.code, 'crop-cuts-subject');
+});

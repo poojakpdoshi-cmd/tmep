@@ -71,6 +71,7 @@ usage: frame <command> [args] [-p project_dir] [--detail minimal|standard|debug]
   render --scene id [--range localStart,localEnd]
   help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene|storyboard]
   doctor [--models]                  check ffmpeg, filters, speech engines (and semantic models)
+  produce [start|resume|revise|status|report] --asset v1 --genre g [--id id] [--target s] [--ratio r] [--captions b] [--reference v2] [--until stage]
   editplan [build|show|refresh|override|compile] --asset v1 [--task t] [--accept ids] [--drop ids] [--dryRun] [--rebase] [--semantic]
   library [list|add <files>|search <words>|dups|recommend --asset v1|licence <id>] [--kind k --tags a,b --licence ID --attribution s --genuine]
   models | models install [names] [--yes]   semantic model status / download plan (downloads only with --yes)
@@ -114,6 +115,15 @@ export async function main(argv: string[]): Promise<number> {
       case 'import':
         print(await api.importMedia(ctx, { paths: args._ }), pretty);
         return 0;
+      case 'produce': {
+        // tmep produce start --asset v1 --genre informative [--target 45] [--ratio 9:16] [--captions false] [--reference v2] [--until final]
+        // tmep produce resume|status|report|revise --id <id> [--target 30 …]
+        const action = (args._[0] as string) ?? 'start';
+        const constraints = Object.fromEntries(['target', 'ratio', 'captions', 'zooms', 'graphics', 'transitions', 'music', 'allowLook', 'maxEffectsPerMinute'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
+        const { produce } = await import('../../engine/src/production.ts');
+        print(await produce(ctx, { action: action as never, id: args.id as string, asset: args.asset as string, genre: args.genre as never, goal: args.goal as string, reference: args.reference as string, until: args.until as never, semantic: !!args.semantic, ...(Object.keys(constraints).length ? { constraints } : {}), ...(args.overrides ? { overrides: JSON.parse(String(args.overrides)) } : {}) }), pretty);
+        return 0;
+      }
       case 'editplan': {
         // tmep editplan build|show|refresh|compile --asset v1 [--task t] [--accept id,id] [--drop id,id] [--dryRun] [--rebase] [--semantic]
         const ids = (v: unknown) => (typeof v === 'string' ? v.split(',').filter(Boolean) : []);

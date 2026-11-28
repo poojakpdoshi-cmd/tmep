@@ -3,9 +3,9 @@
 Reads raw RGB frames from an FFmpeg pipe and prints one JSON object per frame:
   {"t": s, "objects": [[label, score, x, y, w, h]], "faces": [[score, x, y, w, h]],
    "poses": [{"box": [x, y, w, h], "kp": {name: [x, y, visibility]}}],
-   "hands": [[gesture, score, handedness, x, y, w, h]], "emb": [..]}
+   "hands": [[gesture, score, handedness, x, y, w, h]], "emb": [..], "embL": [..], "cls": [[i, p]]}
 Boxes are normalized, top-left origin. Nothing is identified: faces are locations only.
-Usage: semantic.py MODELS FFMPEG FILE FPS W H MAXSEC TASKS(comma list)
+Usage: semantic.py MODELS FFMPEG FILE FPS W H MAXSEC TASKS(comma list) [START_SECONDS]
 """
 import json
 import resource
@@ -18,6 +18,7 @@ import mediapipe as mp
 from mediapipe.tasks.python import BaseOptions, vision
 
 models, ffmpeg, src, fps, W, H, maxsec, tasks = sys.argv[1:9]
+start = sys.argv[9] if len(sys.argv) > 9 else '0'
 W, H, fps = int(W), int(H), float(fps)
 tasks = set(tasks.split(','))
 t_load = time.time()
@@ -26,19 +27,28 @@ det = vision.ObjectDetector.create_from_options(vision.ObjectDetectorOptions(bas
 face = vision.FaceDetector.create_from_options(vision.FaceDetectorOptions(base_options=opt('blaze_face_short_range.tflite'), min_detection_confidence=0.5)) if 'faces' in tasks else None
 pose = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(base_options=opt('pose_landmarker_lite.task'), num_poses=4)) if 'pose' in tasks else None
 ges = vision.GestureRecognizer.create_from_options(vision.GestureRecognizerOptions(base_options=opt('gesture_recognizer.task'), num_hands=2)) if 'gestures' in tasks else None
+embl = vision.ImageEmbedder.create_from_options(vision.ImageEmbedderOptions(base_options=opt('mobilenet_v3_large.tflite'), l2_normalize=True)) if 'scene' in tasks else None
+cls2 = vision.ImageClassifier.create_from_options(vision.ImageClassifierOptions(base_options=opt('efficientnet_lite2.tflite'), max_results=1001)) if 'scene' in tasks else None
 emb = vision.ImageEmbedder.create_from_options(vision.ImageEmbedderOptions(base_options=opt('mobilenet_v3_small.tflite'), l2_normalize=True)) if 'embed' in tasks else None
 print(json.dumps({"ready": True, "loadMs": int((time.time() - t_load) * 1000)}), flush=True)
 
 KP = {"nose": 0, "ls": 11, "rs": 12, "le": 13, "re": 14, "lw": 15, "rw": 16, "lh": 23, "rh": 24, "lk": 25, "rk": 26, "la": 27, "ra": 28}
 r3 = lambda v: round(float(v), 3)
-p = subprocess.Popen([ffmpeg, '-v', 'error', '-t', maxsec, '-i', src, '-an', '-vf', f'fps={fps},scale={W}:{H}', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
+# Output-side seek keeps the source timestamps, so fps sampling lands exactly on start + n/fps
+# (an input-side seek re-bases time and the fps filter then picks a different frame).
+seek = ['-i', src, '-ss', start, '-t', maxsec] if float(start) > 0 else ['-t', maxsec, '-i', src]
+# Take the first frame at or after each sampling instant. (The fps filter keeps the LAST frame of each
+# slot when downsampling, so its "2.5 s" frame at 0.4 fps was really ~3.7 s, and up to +0.25 s at 2 fps.)
+step = 1.0 / fps - 0.002
+sel = f"select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{step:.4f})',scale={W}:{H}"
+p = subprocess.Popen([ffmpeg, '-v', 'error', *seek, '-an', '-vf', sel, '-fps_mode', 'passthrough', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
 n, size = 0, W * H * 3
 while True:
     buf = p.stdout.read(size)
     if not buf or len(buf) < size:
         break
     img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.frombuffer(buf, dtype=np.uint8).reshape(H, W, 3))
-    out = {"t": r3(n / fps)}
+    out = {"t": r3(float(start) + n / fps)}
     t0 = time.time()
     if det:
         out["objects"] = [[d.categories[0].category_name, r3(d.categories[0].score), r3(d.bounding_box.origin_x / W), r3(d.bounding_box.origin_y / H), r3(d.bounding_box.width / W), r3(d.bounding_box.height / H)] for d in det.detect(img).detections]
@@ -64,6 +74,12 @@ while True:
         out["hands"] = hs
     if emb:
         out["emb"] = [round(float(v), 4) for v in emb.embed(img).embeddings[0].embedding]
+    if embl:
+        out["embL"] = [round(float(v), 4) for v in embl.embed(img).embeddings[0].embedding]
+        # ImageNet classes with p >= 1e-4 as [index, probability] (the rest are ~0)
+        cats = cls2.classify(img).classifications[0].categories
+        out["cls"] = [[c.index, round(float(c.score), 5)] for c in cats if c.score >= 1e-4]
+        out["clsTop"] = [[c.category_name, round(float(c.score), 3)] for c in cats[:5]]
     out["ms"] = int((time.time() - t0) * 1000)
     print(json.dumps(out), flush=True)
     n += 1

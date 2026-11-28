@@ -20,7 +20,7 @@ import { run } from './exec.ts';
 import { analyzeSemantics, eventCandidates, textOverTime, type SemanticRecord, type Track } from './semantic.ts';
 
 export const FOOTAGE_SCHEMA = 'frame.footage/1';
-export const FOOTAGE_VERSION = '5a.1';
+export const FOOTAGE_VERSION = '6a.1';
 
 export interface Box { x: number; y: number; w: number; h: number }
 export interface Shot { id: string; t0: number; t1: number; cutScore: number; /** How the shot begins (absent on the first shot). */ boundary?: 'cut' | 'gradual'; keyframe: number; luma: number; motion: number; detail: number; signature: number[] }
@@ -41,11 +41,14 @@ export interface FootageAnalysis {
     /** Audio level (dBFS, RMS) per 0.5 s window; empty without an audio stream. */
     audio: number[];
     silences: { t0: number; t1: number }[];
+    /** Phase 6: global camera motion per 0.5 s window (frame widths / heights per second; + = content moves right/down). */
+    camera?: { dx: number; dy: number }[];
     /** Gradual transitions (dissolve, wipe, fade, graphic); hard cuts are the shot boundaries. */
     transitions?: { t0: number; t1: number; t: number; kind: 'gradual'; score: number }[];
     speech?: { t0: number; t1: number; text: string }[];
     faces?: { t: number; boxes: (Box & { conf: number })[] }[];
-    text?: { t: number; text: string; conf: number }[];
+    /** y/h: mean vertical centre and median word height of the kept words (frame fractions), Phase 6. */
+    text?: { t: number; text: string; conf: number; y?: number; h?: number }[];
     quality: QualityFlag[];
     /** 3×3 grid activity (motion + detail), normalized 0–1, row-major from top-left. */
     gridActivity: number[];
@@ -234,8 +237,8 @@ function levelled(A: Float32Array, B: Float32Array): number {
 }
 
 /** Mean-normalized difference of 32×18 thumbnails, unshifted and at the best shift (±4, ±2 cells). */
-export function compensated(a: Float32Array, b: Float32Array): { plain: number; best: number } {
-  let ma = 0, mb = 0;
+export function compensated(a: Float32Array, b: Float32Array): { plain: number; best: number; dx: number; dy: number } {
+  let ma = 0, mb = 0, bx = 0, by = 0;
   for (let i = 0; i < a.length; i++) { ma += a[i]!; mb += b[i]!; }
   ma /= a.length; mb /= b.length;
   let plain = 0, best = Infinity;
@@ -244,9 +247,27 @@ export function compensated(a: Float32Array, b: Float32Array): { plain: number; 
     for (let y = Math.max(0, -dy); y < TH - Math.max(0, dy); y++) for (let x = Math.max(0, -dx); x < TW - Math.max(0, dx); x++) {
       d += Math.abs(a[y * TW + x]! - ma - (b[(y + dy) * TW + x + dx]! - mb)); n++;
     }
-    d /= n; if (dx === 0 && dy === 0) plain = d; if (d < best) best = d;
+    d /= n; if (dx === 0 && dy === 0) plain = d; if (d < best) { best = d; bx = dx; by = dy; }
   }
-  return { plain, best };
+  return { plain, best, dx: bx, dy: by };
+}
+
+/**
+ * Global camera motion: the best-matching shift between thumbnails 0.5 s apart (32×18 grid, ±7/±3 cells),
+ * accepted only when shifting explains the change (best < 0.8 × unshifted); cuts give zero.
+ */
+export function cameraMotion(stats: FrameStat[], fps: number, cuts: number[], seconds: number): { dx: number; dy: number }[] {
+  const out: { dx: number; dy: number }[] = [];
+  const step = Math.max(1, Math.round(fps * WIN));
+  for (let t = 0; t < seconds; t += WIN) {
+    const i = Math.round(t * fps), j = i + step;
+    const a = stats[i], b = stats[j];
+    if (!a?.t32 || !b?.t32 || cuts.some((c) => c > a.t && c <= b.t)) { out.push({ dx: 0, dy: 0 }); continue; }
+    const c = compensated(a.t32, b.t32);
+    const ok = c.best < 0.8 * c.plain && c.plain > 1;
+    out.push(ok ? { dx: r3(c.dx / TW / WIN), dy: r3(c.dy / TH / WIN) } : { dx: 0, dy: 0 });
+  }
+  return out;
 }
 
 /**
@@ -429,7 +450,7 @@ async function detectFaces(bin: string, file: string, times: number[], tmp: stri
   };
 }
 
-async function readText(bin: string, file: string, times: number[], tmp: string): Promise<{ cap: Capability; text?: FootageAnalysis['observed']['text'] }> {
+async function readText(bin: string, file: string, times: number[], tmp: string, a_w = 16, a_h = 9): Promise<{ cap: Capability; text?: FootageAnalysis['observed']['text'] }> {
   const tess = process.env.FRAME_TESSERACT ?? process.env.TMEP_TESSERACT ?? 'tesseract';
   let ok = false;
   try { ok = (await run(tess, ['--version'], { timeoutMs: 15000 })).code === 0; } catch { /* not on PATH */ }
@@ -447,7 +468,12 @@ async function readText(bin: string, file: string, times: number[], tmp: string)
       const w = c[11]!.trim(), conf = Number(c[10]);
       return w.length >= 2 ? conf >= 70 : /^[\p{L}\p{N}]$/u.test(w) && conf >= 80;
     });
-    if (words.length) text.push({ t: r3(times[i]!), text: words.map((c) => c[11]!.trim()).join(' ').slice(0, 200), conf: r3(words.reduce((a, c) => a + Number(c[10]), 0) / words.length / 100) });
+    if (words.length) {
+      // tesseract runs on 640-px-wide keyframes; geometry is kept as frame fractions (typography profile).
+      const H = 640 * (a_h / a_w);
+      const ys = words.map((c) => (Number(c[7]) + Number(c[9]) / 2) / H), hs = words.map((c) => Number(c[9]) / H).sort((p, q) => p - q);
+      text.push({ t: r3(times[i]!), text: words.map((c) => c[11]!.trim()).join(' ').slice(0, 200), conf: r3(words.reduce((a, c) => a + Number(c[10]), 0) / words.length / 100), y: r3(ys.reduce((p, q) => p + q, 0) / ys.length), h: r3(hs[Math.floor(hs.length / 2)]!) });
+    }
   }
   return { cap: { status: 'ok', tool: 'tesseract' }, text };
 }
@@ -478,6 +504,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
     motion.push(r3(fr.length ? fr.reduce((a, s) => a + s.diff, 0) / fr.length : 0));
   }
   const silences = findSilences(levels);
+  const camera = cameraMotion(stats, fps, cuts.map((c) => c.t), seconds);
   const gridSum = new Array(9).fill(0);
   for (const s of stats) s.grid.forEach((g, i) => (gridSum[i] += g));
   const gmax = Math.max(...gridSum, 1e-9);
@@ -508,7 +535,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
   ];
   if (pr.audio) provenance.push({ analyzer: 'frame.audio-levels', version: FOOTAGE_VERSION, method: 'mono 16 kHz RMS per 0.5 s; silence = 6 dB above an adaptive floor, ≥ 0.6 s', params: {}, ms: tVideo });
 
-  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, transitions: gradual.map((g) => ({ ...g, kind: 'gradual' as const })), quality, gridActivity };
+  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, transitions: gradual.map((g) => ({ ...g, kind: 'gradual' as const })), camera, quality, gridActivity };
   if (opts.words?.length) {
     // Speech segments come from the transcript: consecutive words with gaps < 0.6 s.
     const segs: { t0: number; t1: number; text: string }[] = [];
@@ -556,7 +583,7 @@ async function addAdapters(bin: string, file: string, a: FootageAnalysis, opts: 
       const t = Date.now();
       const every = opts.textEvery ?? 1;
       const times = opts.temporalText ? Array.from({ length: Math.min(180, Math.floor(a.asset.analyzedSeconds / every)) }, (_, i) => r3(i * every + every / 2)) : keyTimes;
-      const r = await readText(bin, file, times, tmp);
+      const r = await readText(bin, file, times, tmp, a.asset.w, a.asset.h);
       caps.text = r.cap; if (r.text) observed.text = r.text;
       if (r.cap.status === 'ok') {
         for (let i = provenance.length - 1; i >= 0; i--) if (provenance[i]!.analyzer === 'frame.ocr') provenance.splice(i, 1);

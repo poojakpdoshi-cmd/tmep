@@ -14,7 +14,7 @@
  */
 import { layout, resolveRef, RATIOS, type Timeline, type Effect } from '../../core/src/index.ts';
 import type { FootageAnalysis, Box } from '../../media/src/footage.ts';
-import { boxAt, type Track } from '../../media/src/semantic.ts';
+import { boxAt, centreToOffset, type Track } from '../../media/src/semantic.ts';
 
 export interface FootageFinding { code: 'graphics-over-presenter' | 'captions-over-presenter' | 'crop-cuts-presenter' | 'repetitive-zoom' | 'missing-moment' | 'graphics-over-subject' | 'crop-cuts-subject' | 'overlay-over-subject'; severity: 'advisory'; msg: string; detail?: Record<string, unknown>; fix?: string }
 
@@ -30,6 +30,15 @@ export function sourceToOutput(box: Box, src: { w: number; h: number }, out: { w
   const sw = src.w * k, sh = src.h * k;
   const ox = (sw - out.w) * cx, oy = (sh - out.h) * cy;
   return { x: (box.x * sw - ox) / out.w, y: (box.y * sh - oy) / out.h, w: (box.w * sw) / out.w, h: (box.h * sh) / out.h };
+}
+
+/** Crop centre of a clip at a source time: follow keys (linear, clamped) when present, else cx/cy. */
+export function cropCentre(c: Timeline['clips'][number], t: number): [number, number] {
+  const f = c.follow;
+  if (!f?.length) return [c.cx, c.cy];
+  if (t <= f[0]!.t) return [f[0]!.cx, f[0]!.cy];
+  for (let i = 1; i < f.length; i++) if (t < f[i]!.t) { const a = f[i - 1]!, b = f[i]!, u = (t - a.t) / (b.t - a.t); return [a.cx + (b.cx - a.cx) * u, a.cy + (b.cy - a.cy) * u]; }
+  return [f.at(-1)!.cx, f.at(-1)!.cy];
 }
 
 export function footageFindings(tl: Timeline, analyses: Map<string, FootageAnalysis>): FootageFinding[] {
@@ -74,7 +83,8 @@ export function footageFindings(tl: Timeline, analyses: Map<string, FootageAnaly
     const primary = a.observed.tracks.find((t) => t.id === a.inferred.subjects?.primary);
     const outBox = (tr: Track, t: number): Box | undefined => {
       const b = boxAt(tr, srcAt(t)); if (!b) return undefined;
-      return sourceToOutput({ x: b[0] + b[2] / 2, y: b[1] + b[3] / 2, w: b[2], h: b[3] }, { w: a.asset.w, h: a.asset.h }, { w: W, h: H }, p.clip.cx, p.clip.cy);
+      const [cx, cy] = cropCentre(p.clip, srcAt(t));
+      return sourceToOutput({ x: b[0] + b[2] / 2, y: b[1] + b[3] / 2, w: b[2], h: b[3] }, { w: a.asset.w, h: a.asset.h }, { w: W, h: H }, cx, cy);
     };
     const times: number[] = [];
     for (let t = p.start; t < p.start + p.dur; t += 0.5) times.push(t);
@@ -89,7 +99,7 @@ export function footageFindings(tl: Timeline, analyses: Map<string, FootageAnaly
       const rf = a.inferred.reframe?.find((r) => r.aspect === tl.settings.ratio && r.keys.length);
       const keys = rf?.keys.filter((k) => k.t >= p.clip.in - 0.5 && k.t <= p.clip.out + 0.5) ?? [];
       const med = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)]!;
-      const fix = keys.length ? `reframe ${p.clip.id} cx=${med(keys.map((k) => k.cx))} cy=${med(keys.map((k) => k.cy))}` : undefined;
+      const fix = keys.length ? `reframe ${p.clip.id} cx=${centreToOffset(med(keys.map((k) => k.cx)), rf!.crop?.w ?? 1)} cy=${centreToOffset(med(keys.map((k) => k.cy)), rf!.crop?.h ?? 1)}` : undefined;
       if (worst < 0.7) out.push({ code: 'crop-cuts-subject', severity: 'advisory', msg: `clip ${p.clip.id}: the ${tl.settings.ratio} crop keeps ${(worst * 100).toFixed(0)}% of ${primary.id} at ${at.toFixed(1)}s${fix ? `; the subject's median crop centre is ${fix.split(' ').slice(2).join(' ')}` : ''}`, detail: { clip: p.clip.id, track: primary.id, t: +at.toFixed(2), visible: +worst.toFixed(2) }, ...(fix && { fix }) });
       for (const b of tl.broll) {
         const bt = resolveRef(placed, b.ref); if (bt === undefined) continue;

@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { TmepError } from '../../core/src/index.ts';
 import type { Box, FootageAnalysis, Shot } from './footage.ts';
 import { modelDir, modelStatus, semanticRuntime } from './models.ts';
+import { classifyFrames, sceneModel, type SceneClass } from './scenes.ts';
 
 const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'semantic.py');
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -31,6 +32,10 @@ export interface SemFrame {
   poses?: { box: [number, number, number, number]; kp: Kp }[];
   hands?: [string, number, string, number, number, number, number][];
   emb?: number[];
+  /** Phase 6 scene features: MobileNetV3-large embedding and top ImageNet classes [index, p]. */
+  embL?: number[];
+  cls?: [number, number][];
+  clsTop?: [string, number][];
   ms?: number;
 }
 
@@ -57,7 +62,7 @@ export interface SemanticRecord {
   };
   inferred: {
     subjects: { presenter?: string; primary?: string; moving: string[]; basis: string[] };
-    reframe: { aspect: string; subject?: string; keys: { t: number; cx: number; cy: number }[]; subjectInside: number; basis: string }[];
+    reframe: { aspect: string; subject?: string; /** Crop window centres (source fractions). */ keys: { t: number; cx: number; cy: number }[]; subjectInside: number; basis: string; crop?: { w: number; h: number } }[];
     activities: { track: string; t0: number; t1: number; label: 'gesturing' | 'moving across frame' | 'stationary'; confidence: number; evidence: string[] }[];
     sceneTypes: { shot: string; label: SceneType; confidence: number; evidence: string[] }[];
     duplicates: { a: string; b: string; similarity: number; kind: 'near-duplicate' | 'similar' | 'replay-candidate'; basis: string }[];
@@ -66,13 +71,14 @@ export interface SemanticRecord {
     events: EventCandidate[];
   };
 }
-export type SceneType = 'talking-head' | 'multi-person conversation' | 'screen/slides' | 'crowd/field' | 'object close-up' | 'action' | 'empty/landscape' | 'other';
+/** Phase 6 taxonomy (docs/phase-6/PROGRESS.md); `other` when neither the classifier nor a rule applies. */
+export type SceneType = SceneClass | 'other';
 export interface EventCandidate { id: string; t: number; t0: number; t1: number; score: number; confidence: number; signals: Record<string, number>; evidence: string[]; note: string }
 
 /** Run the worker. Rejects with E_CANCELLED on abort; worker failure surfaces its stderr tail. */
-export async function runWorker(python: string, env: NodeJS.ProcessEnv, ffmpeg: string, file: string, o: { fps: number; w: number; h: number; maxSeconds: number; tasks: string[]; signal?: AbortSignal }): Promise<{ frames: SemFrame[]; loadMs: number; maxRssMB?: number }> {
+export async function runWorker(python: string, env: NodeJS.ProcessEnv, ffmpeg: string, file: string, o: { fps: number; w: number; h: number; maxSeconds: number; tasks: string[]; signal?: AbortSignal; start?: number }): Promise<{ frames: SemFrame[]; loadMs: number; maxRssMB?: number }> {
   return new Promise((resolve, reject) => {
-    const p = spawn(python, [WORKER, modelDir(), ffmpeg, file, String(o.fps), String(o.w), String(o.h), String(o.maxSeconds), o.tasks.join(',')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    const p = spawn(python, [WORKER, modelDir(), ffmpeg, file, String(o.fps), String(o.w), String(o.h), String(o.maxSeconds), o.tasks.join(','), String(o.start ?? 0)], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
     const frames: SemFrame[] = [];
     let loadMs = 0, buf = '', err = '', done = false, maxRssMB: number | undefined;
     const abort = () => p.kill('SIGKILL');
@@ -113,7 +119,13 @@ const inside = (inner: number[], outer: number[]) => { const [cx, cy] = centre(i
  * Greedy IoU association per label with a one-sample gap tolerance; a fast mover is still matched when
  * its centre moved less than its own size. Shot boundaries end every track.
  */
-export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = []): Track[] {
+/** A pose that faces the camera: nose and both shoulders visible, shoulders reasonably wide. */
+const facing = (f: SemFrame, box: number[]) => (f.poses ?? []).some((p) => iou(p.box, box) > 0.3 && p.kp.nose[2] > 0.5 && p.kp.ls[2] > 0.5 && p.kp.rs[2] > 0.5 && Math.abs(p.kp.ls[0] - p.kp.rs[0]) > 0.06 && p.kp.nose[0] > Math.min(p.kp.ls[0], p.kp.rs[0]) && p.kp.nose[0] < Math.max(p.kp.ls[0], p.kp.rs[0]));
+
+/** Camera velocity (frame widths/s) at time t from the base pass, zero when unknown. */
+const camAt = (camera: { dx: number; dy: number }[] | undefined, t: number) => camera?.[Math.min(camera.length - 1, Math.max(0, Math.floor(t / 0.5)))] ?? { dx: 0, dy: 0 };
+
+export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [], camera?: { dx: number; dy: number }[]): Track[] {
   interface Open { id: number; label: string; last: number; samples: { t: number; box: number[]; score: number; face: boolean }[] }
   const open: Open[] = [], closed: Open[] = [];
   let next = 1;
@@ -140,12 +152,12 @@ export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [
       if (usedO.has(p.o) || usedD.has(p.d)) continue;
       usedO.add(p.o); usedD.add(p.d);
       const d = dets[p.d]!;
-      p.o.samples.push({ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) });
+      p.o.samples.push({ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) || (d.label === 'person' && facing(f, d.box)) });
       p.o.last = f.t;
     }
     dets.forEach((d, k) => {
       if (usedD.has(k)) return;
-      open.push({ id: next++, label: d.label, last: f.t, samples: [{ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) }] });
+      open.push({ id: next++, label: d.label, last: f.t, samples: [{ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) || (d.label === 'person' && facing(f, d.box)) }] });
     });
   }
   closed.push(...open);
@@ -155,7 +167,13 @@ export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [
     if (s.length < 2 && sc < 0.5) continue; // single weak detections are noise
     const t0 = s[0]!.t, t1 = s.at(-1)!.t;
     const speeds: number[] = [];
-    for (let i = 1; i < s.length; i++) { const [ax, ay] = centre(s[i - 1]!.box), [bx, by] = centre(s[i]!.box); speeds.push(Math.hypot(bx - ax, by - ay) / Math.max(1e-6, s[i]!.t - s[i - 1]!.t)); }
+    // Speed relative to the scene: on-screen velocity minus the camera's (a panned-on subject is moving,
+    // a handheld interviewee is not).
+    for (let i = 1; i < s.length; i++) {
+      const [ax, ay] = centre(s[i - 1]!.box), [bx, by] = centre(s[i]!.box), dt = Math.max(1e-6, s[i]!.t - s[i - 1]!.t);
+      const cam = camAt(camera, (s[i]!.t + s[i - 1]!.t) / 2);
+      speeds.push(Math.hypot((bx - ax) / dt - cam.dx, (by - ay) / dt - cam.dy));
+    }
     const step = Math.max(1, Math.ceil(s.length / 80));
     tracks.push({
       id: `${o.label.replace(/\s+/g, '-')}${tracks.filter((t) => t.label === o.label).length + 1}`, label: o.label, t0: r3(t0), t1: r3(t1), n: s.length, score: r3(sc),
@@ -195,6 +213,9 @@ export function findSubjects(tracks: Track[], dur: number): SemanticRecord['infe
  * Crop centre keys that keep a subject in a narrower frame. A dead zone holds the crop still while the
  * subject stays inside its middle 60 %, and every shot starts from the subject's own position.
  */
+/** Renderer crop offset (0..1, the `cx`/`cy`/`follow` convention) that puts a window of relative size `crop` centred on `centre`. */
+export const centreToOffset = (centre: number, crop: number) => (crop >= 0.999 ? 0.5 : Math.round(Math.min(1, Math.max(0, (centre - crop / 2) / (1 - crop))) * 1000) / 1000);
+
 export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }, aspect: [number, number], shots: Pick<Shot, 't0'>[]): SemanticRecord['inferred']['reframe'][number] {
   const label = `${aspect[0]}:${aspect[1]}`;
   const cw = Math.min(1, (src.h * aspect[0]) / aspect[1] / src.w), ch = Math.min(1, (src.w * aspect[1]) / aspect[0] / src.h);
@@ -216,11 +237,11 @@ export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }
     const last = keys.at(-1);
     if (!last || Math.abs(last.cx - cx) > 0.005 || Math.abs(last.cy - cy) > 0.005 || si !== shots.filter((s) => s.t0 <= last.t).length - 1) keys.push({ t: t, cx: r3(cx), cy: r3(cy) });
   }
-  return { aspect: label, subject: tr.id, keys, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame; kept = the crop holds as much of the subject as it can` };
+  return { aspect: label, subject: tr.id, keys, crop: { w: r3(cw), h: r3(ch) }, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame; kept = the crop holds as much of the subject as it can` };
 }
 
 /** Activity from pose: wrist travel relative to shoulder width, and whole-body travel. */
-export function poseActivities(frames: SemFrame[], tracks: Track[]): SemanticRecord['inferred']['activities'] {
+export function poseActivities(frames: SemFrame[], tracks: Track[], camera?: { dx: number; dy: number }[]): SemanticRecord['inferred']['activities'] {
   const out: SemanticRecord['inferred']['activities'] = [];
   for (const tr of tracks.filter((t) => t.label === 'person' && t.n >= 3)) {
     const seq: { t: number; kp: Kp }[] = [];
@@ -237,14 +258,17 @@ export function poseActivities(frames: SemFrame[], tracks: Track[]): SemanticRec
       const vis = (k: keyof Kp) => a[k][2] > 0.5 && b[k][2] > 0.5;
       const rel = (k: 'lw' | 'rw', s: 'ls' | 'rs') => (vis(k) && vis(s) ? Math.hypot((b[k][0] - b[s][0]) - (a[k][0] - a[s][0]), (b[k][1] - b[s][1]) - (a[k][1] - a[s][1])) / sw / dt : 0);
       wrist.push(Math.max(rel('lw', 'ls'), rel('rw', 'rs')));
-      const hip = (k: Kp) => [(k.lh[0] + k.rh[0]) / 2, (k.lh[1] + k.rh[1]) / 2];
+      // Body position: hip centre when both hips are visible in both frames, else shoulder centre (close-ups).
+      const hipsSeen = vis('lh') && vis('rh');
+      const hip = (k: Kp) => (hipsSeen ? [(k.lh[0] + k.rh[0]) / 2, (k.lh[1] + k.rh[1]) / 2] : [(k.ls[0] + k.rs[0]) / 2, (k.ls[1] + k.rs[1]) / 2]);
       const [ha, hb] = [hip(a), hip(b)];
-      body.push(Math.hypot(hb[0]! - ha[0]!, hb[1]! - ha[1]!) / dt);
+      const cam = camAt(camera, (seq[i]!.t + seq[i - 1]!.t) / 2);
+      body.push(Math.hypot((hb[0]! - ha[0]!) / dt - cam.dx, (hb[1]! - ha[1]!) / dt - cam.dy));
     }
     const w = median(wrist), b = median(body);
     const label = b >= 0.15 ? 'moving across frame' : w >= 0.8 ? 'gesturing' : 'stationary';
     const confidence = label === 'moving across frame' ? Math.min(1, b / 0.3) : label === 'gesturing' ? Math.min(1, w / 1.6) : Math.min(1, 1 - Math.max(w / 0.8, b / 0.15) * 0.5);
-    out.push({ track: tr.id, t0: tr.t0, t1: tr.t1, label, confidence: r3(Math.max(0.1, confidence)), evidence: [`${seq.length} pose samples`, `median wrist travel ${r3(w)} shoulder-widths/s`, `median hip travel ${r3(b)} frame widths/s`] });
+    out.push({ track: tr.id, t0: tr.t0, t1: tr.t1, label, confidence: r3(Math.max(0.1, confidence)), evidence: [`${seq.length} pose samples`, `median wrist travel ${r3(w)} shoulder-widths/s`, `median hip travel ${r3(b)} frame widths/s${camera ? ' (camera motion removed)' : ''}`] });
   }
   return out;
 }
@@ -256,6 +280,9 @@ export function sceneTypes(a: FootageAnalysis, frames: SemFrame[]): SemanticReco
   return a.observed.shots.map((s) => {
     const fr = frames.filter((f) => f.t >= s.t0 && f.t < s.t1);
     if (!fr.length) return { shot: s.id, label: 'other' as SceneType, confidence: 0, evidence: ['no semantic samples in this shot'] };
+    // Phase 6: the trained classifier when its features were computed; the Phase 5 rules otherwise.
+    const c = classifyFrames(fr);
+    if (c) return { shot: s.id, label: c.label, confidence: c.confidence, evidence: [`scene classifier over ${c.frames} frames (runner-up: ${c.runnerUp})`] };
     const share = (p: (f: SemFrame) => boolean) => fr.filter(p).length / fr.length;
     const persons = (f: SemFrame) => (f.objects ?? []).filter((o) => o[0] === 'person');
     const bigFaces = (f: SemFrame, min: number) => (f.faces ?? []).filter((x) => x[3] * x[4] >= min).length;
@@ -265,13 +292,13 @@ export function sceneTypes(a: FootageAnalysis, frames: SemFrame[]): SemanticReco
     // Rules are checked in order of specificity: people and faces first, motion last, so a handheld
     // talking head is not called action.
     const ordered: [SceneType, number, string][] = [
-      ['multi-person conversation', s.motion < 6 ? share((f) => bigFaces(f, 0.006) >= 2 || (big(f) >= 2 && big(f) <= 4)) : 0, 'two to four large people or two prominent faces, low motion'],
+      ['group', s.motion < 6 ? share((f) => bigFaces(f, 0.006) >= 2 || (big(f) >= 2 && big(f) <= 4)) : 0, 'two to four large people or two prominent faces, low motion'],
       ['talking-head', share((f) => bigFaces(f, 0.012) === 1 && persons(f).length <= 2), 'one prominent face, at most two people'],
-      ['crowd/field', share((f) => persons(f).length >= 4 && median(persons(f).map((p) => p[4] * p[5])) < 0.05), 'four or more small people'],
-      ['object close-up', share((f) => (f.objects ?? []).some((o) => o[0] !== 'person' && o[4] * o[5] >= 0.12) && !(f.faces ?? []).length), 'a large non-person object, no face'],
-      ['screen/slides', text.length && words >= 4 ? share((f) => !persons(f).length) * Math.min(1, words / 8) : 0, `${Math.round(words)} OCR words per sample, no people`],
-      ['action', s.motion >= 6 || (s.motion >= 2 * medMotion && s.motion >= 3) ? share((f) => persons(f).length >= 1) : 0, `motion ${s.motion} (clip median ${r3(medMotion)}) with people`],
-      ['empty/landscape', share((f) => !(f.objects ?? []).length && !(f.faces ?? []).length), 'no detections'],
+      ['sports', share((f) => persons(f).length >= 4 && median(persons(f).map((p) => p[4] * p[5])) < 0.05), 'four or more small people'],
+      ['close-up', share((f) => (f.objects ?? []).some((o) => o[0] !== 'person' && o[4] * o[5] >= 0.12) && !(f.faces ?? []).length), 'a large non-person object, no face'],
+      ['screen', text.length && words >= 4 ? share((f) => !persons(f).length) * Math.min(1, words / 8) : 0, `${Math.round(words)} OCR words per sample, no people`],
+      ['sports', s.motion >= 6 || (s.motion >= 2 * medMotion && s.motion >= 3) ? share((f) => persons(f).length >= 1) : 0, `motion ${s.motion} (clip median ${r3(medMotion)}) with people`],
+      ['scenery', share((f) => !(f.objects ?? []).length && !(f.faces ?? []).length), 'no detections'],
     ];
     const first = ordered.find((c) => c[1] >= 0.5);
     const [label, conf, why] = first ?? [...ordered].sort((x, y) => y[1] - x[1])[0]!;
@@ -387,6 +414,16 @@ export function eventCandidates(a: FootageAnalysis, tracks: Track[], changes: Se
 
 export interface SemanticOptions { fps?: number; gestures?: boolean; maxSeconds?: number; signal?: AbortSignal; words?: { w: string; s: number; e: number }[]; textStep?: number }
 
+/** One frame's scene features of a file (image or a video at `at`), or undefined when the models are absent. */
+export async function embedFile(ffmpeg: string, file: string, at = 0, size?: { w: number; h: number }): Promise<{ emb: number[]; labels: [string, number][] } | undefined> {
+  const av = await semanticAvailability(['sceneEmbed', 'sceneClasses']);
+  if (!av.ok) return undefined;
+  const w = Math.min(640, size?.w ?? 640) & ~1, h = size ? Math.max(2, Math.round((w * size.h) / size.w / 2) * 2) : 360;
+  const { frames } = await runWorker(av.python!, av.env, ffmpeg, file, { fps: 1, w, h, maxSeconds: 1, tasks: ['scene'], start: at });
+  const f = frames[0];
+  return f?.embL ? { emb: f.embL.map((v) => Math.round(v * 1000) / 1000), labels: f.clsTop ?? [] } : undefined;
+}
+
 export function semanticFps(seconds: number): number { return seconds <= 600 ? 2 : seconds <= 1800 ? 1 : 0.5; }
 
 /** Availability check without running anything heavy. */
@@ -399,16 +436,19 @@ export async function semanticAvailability(tasks: string[]): Promise<{ ok: boole
 }
 
 export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts: SemanticOptions = {}): Promise<{ record?: SemanticRecord; reason?: string; ms: number; loadMs: number; perFrameMs: number; maxRssMB?: number }> {
-  const tasks = ['objects', 'faces', 'pose', 'embed', ...(opts.gestures ? ['gestures'] : [])];
+  const base = ['objects', 'faces', 'pose', 'embed', ...(opts.gestures ? ['gestures'] : [])];
   const t0 = Date.now();
-  const av = await semanticAvailability(tasks);
+  const av = await semanticAvailability(base);
+  // Scene features need two more models; without them scene types fall back to detection rules.
+  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses'])).models.every((m) => m.verified);
+  const tasks = [...base, ...(sceneOk ? ['scene'] : [])];
   if (!av.ok) return { reason: av.reason, ms: Date.now() - t0, loadMs: 0, perFrameMs: 0 };
   const seconds = a.asset.analyzedSeconds;
   const fps = opts.fps ?? semanticFps(seconds);
   const w = Math.min(640, a.asset.w), h = Math.max(2, Math.round((w * a.asset.h) / a.asset.w / 2) * 2);
   const { frames, loadMs, maxRssMB } = await runWorker(av.python!, av.env, ffmpeg, a.asset.file, { fps, w: w - (w % 2), h, maxSeconds: opts.maxSeconds ?? seconds, tasks, signal: opts.signal });
   const cuts = a.observed.shots.slice(1).map((s) => s.t0);
-  const tracks = trackObjects(frames, fps, cuts);
+  const tracks = trackObjects(frames, fps, cuts, a.observed.camera);
   const subjects = findSubjects(tracks, seconds);
   const subj = tracks.find((t) => t.id === subjects.primary);
   const gestures = frames.flatMap((f) => (f.hands ?? []).filter((x) => x[0] !== 'None' && x[1] >= 0.5).map(([label, score, hand, x, y, bw, bh]) => ({ t: f.t, label, score, hand, box: { x: r3(x + bw / 2), y: r3(y + bh / 2), w: bw, h: bh } })));
@@ -419,7 +459,7 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
     inferred: {
       subjects,
       reframe: [reframeKeys(subj, a.asset, [9, 16], a.observed.shots), reframeKeys(subj, a.asset, [1, 1], a.observed.shots), reframeKeys(subj, a.asset, [4, 5], a.observed.shots)],
-      activities: poseActivities(frames, tracks),
+      activities: poseActivities(frames, tracks, a.observed.camera),
       sceneTypes: sceneTypes(a, frames),
       duplicates: dups,
       textChanges: text.changes,

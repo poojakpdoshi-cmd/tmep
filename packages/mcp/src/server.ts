@@ -11,6 +11,7 @@
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { TmepError, asTmepError, formatIssues, VERSION, resolveContainedPath, parseAllowedRoots, type Detail } from '../../core/src/index.ts';
+import { produce } from '../../engine/src/production.ts';
 import * as api from '../../engine/src/api.ts';
 import { startJob, waitJob, cancelJob, jobView } from '../../render/src/jobs.ts';
 import { TOOLS, toolList } from './tools.ts';
@@ -183,6 +184,10 @@ export class McpServer {
         return jobView(j, ctx.detail);
       }
       case 'video_plan': {
+        if (a.mode === 'produce') {
+          const { mode: _m, reference, ...rest } = a as Record<string, unknown>;
+          return produce(ctx, { ...rest, ...(typeof reference === 'string' && { reference }) } as never, flight?.ctrl.signal);
+        }
         if (a.mode === 'structured') {
           return api.editPlan(ctx, { action: a.action as never, asset: a.asset as string, task: a.task as string, overrides: a.overrides as never, dryRun: a.dryRun as boolean, rebase: a.rebase as boolean, semantic: a.semantic as boolean });
         }

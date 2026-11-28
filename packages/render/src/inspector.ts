@@ -10,7 +10,7 @@ import {
   layout, duration, totalFrames,
 } from '../../core/src/index.ts';
 import { ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
-import { run } from '../../media/src/exec.ts';
+import { run, runBinary } from '../../media/src/exec.ts';
 import { diagnoseScenes } from '../../motion/src/scene.ts';
 
 export type QaSeverity = 'defect' | 'advisory';
@@ -44,6 +44,8 @@ export interface QaReport {
     expectedDur: number;
     videoDur?: number;
     audioDur?: number;
+    /** Decoded audio length when the container duration disagreed with the video (AAC padding check). */
+    audioDecodedDur?: number;
     maxVolumeDb?: number;
     integratedLufs?: number;
     truePeakDbtp?: number;
@@ -146,11 +148,18 @@ export async function runInspector(tl: Timeline, words: TlWord[], opts: InspectO
         msg: `video duration ${vDur.toFixed(3)}s differs from timeline ${expectedDur.toFixed(3)}s`,
       });
     }
+    // Container durations of AAC streams include encoder priming and frame padding (up to ~2 × 1024
+    // samples), so a mismatch is confirmed against the decoded sample count before it is reported.
+    let aReal = aDur;
     if (aDur !== undefined && Math.abs(aDur - vDur) > frameTol) {
+      const pcm = await runBinary(bin, ['-v', 'error', '-i', opts.renderedPath, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-'], { maxBytes: 64 << 20 }).catch(() => undefined);
+      if (pcm) { aReal = pcm.length / 2 / 8000; metrics.audioDecodedDur = Math.round(aReal * 1000) / 1000; }
+    }
+    if (aReal !== undefined && Math.abs(aReal - vDur) > frameTol) {
       findings.push({
         code: 'av-sync',
         severity: 'defect',
-        msg: `audio duration ${aDur.toFixed(3)}s drifts from video ${vDur.toFixed(3)}s`,
+        msg: `audio duration ${aReal.toFixed(3)}s (decoded) drifts from video ${vDur.toFixed(3)}s`,
       });
     }
     if (vStream?.nb_frames && Math.abs(Number(vStream.nb_frames) - totalFrames(tl)) > 2) {

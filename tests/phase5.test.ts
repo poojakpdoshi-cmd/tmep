@@ -35,7 +35,7 @@ test('library + structured plan end to end', { timeout: 180_000 }, async () => {
 
     // Library: licences recorded, unknown licences flagged, near-duplicates found, SVG text indexed.
     const add1 = await api.library(ctx, { action: 'add', paths: [chart], meta: { kind: 'chart', title: 'Revenue growth chart', tags: ['revenue', 'growth', 'percent'], licence: { id: 'owned' } } }) as any;
-    assert.equal(add1.added[0].verified, true);
+    assert.equal(add1.added[0].status, 'declared', 'a stated licence is declared, not verified (Phase 6)');
     const add2 = await api.library(ctx, { action: 'add', paths: [chart2, icon], meta: { tags: ['launch'] } }) as any;
     assert.equal(add2.added[0].licence, 'unknown');
     assert.ok(add2.duplicates?.some((d: any) => d.kind === 'near'), JSON.stringify(add2));

@@ -48,7 +48,7 @@ import {
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
 import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, transcriptText } from '../../speech/src/transcript.ts';
-import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
+import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus, hasSherpa, transcribeSherpa, sherpaModel } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
 import { compileIntent } from '../../story/src/compiler.ts';
@@ -64,7 +64,8 @@ import { runInspector } from '../../render/src/inspector.ts';
 import { footageFindings, sourceToOutput } from '../../render/src/footage-qa.ts';
 import { analyzeFootage, FOOTAGE_VERSION, type FootageAnalysis } from '../../media/src/footage.ts';
 import { modelStatus, installModels } from '../../media/src/models.ts';
-import { LIBRARY_SCHEMA, ASSET_KINDS, describeAsset, duplicates as libraryDuplicates, search as librarySearch, recommend as libraryRecommend, type Library, type EntryMeta, type AssetKind } from '../../media/src/library.ts';
+import { LIBRARY_SCHEMA, ASSET_KINDS, describeAsset, duplicates as libraryDuplicates, search as librarySearch, recommend as libraryRecommend, similar as librarySimilar, verifyLicence, makeLicence, type Library, type EntryMeta, type AssetKind } from '../../media/src/library.ts';
+import { embedFile } from '../../media/src/semantic.ts';
 import { editingBrief, BRIEF_TASKS, type BriefTask } from '../../story/src/brief.ts';
 import { buildPlan, refreshPlan, applyOverrides, compilePlan, type EditPlan, type Override } from '../../story/src/plan.ts';
 import { computeShotMatch } from '../../render/src/color.ts';
@@ -174,7 +175,9 @@ export async function transcriptsFor(p: Project, ids: Iterable<string>): Promise
 interface SpeechOptions { engine?: string; lang?: string; model?: string; prompt?: string; force?: boolean; signal?: AbortSignal }
 
 function transcriptKey(a: Asset, engine: string, inp: SpeechOptions, fileHash?: string): string {
-  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model: inp.model ?? null, prompt: inp.prompt ?? null, f: fileHash ?? null });
+  // sherpa-onnx models come from an environment directory: the directory is part of the key.
+  const model = inp.model ?? (engine === 'sherpa-onnx' ? sherpaModel() ?? null : null);
+  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model, prompt: inp.prompt ?? null, f: fileHash ?? null });
 }
 
 async function speechWav(p: Project, a: Asset, signal?: AbortSignal): Promise<string> {
@@ -213,6 +216,7 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
     if (inp.file) engine = 'import';
     else if ((await findWhisperCpp()) && (await resolveGgmlModel(inp.model))) engine = 'whisper.cpp';
     else if (await hasFasterWhisper()) engine = 'faster-whisper';
+    else if (await hasSherpa({ model: inp.model })) engine = 'sherpa-onnx';
     else throw new TmepError('E_ENGINE_MISSING', 'no local speech engine installed', 'install whisper.cpp (+ ggml model) or faster-whisper, or pass file:"subs.srt|.vtt|.json" to import a transcript; see `tmep doctor`');
   }
   const envRoots = parseAllowedRoots();
@@ -235,7 +239,8 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
       const wav = await speechWav(p, a, inp.signal);
       if (engine === 'whisper.cpp') tr = await transcribeWhisperCpp(wav, p.workPath(`wcpp-${key}`), { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
       else if (engine === 'faster-whisper') tr = await transcribeFasterWhisper(wav, { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
-      else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, import');
+      else if (engine === 'sherpa-onnx') tr = await transcribeSherpa(wav, { lang: inp.lang, model: inp.model, signal: inp.signal });
+      else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, sherpa-onnx, import');
     }
     validateTranscript(tr, a);
     await writeJson(cacheFile, tr, false);
@@ -595,8 +600,9 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
 // ---------------------------------------------------------------- visual asset library (Phase 5)
 const libFile = (p: Project) => path.join(p.root, '.tmep', 'library.json');
 const readLib = async (p: Project) => readJsonOr<Library>(libFile(p), { schema: LIBRARY_SCHEMA, entries: [] });
+export const readLibrary = readLib;
 
-export interface LibraryInput { action?: 'list' | 'add' | 'search' | 'dups' | 'recommend' | 'licence'; paths?: string[]; meta?: EntryMeta; query?: string; kind?: string; max?: number; asset?: string; id?: string; minScore?: number; product?: string }
+export interface LibraryInput { action?: 'list' | 'add' | 'search' | 'dups' | 'recommend' | 'licence' | 'similar' | 'verify' | 'audit'; paths?: string[]; meta?: EntryMeta; query?: string; kind?: string; max?: number; asset?: string; id?: string; minScore?: number; product?: string; like?: string; at?: number; evidence?: string }
 
 /** The project's visual asset library: add with metadata and licence, search, find duplicates, recommend. */
 export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<string, unknown>> {
@@ -604,17 +610,33 @@ export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<strin
   if (inp.kind !== undefined && !(ASSET_KINDS as readonly string[]).includes(inp.kind)) throw new TmepError('E_INPUT', `unknown asset kind "${inp.kind}"`, `kind: ${ASSET_KINDS.join('|')}`);
   if (inp.meta?.kind !== undefined && !(ASSET_KINDS as readonly string[]).includes(inp.meta.kind)) throw new TmepError('E_INPUT', `unknown asset kind "${inp.meta.kind}"`, `kind: ${ASSET_KINDS.join('|')}`);
   const p = await openProject(ctx.project, action === 'add', ctx.projectRoots);
-  if (action === 'add' || action === 'licence') {
+  if (action === 'add' || action === 'licence' || action === 'verify') {
     return p.withLock(async () => {
       const lib = await readLib(p);
       if (action === 'licence') {
         const e = lib.entries.find((x) => x.id === inp.id);
         if (!e) throw new TmepError('E_NOT_FOUND', `library entry ${inp.id} not found`);
         const l = inp.meta?.licence ?? {};
-        e.licence = { ...e.licence, ...l, verified: !!(l.id ?? e.licence.id) && (l.id ?? e.licence.id) !== 'unknown' && l.verified !== false };
+        // A changed licence id drops any earlier verification: it verified a different claim.
+        e.licence = makeLicence({ ...e.licence, ...l, verification: l.id && l.id !== e.licence.id ? undefined : e.licence.verification });
         if (inp.meta?.genuine !== undefined) e.genuine = inp.meta.genuine;
         await writeJson(libFile(p), lib, false);
         return { ok: 1, id: e.id, licence: e.licence, genuine: e.genuine };
+      }
+      if (action === 'verify') {
+        // Independent evidence only: embedded metadata, or an attribution record file the user points to.
+        let attribution: { file: string; text: string } | undefined;
+        if (inp.evidence) {
+          const envRoots = parseAllowedRoots();
+          const f = await resolveSafePath(inp.evidence, ctx.project, ctx.mediaRoots ?? (envRoots.length ? [ctx.project, ...envRoots] : undefined), 'evidence file');
+          attribution = { file: f, text: (await fsp.readFile(f, 'utf8')).slice(0, 8 << 20) };
+        }
+        const targets = inp.id ? lib.entries.filter((x) => x.id === inp.id) : lib.entries;
+        if (inp.id && !targets.length) throw new TmepError('E_NOT_FOUND', `library entry ${inp.id} not found`);
+        const out: Record<string, unknown>[] = [];
+        for (const e of targets) { e.licence = await verifyLicence(e, attribution); out.push({ id: e.id, licence: e.licence.id, status: e.licence.status, ...(e.licence.verification && { evidence: e.licence.verification.evidence }) }); }
+        await writeJson(libFile(p), lib, false);
+        return { ok: 1, results: out };
       }
       if (!inp.paths?.length) throw new TmepError('E_INPUT', 'library add needs paths');
       const envRoots = parseAllowedRoots();
@@ -625,10 +647,15 @@ export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<strin
         if (!(await exists(file))) throw new TmepError('E_NOT_FOUND', `file not found: ${raw}`);
         const next = `L${lib.entries.reduce((m, e) => Math.max(m, Number(e.id.slice(1)) || 0), 0) + 1}`;
         const e = await describeAsset(file, inp.meta ?? {}, next);
+        if (e.kind !== 'svg') {
+          // Semantic features for similarity search and model tags (skipped when the models are absent).
+          const f = await embedFile((await ffmpegInfo()).ffmpeg, file, e.dur ? Math.min(1, e.dur / 2) : 0, e.w && e.h ? { w: e.w, h: e.h } : undefined).catch(() => undefined);
+          if (f) { e.emb = f.emb; const tags = f.labels.filter(([, p]) => p >= 0.15).map(([n]) => n); if (tags.length) e.modelTags = tags; }
+        }
         const same = lib.entries.find((x) => x.sha256 === e.sha256 && x.file === e.file);
         if (same) { added.push({ id: same.id, existed: true }); continue; }
         lib.entries.push(e);
-        added.push({ id: e.id, kind: e.kind, licence: e.licence.id, verified: e.licence.verified, ...(e.dhash && { dhash: e.dhash }) });
+        added.push({ id: e.id, kind: e.kind, licence: e.licence.id, status: e.licence.status, ...(e.dhash && { dhash: e.dhash }), ...(e.emb && { embedded: true }), ...(e.modelTags && { modelTags: e.modelTags }) });
       }
       await writeJson(libFile(p), lib, false);
       const dups = libraryDuplicates(lib.entries).filter((d) => added.some((a) => a.id === d.a || a.id === d.b));
@@ -637,8 +664,19 @@ export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<strin
   }
   const lib = await readLib(p);
   const max = Math.min(50, Math.max(1, inp.max ?? 10));
-  if (action === 'list') return { entries: lib.entries.slice(0, 200).map((e) => ({ id: e.id, kind: e.kind, file: path.basename(e.file), ...(e.title && { title: e.title }), tags: e.tags, licence: e.licence.id, verified: e.licence.verified, ...(e.genuine !== undefined && { genuine: e.genuine }) })) };
+  if (action === 'list') return { entries: lib.entries.slice(0, 200).map((e) => ({ id: e.id, kind: e.kind, file: path.basename(e.file), ...(e.title && { title: e.title }), tags: e.tags, ...(e.modelTags && { modelTags: e.modelTags }), licence: e.licence.id, status: e.licence.status ?? (e.licence.verified ? 'declared' : 'unknown'), ...(e.genuine !== undefined && { genuine: e.genuine }) })) };
   if (action === 'dups') return { duplicates: libraryDuplicates(lib.entries) };
+  if (action === 'audit') {
+    const by = (st: string) => lib.entries.filter((e) => (e.licence.status ?? (e.licence.verified ? 'declared' : 'unknown')) === st);
+    return { verified: by('verified').length, declared: by('declared').length, unknown: by('unknown').length, declaredOnly: by('declared').map((e) => ({ id: e.id, licence: e.licence.id })), unknownIds: by('unknown').map((e) => e.id), note: 'declared = stated by the user, not independently checked; verify with an attribution record (verify evidence=file) or embedded metadata' };
+  }
+  if (action === 'similar') {
+    let emb: number[] | undefined;
+    if (inp.like) emb = lib.entries.find((e) => e.id === inp.like)?.emb;
+    else if (inp.asset) { const a = await p.asset(inp.asset); emb = (await embedFile((await ffmpegInfo()).ffmpeg, a.path, inp.at ?? 0, a.w && a.h ? { w: a.w, h: a.h } : undefined))?.emb; }
+    if (!emb) throw new TmepError('E_INPUT', 'similar needs like:<library id with an embedding> or asset (+at) with the scene models installed', 'tmep models install sceneEmbed sceneClasses --yes');
+    return { results: librarySimilar(lib.entries, emb, { k: max, kind: inp.kind as AssetKind | undefined, exclude: inp.like }) };
+  }
   if (action === 'search') {
     if (!inp.query) throw new TmepError('E_INPUT', 'library search needs query');
     return { results: librarySearch(lib.entries, inp.query, { kind: inp.kind as AssetKind | undefined, max }) };
@@ -655,7 +693,7 @@ export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<strin
     const tl = (await p.manifest()).head ? await p.timeline() : undefined;
     return libraryRecommend(lib.entries, segs, { minScore: inp.minScore, max, aspect: tl?.settings.ratio, product: inp.product }) as unknown as Record<string, unknown>;
   }
-  throw new TmepError('E_INPUT', `unknown library action "${action}"`, 'action: list|add|search|dups|recommend|licence');
+  throw new TmepError('E_INPUT', `unknown library action "${action}"`, 'action: list|add|search|dups|recommend|licence|similar|verify|audit');
 }
 
 // ---------------------------------------------------------------- structured editing plan (Phase 5.4)
@@ -794,7 +832,8 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
     const words = (await transcriptsFor(p, [inp.asset]))[inp.asset] ?? [];
     return { ok: 1, ...(cached && { cached: true }), ...editingBrief(analysis, task, words, Math.min(12, Math.max(1, inp.max ?? 6))) };
   }
-  if (inp.what === 'library') return library(ctx, { action: (inp as { action?: LibraryInput['action'] }).action ?? 'list', query: inp.find, kind: (inp as { kind?: string }).kind, max: inp.max, asset: inp.asset, minScore: (inp as { minScore?: number }).minScore, product: (inp as { product?: string }).product });
+  if (inp.what === 'library' && ['add', 'licence', 'verify'].includes(String((inp as { action?: string }).action))) throw new TmepError('E_INPUT', 'inspect is read-only: add assets with video_import {library:{…}}; licence/verify via the CLI (tmep library licence|verify)');
+  if (inp.what === 'library') { const x = inp as { action?: LibraryInput['action']; kind?: string; minScore?: number; product?: string; like?: string; at?: number }; return library(ctx, { action: x.action ?? 'list', query: inp.find, kind: x.kind, max: inp.max, asset: inp.asset, minScore: x.minScore, product: x.product, like: x.like, at: x.at }); }
   if (inp.what === 'scenes') {
     const p = await openProject(ctx.project, false);
     const tl = await p.timeline(inp.rev);

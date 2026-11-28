@@ -114,7 +114,7 @@ test('scene rules: talking head, screen with text, empty frames', () => {
   const frames: SemFrame[] = [];
   for (let t = 0; t < 12; t += 0.5) frames.push(t < 4 ? person(t, 0.4) : { t, objects: [], faces: [] });
   const a = { observed: { shots, text: [{ t: 5, text: 'Quarterly revenue grew twelve percent year over year', conf: 0.9 }, { t: 6, text: 'Three drivers of growth this quarter', conf: 0.9 }] } } as never;
-  assert.deepEqual(sceneTypes(a, frames).map((s) => s.label), ['talking-head', 'screen/slides', 'empty/landscape']);
+  assert.deepEqual(sceneTypes(a, frames).map((s) => s.label), ['talking-head', 'screen', 'scenery'], 'without scene features the detection rules apply (Phase 6 labels)');
 });
 
 test('model manager plans downloads without fetching anything', async () => {
@@ -129,4 +129,19 @@ test('model manager plans downloads without fetching anything', async () => {
     assert.equal(plan.installed.length, 0, 'no download without confirm');
     assert.equal(plan.planned[0]!.file, 'efficientdet_lite0.tflite');
   } finally { if (prev === undefined) delete process.env.FRAME_MODELS; else process.env.FRAME_MODELS = prev; }
+});
+
+test('camera motion: a pan is measured, a cut is not; subject speed is relative to the camera', async () => {
+  const { cameraMotion } = await import('../src/footage.ts');
+  const fps = 10;
+  // Content moves right by 0.6 cells/frame = 6 cells/s of 32 → ~0.19 frame widths/s.
+  const pan = seq(30, fps, (i, x, y) => texA(x - i * 0.6, y));
+  const cam = cameraMotion(pan as never, fps, [], 3);
+  assert.ok(cam.slice(1, 5).every((c) => c.dx > 0.12 && c.dx < 0.26), JSON.stringify(cam)); // window 0 straddles the synthetic edge
+  assert.deepEqual(cameraMotion(pan as never, fps, [0.3], 0.5), [{ dx: 0, dy: 0 }], 'a cut inside the window gives no motion');
+  // A person who stays put on screen while the camera pans is moving in the scene; one who moves with the pan is not.
+  const frames = Array.from({ length: 8 }, (_, i): SemFrame => ({ t: i * 0.5, objects: [['person', 0.9, 0.4 + i * 0.05, 0.2, 0.2, 0.6]] }));
+  const still = trackObjects(frames, 2, [], Array(8).fill({ dx: 0.1, dy: 0 }))[0]!;
+  const free = trackObjects(frames, 2, [])[0]!;
+  assert.ok(still.speed < 0.02 && free.speed > 0.09, `${still.speed} vs ${free.speed}`);
 });
