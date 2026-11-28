@@ -65,7 +65,7 @@ function strategySection(st: Stage, s?: Strategy): unknown {
   switch (st) {
     case 'roughcut': return [s.pacing, s.ratio, s.target];
     case 'assets': return s.assets;
-    case 'motion': return [s.graphics, s.ratio];
+    case 'motion': return [s.graphics, s.ratio, s.sfx, s.framing];
     case 'fine': return [s.zooms, s.jumpCuts, s.captions, s.effectBudgetPerMinute, s.graphics.allowed];
     case 'finish': return [s.colour, s.audio];
     default: return null;
@@ -83,10 +83,12 @@ function stageHash(pr: Production, st: Stage, upstream: string): string {
 }
 
 /** Shorten retained ranges to a target length: drop the least informative sentences first; honour keep/avoid. */
-export function fitRanges(ranges: [number, number][], words: { w: string; s: number; e: number }[], c: Constraints, moments: number[]): { ranges: [number, number][]; dropped: number } {
+export function fitRanges(ranges: [number, number][], words: { w: string; s: number; e: number }[], c: Constraints, momentsIn: (number | { t: number; t0?: number; t1?: number; confidence?: number })[]): { ranges: [number, number][]; dropped: number; beats?: [number, number][] } {
+  const moments = momentsIn.map((m) => (typeof m === 'number' ? m : m.t));
   let rs = ranges.map((r) => [...r] as [number, number]);
   for (const [a, b] of c.avoid ?? []) rs = rs.flatMap(([s, e]) => (e <= a || s >= b ? [[s, e]] : [...(s < a ? [[s, a]] : []), ...(e > b ? [[b, e]] : [])]) as [number, number][]);
   const len = () => rs.reduce((s, [a, b]) => s + b - a, 0);
+  if (c.min && len() < c.min) return extendWithBeats(rs, c, momentsIn);
   if (!c.target || len() <= c.target) return { ranges: rs.filter(([a, b]) => b - a > 0.2), dropped: 0 };
   const ss = sentences(words as never);
   const kw = new Set(keywords(words as never, 8).map((k) => k.k));
@@ -99,6 +101,28 @@ export function fitRanges(ranges: [number, number][], words: { w: string; s: num
     dropped++;
   }
   return { ranges: rs.filter(([a, b]) => b - a > 0.2).map(([a, b]) => [Math.round(a * 100) / 100, Math.round(b * 100) / 100]), dropped };
+}
+
+/**
+ * Phase 7: speech shorter than the requested minimum is extended with motivated beats — candidate moments
+ * (motion/audio evidence) of up to 3 s, strongest first, merged in source order — never with silence.
+ */
+export function extendWithBeats(ranges: [number, number][], c: Constraints, moments: (number | { t: number; t0?: number; t1?: number; confidence?: number })[]): { ranges: [number, number][]; dropped: number; beats: [number, number][] } {
+  let rs = ranges.map((r) => [...r] as [number, number]);
+  const len = () => rs.reduce((s, [a, b]) => s + b - a, 0);
+  const beats: [number, number][] = [];
+  const ms = moments.map((m) => (typeof m === 'number' ? { t: m, t0: m - 1, t1: m + 1, confidence: 0.5 } : { t: m.t, t0: m.t0 ?? m.t - 1, t1: m.t1 ?? m.t + 1, confidence: m.confidence ?? 0.5 }))
+    .filter((m) => !(c.avoid ?? []).some(([a, b]) => m.t1 > a && m.t0 < b) && !rs.some(([a, b]) => m.t >= a && m.t <= b)).sort((x, y) => y.confidence - x.confidence);
+  for (const m of ms) {
+    if (len() >= (c.min ?? 0)) break;
+    const half = Math.min(1.5, (m.t1 - m.t0) / 2), b: [number, number] = [Math.max(0, m.t - half), m.t + half];
+    beats.push([Math.round(b[0] * 100) / 100, Math.round(b[1] * 100) / 100]);
+    rs.push(b);
+    rs.sort((x, y) => x[0] - y[0]);
+    rs = rs.reduce<[number, number][]>((acc, r) => { const l = acc.at(-1); if (l && r[0] <= l[1] + 0.3) l[1] = Math.max(l[1], r[1]); else acc.push([...r]); return acc; }, []);
+    if (c.target && len() > c.target) break;
+  }
+  return { ranges: rs.filter(([a, b]) => b - a > 0.2).map(([a, b]) => [Math.round(a * 100) / 100, Math.round(b * 100) / 100]), dropped: 0, beats };
 }
 
 /** Plan items allowed by the strategy, within the effect budget (lowest confidence dropped first). */
@@ -245,10 +269,10 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         const lib = (await api.readLibrary(p)).entries;
         pr.plan = buildPlan({ asset: pr.asset, dur: a.asset.dur, analysis: a, words: words as never, library: lib, ratio: s.ratio, task: pr.genre, baseRev: (await p.manifest()).head, pause: s.pacing.removePausesOver, pad: s.pacing.padding });
         const retain = pr.plan.items.find((i) => i.kind === 'retain')!;
-        const fit = fitRanges(retain.ops[0]!.ranges as [number, number][], words, pr.constraints, a.inferred.moments.map((m) => m.t));
+        const fit = fitRanges(retain.ops[0]!.ranges as [number, number][], words, pr.constraints, a.inferred.moments);
         retain.ops[0]!.ranges = fit.ranges;
         const res = await applyOps([{ op: 'format', ratio: s.ratio }, ...retain.ops], 'rough cut');
-        return { ...res, ranges: fit.ranges.length, seconds: Math.round(fit.ranges.reduce((x, [u, v]) => x + v - u, 0) * 10) / 10, droppedSentences: fit.dropped };
+        return { ...res, ranges: fit.ranges.length, seconds: Math.round(fit.ranges.reduce((x, [u, v]) => x + v - u, 0) * 10) / 10, droppedSentences: fit.dropped, ...(fit.beats?.length && { beats: fit.beats }) };
       }
       case 'assets': case 'motion': case 'fine': case 'finish': {
         const s = pr.strategy!, plan = pr.plan!;
@@ -262,6 +286,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         }
         const ranges = plan.items.find((i) => i.kind === 'retain')!.ops[0]!.ranges as [number, number][];
         const { ops, skipped } = compilePlan({ ...plan, items }, (id) => imported.get(id) ?? id, { ranges });
+        if (st === 'motion' && s.sfx?.allowed) for (const o of [...ops]) if (o.op === 'gfx' && o.at !== undefined) ops.push({ op: 'sfx', kind: s.sfx.kind ?? 'pop', at: o.at, vol: 0.35 });
         if (st === 'fine') ops.push(s.captions.burn ? { op: 'captions', pos: s.captions.position } : { op: 'captions', style: 'none' });
         if (st === 'finish') { if (s.colour.look?.saturation) ops.push({ op: 'color', saturation: s.colour.look.saturation }); if (s.audio.music) ops.push({ op: 'music', src: s.audio.music }); }
         items = items.filter((i) => !skipped.some((x) => x.id === i.id));

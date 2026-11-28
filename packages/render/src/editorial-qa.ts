@@ -145,8 +145,11 @@ export async function editorialFindings(tl: Timeline, words: TlWord[], analyses:
 
   // ---- density, repetition and pacing (advisory, or preference when the user asked for it)
   const zooms = placed.reduce((n, p) => n + p.clip.zoom.length, 0), trans = placed.filter((p) => p.clip.trans).length;
-  const fxCount = zooms + trans + tl.gfx.length + tl.sfx.length + tl.broll.length, perMin = dur > 0 ? (fxCount / dur) * 60 : 0, lim = c.maxEffectsPerMinute ?? 12;
-  if (dur >= 15 && perMin > lim) add({ code: 'effects-density', class: c.maxEffectsPerMinute === undefined && (c.zooms === true || c.transitions === true || c.graphics === true) ? 'preference' : c.maxEffectsPerMinute !== undefined ? 'objective' : 'advisory', msg: `${fxCount} effects in ${r2(dur)} s (${r2(perMin)}/min; limit ${lim}/min)`, evidence: [`zooms ${zooms}, transitions ${trans}, graphics ${tl.gfx.length}, sfx ${tl.sfx.length}, b-roll ${tl.broll.length}`] });
+  // A sound effect on a graphic's entrance is part of that graphic, not a separate effect.
+  const gfxStarts = tl.gfx.map((g) => at(g.ref)).filter((x): x is number => x !== undefined);
+  const looseSfx = tl.sfx.filter((s) => { const t = at(s.ref); return t === undefined || !gfxStarts.some((g) => Math.abs(g - t) <= 0.3); }).length;
+  const fxCount = zooms + trans + tl.gfx.length + looseSfx + tl.broll.length, perMin = dur > 0 ? (fxCount / dur) * 60 : 0, lim = c.maxEffectsPerMinute ?? 12;
+  if (dur >= 15 && perMin > lim) add({ code: 'effects-density', class: c.maxEffectsPerMinute === undefined && (c.zooms === true || c.transitions === true || c.graphics === true) ? 'preference' : c.maxEffectsPerMinute !== undefined ? 'objective' : 'advisory', msg: `${fxCount} effects in ${r2(dur)} s (${r2(perMin)}/min; limit ${lim}/min)`, evidence: [`zooms ${zooms}, transitions ${trans}, graphics ${tl.gfx.length}, sfx ${looseSfx} (+${tl.sfx.length - looseSfx} on graphic entrances), b-roll ${tl.broll.length}`] });
   const types = placed.filter((p) => p.clip.trans).map((p) => p.clip.trans!.type);
   if (types.length >= 4 && new Set(types).size === 1 && types[0] !== 'cut') add({ code: 'repetitive-pattern', class: c.transitions === true ? 'preference' : 'advisory', msg: `every transition is "${types[0]}" (${types.length}×): a uniform effect reads as a template`, evidence: [`${types.length} transitions`] });
   const presets = tl.gfx.map((g) => [at(g.ref) ?? 0, g.preset] as const).sort((x, y) => x[0] - y[0]).map((x) => x[1]);

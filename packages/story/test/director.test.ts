@@ -46,3 +46,20 @@ test('rough cut fits a target by dropping the weakest sentences; keep/avoid hono
   assert.equal(itemsFor('fine', plan, s, 1).filter((i) => i.kind === 'moment').length, 3, 'at most 3 zooms per minute');
   assert.equal(prioritize([{ code: 'repetitive-zoom', severity: 'advisory', msg: '' }, { code: 'caption-overlap', severity: 'defect', msg: '' }, { code: 'crop-cuts-subject', severity: 'advisory', msg: '' }])[1]!.code, 'crop-cuts-subject');
 });
+
+test('Phase 7: speaker framing, motivated SFX, split screen left open, minimum length from beats', () => {
+  const spk = { ...(a as object), inferred: { moments: [], speakers: { fps: 8, faceTracks: [], segments: [{ t0: 0, t1: 3, track: 'face1', confidence: 0.1 }, { t0: 3, t1: 6, track: 'face2', confidence: 0.1 }], recommendations: [{ at: [10, 15], kind: 'split-screen', reason: 'test' }], speech: 'transcript', basis: '', ms: 1 } } } as never;
+  const d = direct({ genre: 'podcast' }, spk, words);
+  assert.equal(d.framing.mode, 'active-speaker');
+  assert.ok(d.open.some((o) => /split screen 10–15/.test(o)), 'split screen is proposed, not applied');
+  assert.equal(d.sfx.allowed, false, 'no SFX for a podcast by default');
+  const inf = direct({ genre: 'informative' }, a, words);
+  assert.deepEqual([inf.sfx.allowed, inf.sfx.on], [true, 'graphic-entrances']);
+  assert.equal(direct({ genre: 'informative', constraints: { sfx: false } }, a, words).sfx.allowed, false);
+  assert.equal(direct({ genre: 'informative', constraints: { graphics: false } }, a, words).sfx.allowed, false, 'no graphics, nothing to motivate a sound');
+  // 20 s of speech, minimum 26 s: the strongest moments outside the speech are added (≤ 3 s each), in order.
+  const fit = fitRanges([[0, 10], [20, 30]], [], { min: 26 }, [{ t: 15, t0: 14, t1: 16.5, confidence: 0.9 }, { t: 40, t0: 39, t1: 41, confidence: 0.8 }, { t: 5, confidence: 1 }]);
+  assert.deepEqual(fit.beats, [[13.75, 16.25], [39, 41]]);
+  assert.deepEqual(fit.ranges.map((r) => r[0]), [0, 13.75, 20, 39]);
+  assert.equal(fitRanges([[0, 10]], [], { min: 26, avoid: [[30, 50]] }, [{ t: 40, confidence: 0.9 }]).beats?.length, 0, 'avoid ranges are respected');
+});

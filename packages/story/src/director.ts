@@ -17,11 +17,15 @@ export type Genre = (typeof GENRES)[number];
 export interface Constraints {
   /** Target output length in seconds (the rough cut is shortened to fit; never padded). */
   target?: number;
+  /** Minimum output length (s): when speech alone is shorter, motivated non-speech beats (moments) are kept. */
+  min?: number;
   ratio?: '9:16' | '16:9' | '1:1' | '4:5';
   captions?: boolean;
   zooms?: boolean;
   graphics?: boolean;
   transitions?: boolean;
+  /** Sound effects on graphic entrances (Phase 7; default by genre). */
+  sfx?: boolean;
   music?: string;
   /** Source ranges that must stay / must go (seconds). */
   keep?: [number, number][];
@@ -44,6 +48,10 @@ export interface Strategy {
   graphics: { allowed: boolean; kinds: string[] };
   captions: { burn: boolean; position: 'upper' | 'lower'; reason: string };
   transitions: { allowed: boolean; kinds: string[] };
+  /** Phase 7: SFX only where a visual event motivates them (graphic entrances), at most one per graphic. */
+  sfx: { allowed: boolean; kind?: string; on: 'graphic-entrances' | 'none' };
+  /** Phase 7: how a multi-person frame is reframed. */
+  framing: { mode: 'active-speaker' | 'primary-subject' | 'centre'; reason: string };
   colour: { corrective: boolean; look?: { saturation?: number; reason: string } };
   audio: { compress: boolean; music?: string };
   assets: { allowed: boolean };
@@ -53,11 +61,11 @@ export interface Strategy {
   open: string[];
 }
 
-const POLICY: Record<Genre, { pause: number; zoomPerMin: number; zoomOn: Strategy['zooms']['on']; graphics: string[]; captions: boolean; transitions: string[]; budget: number; jump: Strategy['jumpCuts']; assets: boolean; cpm?: [number, number] }> = {
-  informative: { pause: 0.6, zoomPerMin: 3, zoomOn: 'strong-moments', graphics: ['stat', 'icons'], captions: true, transitions: [], budget: 6, jump: 'punch-alternate', assets: true, cpm: [6, 30] },
-  educational: { pause: 0.8, zoomPerMin: 2, zoomOn: 'strong-moments', graphics: ['stat', 'icons'], captions: true, transitions: [], budget: 4, jump: 'punch-alternate', assets: true, cpm: [3, 15] },
+const POLICY: Record<Genre, { pause: number; zoomPerMin: number; zoomOn: Strategy['zooms']['on']; graphics: string[]; captions: boolean; transitions: string[]; budget: number; jump: Strategy['jumpCuts']; assets: boolean; sfx?: string; cpm?: [number, number] }> = {
+  informative: { pause: 0.6, zoomPerMin: 3, zoomOn: 'strong-moments', graphics: ['stat', 'icons'], captions: true, transitions: [], budget: 6, jump: 'punch-alternate', assets: true, sfx: 'pop', cpm: [6, 30] },
+  educational: { pause: 0.8, zoomPerMin: 2, zoomOn: 'strong-moments', graphics: ['stat', 'icons'], captions: true, transitions: [], budget: 4, jump: 'punch-alternate', assets: true, sfx: 'pop', cpm: [3, 15] },
   podcast: { pause: 1.0, zoomPerMin: 2, zoomOn: 'strong-moments', graphics: [], captions: true, transitions: [], budget: 3, jump: 'punch-alternate', assets: false, cpm: [2, 12] },
-  product: { pause: 0.6, zoomPerMin: 2, zoomOn: 'strong-moments', graphics: ['callout'], captions: true, transitions: [], budget: 4, jump: 'punch-alternate', assets: true, cpm: [6, 24] },
+  product: { pause: 0.6, zoomPerMin: 2, zoomOn: 'strong-moments', graphics: ['callout'], captions: true, transitions: [], budget: 4, jump: 'punch-alternate', assets: true, sfx: 'click', cpm: [6, 24] },
   cinematic: { pause: 1.5, zoomPerMin: 0, zoomOn: 'none', graphics: [], captions: false, transitions: ['fade'], budget: 1, jump: 'leave', assets: false, cpm: [2, 20] },
   sports: { pause: 2.0, zoomPerMin: 4, zoomOn: 'event-candidates', graphics: [], captions: false, transitions: [], budget: 6, jump: 'leave', assets: false, cpm: [8, 40] },
 };
@@ -111,6 +119,17 @@ export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s
     }
   }
   pause = user(undefined, pause, 'pause threshold');
+  // Framing (Phase 7): the active speaker when several faces share the screen, else the primary subject.
+  const sp = a.inferred.speakers;
+  const turns = sp?.segments.length ?? 0, voices = new Set(sp?.segments.map((x) => x.track)).size;
+  const framing: Strategy['framing'] = sp && voices >= 2 ? { mode: 'active-speaker', reason: `${turns} speaking turns by ${voices} faces (mouth movement during speech)` }
+    : a.inferred.subjects?.primary ? { mode: 'primary-subject', reason: `primary subject ${a.inferred.subjects.primary}` } : { mode: 'centre', reason: 'no tracked subject' };
+  say(`framing: ${framing.mode}`, framing.reason, 'footage');
+  for (const r of sp?.recommendations ?? []) open.push(`split screen ${r.at[0]}–${r.at[1]} s: ${r.reason} (not applied automatically)`);
+  // SFX: only on graphic entrances, only for genres whose graphics carry information, never by default elsewhere.
+  const sfxAllowed = user(c.sfx, !!P.sfx && graphicsAllowed, 'sound effects');
+  if (sfxAllowed) say(`sound effect "${P.sfx ?? 'pop'}" on graphic entrances only`, 'a sound is motivated by a visual event; none on cuts or speech', c.sfx !== undefined ? 'user' : 'policy');
+  if (c.min) say(`minimum length ${c.min} s`, 'explicit user instruction: if speech is shorter, motivated beats (moments with motion or audio evidence) are kept, never silence', 'user');
   if (!c.allowBackgroundChange) say('no background change', 'never without an explicit instruction', 'policy');
   if (P.graphics.length && graphicsAllowed) open.push('graphic wording beyond spoken figures/lists (titles, names) needs the user');
   if (!c.music && g !== 'cinematic') open.push('music: none chosen (selection is a creative decision)');
@@ -122,6 +141,8 @@ export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s
     graphics: { allowed: graphicsAllowed, kinds: graphicsAllowed ? P.graphics : [] },
     captions: { burn, position, reason: capReason },
     transitions: { allowed: transitionsAllowed, kinds: transitionsAllowed ? (P.transitions.length ? P.transitions : ['fade']) : [] },
+    sfx: sfxAllowed ? { allowed: true, kind: P.sfx ?? 'pop', on: 'graphic-entrances' } : { allowed: false, on: 'none' },
+    framing,
     colour: { corrective: true, ...(look && { look }) },
     audio: { compress: !!words.length && a.asset.audio, ...(c.music && { music: c.music }) },
     assets: { allowed: P.assets && graphicsAllowed !== false },
