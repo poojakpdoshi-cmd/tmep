@@ -1,11 +1,11 @@
 {
- "date": "2026-11-28T12:25:08.771Z",
+ "date": "2026-11-28T12:32:45.140Z",
  "host": "linux x64 4 cpu, node v22.23.5",
  "media": "real video (Vlog_360P-1e5b_crf_10_ss_00_t_20.0.mp4, NewsClip_360P-1e1c_crf_10_ss_00_t_20.0.mp4; YouTube UGC, CC BY 4.0) + synthetic tones",
  "baseline": {
   "dur": 6
  },
- "pass": 87,
+ "pass": 88,
  "total": 88,
  "results": [
   {
@@ -19,8 +19,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.8,
-   "ms": 2323
+   "renderS": 1.9,
+   "ms": 2451
   },
   {
    "name": "fx zoomin",
@@ -33,8 +33,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.7,
-   "ms": 2357
+   "renderS": 1.5,
+   "ms": 2063
   },
   {
    "name": "fx zoomout",
@@ -47,8 +47,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2170
+   "renderS": 1.7,
+   "ms": 2302
   },
   {
    "name": "fx push",
@@ -61,8 +61,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.7,
-   "ms": 2227
+   "renderS": 1.8,
+   "ms": 2434
   },
   {
    "name": "fx pull",
@@ -75,8 +75,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 1998
+   "renderS": 1.4,
+   "ms": 1999
   },
   {
    "name": "fx panleft",
@@ -89,8 +89,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 2319
+   "renderS": 1.6,
+   "ms": 2174
   },
   {
    "name": "fx panright",
@@ -103,8 +103,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.7,
-   "ms": 2058
+   "renderS": 1.9,
+   "ms": 2462
   },
   {
    "name": "fx panup",
@@ -117,8 +117,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1827
+   "renderS": 2,
+   "ms": 2544
   },
   {
    "name": "fx pandown",
@@ -131,8 +131,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1923
+   "renderS": 1.6,
+   "ms": 2093
   },
   {
    "name": "fx mask rect",
@@ -146,7 +146,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 1,
-   "ms": 1531
+   "ms": 1673
   },
   {
    "name": "fx mask ellipse",
@@ -159,8 +159,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.9,
-   "ms": 1474
+   "renderS": 1.1,
+   "ms": 1672
   },
   {
    "name": "fx mask poly",
@@ -174,7 +174,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 1,
-   "ms": 1717
+   "ms": 1520
   },
   {
    "name": "fx mask concave",
@@ -187,8 +187,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1920
+   "renderS": 1.2,
+   "ms": 1773
   },
   {
    "name": "fx mask concave keyed",
@@ -201,8 +201,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.4,
-   "ms": 2043
+   "renderS": 1.7,
+   "ms": 2307
   },
   {
    "name": "fx mask bezier",
@@ -215,8 +215,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.1,
-   "ms": 1672
+   "renderS": 1.4,
+   "ms": 1996
   },
   {
    "name": "fx mask reveal",
@@ -229,8 +229,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 5.1,
-   "ms": 5638
+   "renderS": 5,
+   "ms": 5602
   },
   {
    "name": "fx blur gaussian",
@@ -243,8 +243,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.1,
-   "ms": 1944
+   "renderS": 1.2,
+   "ms": 1875
   },
   {
    "name": "fx blur directional",
@@ -257,8 +257,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.4,
-   "ms": 1907
+   "renderS": 1.5,
+   "ms": 2096
   },
   {
    "name": "fx glow",
@@ -272,7 +272,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.3,
-   "ms": 1782
+   "ms": 1956
   },
   {
    "name": "fx shadow (b-roll)",
@@ -286,8 +286,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 8.8,
-   "ms": 9386
+   "renderS": 5.2,
+   "ms": 5881
   },
   {
    "name": "fx blend multiply (b-roll)",
@@ -301,8 +301,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 7.7,
-   "ms": 8593
+   "renderS": 4.6,
+   "ms": 5173
   },
   {
    "name": "fx chromakey (b-roll)",
@@ -316,8 +316,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 3.1,
-   "ms": 3622
+   "renderS": 2.1,
+   "ms": 2632
   },
   {
    "name": "fx mblur",
@@ -330,8 +330,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.8,
-   "ms": 2508
+   "renderS": 1.2,
+   "ms": 1799
   },
   {
    "name": "fx persp",
@@ -344,8 +344,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.8,
-   "ms": 2362
+   "renderS": 1.5,
+   "ms": 2165
   },
   {
    "name": "fx chain cinematic-vignette",
@@ -358,8 +358,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.3,
-   "ms": 3112
+   "renderS": 1.9,
+   "ms": 2707
   },
   {
    "name": "fx chain soft-glow-warm",
@@ -372,8 +372,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 2100
+   "renderS": 1.3,
+   "ms": 1874
   },
   {
    "name": "fx chain dreamy-blur",
@@ -386,8 +386,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2196
+   "renderS": 1.5,
+   "ms": 2119
   },
   {
    "name": "fx chain chroma-clean (b-roll)",
@@ -401,8 +401,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 3.3,
-   "ms": 3941
+   "renderS": 2.4,
+   "ms": 3004
   },
   {
    "name": "fx chain crisp-callout (b-roll)",
@@ -416,8 +416,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 6.8,
-   "ms": 7445
+   "renderS": 5,
+   "ms": 5648
   },
   {
    "name": "jcut",
@@ -431,8 +431,8 @@
    "audioDiff": 0.172,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.1,
-   "ms": 2696
+   "renderS": 1.3,
+   "ms": 2776
   },
   {
    "name": "lcut",
@@ -442,11 +442,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 5.465,
+   "audioDiff": 5.468,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.2,
-   "ms": 1734
+   "renderS": 1.3,
+   "ms": 1919
   },
   {
    "name": "ramp",
@@ -456,11 +456,11 @@
    ],
    "ok": true,
    "videoDiff": 50.37,
-   "audioDiff": 1.081,
+   "audioDiff": 1.099,
    "dur": 5.5,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1885
+   "renderS": 1.4,
+   "ms": 2069
   },
   {
    "name": "freeze",
@@ -474,7 +474,7 @@
    "dur": 7,
    "baseDur": 6,
    "renderS": 1.6,
-   "ms": 2174
+   "ms": 2214
   },
   {
    "name": "reverse",
@@ -484,11 +484,11 @@
    ],
    "ok": true,
    "videoDiff": 59.21,
-   "audioDiff": 1.995,
+   "audioDiff": 1.999,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.2,
-   "ms": 1835
+   "renderS": 1.5,
+   "ms": 2063
   },
   {
    "name": "punch",
@@ -501,8 +501,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.2,
-   "ms": 2727
+   "renderS": 2.4,
+   "ms": 2885
   },
   {
    "name": "matchcut",
@@ -512,11 +512,11 @@
    ],
    "ok": true,
    "videoDiff": 15.31,
-   "audioDiff": 0.698,
+   "audioDiff": 0.696,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 3.7,
-   "ms": 4154
+   "renderS": 3.5,
+   "ms": 4400
   },
   {
    "name": "reframe (9:16)",
@@ -530,8 +530,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1,
-   "ms": 3016
+   "renderS": 1.5,
+   "ms": 3299
   },
   {
    "name": "stabilize",
@@ -544,8 +544,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2290
+   "renderS": 1.7,
+   "ms": 2385
   },
   {
    "name": "splitscreen",
@@ -558,8 +558,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 4.1,
-   "ms": 4628
+   "renderS": 4.7,
+   "ms": 5331
   },
   {
    "name": "pip",
@@ -572,8 +572,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 5.2,
-   "ms": 5778
+   "renderS": 4.8,
+   "ms": 5381
   },
   {
    "name": "parallax",
@@ -586,8 +586,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 3.5,
-   "ms": 3942
+   "renderS": 3.8,
+   "ms": 4242
   },
   {
    "name": "color exposure=0.6",
@@ -601,7 +601,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 0.9,
-   "ms": 1493
+   "ms": 1645
   },
   {
    "name": "color contrast=1.6",
@@ -615,7 +615,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 1,
-   "ms": 1753
+   "ms": 1671
   },
   {
    "name": "color temp=3000",
@@ -629,7 +629,7 @@
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.9,
-   "ms": 2628
+   "ms": 2590
   },
   {
    "name": "color tint=0.5",
@@ -642,8 +642,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.6,
-   "ms": 3181
+   "renderS": 2.9,
+   "ms": 3585
   },
   {
    "name": "color saturation=0.2",
@@ -656,8 +656,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.8,
-   "ms": 1541
+   "renderS": 1,
+   "ms": 1689
   },
   {
    "name": "color vibrance=0.8",
@@ -670,8 +670,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2,
-   "ms": 2568
+   "renderS": 1.9,
+   "ms": 2506
   },
   {
    "name": "color highlights=-0.6",
@@ -684,8 +684,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2172
+   "renderS": 1.5,
+   "ms": 2078
   },
   {
    "name": "color shadows=1",
@@ -698,8 +698,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 1985
+   "renderS": 1.6,
+   "ms": 2309
   },
   {
    "name": "color vignette=0.8",
@@ -712,8 +712,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.2,
-   "ms": 1744
+   "renderS": 1,
+   "ms": 1558
   },
   {
    "name": "color inputColorSpace=bt601",
@@ -726,8 +726,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1981
+   "renderS": 1.1,
+   "ms": 1727
   },
   {
    "name": "color curves",
@@ -740,8 +740,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2297
+   "renderS": 1.1,
+   "ms": 1712
   },
   {
    "name": "color lut",
@@ -754,8 +754,8 @@
    "audioDiff": 0,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.9,
-   "ms": 3492
+   "renderS": 1.8,
+   "ms": 2389
   },
   {
    "name": "audio c2 deess=1",
@@ -768,8 +768,8 @@
    "audioDiff": 0.172,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.2,
-   "ms": 1893
+   "renderS": 1.1,
+   "ms": 1685
   },
   {
    "name": "audio c1 eq=dialogue",
@@ -779,11 +779,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.14,
+   "audioDiff": 0.139,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1,
-   "ms": 1586
+   "renderS": 1.1,
+   "ms": 1616
   },
   {
    "name": "audio c1 eq=warm",
@@ -793,11 +793,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.126,
+   "audioDiff": 0.128,
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.2,
-   "ms": 1757
+   "ms": 1762
   },
   {
    "name": "audio c1 eq=crisp",
@@ -807,11 +807,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.135,
+   "audioDiff": 0.134,
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.2,
-   "ms": 1728
+   "ms": 1791
   },
   {
    "name": "audio c1 denoise=0.9",
@@ -821,11 +821,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.166,
+   "audioDiff": 0.165,
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.1,
-   "ms": 1671
+   "ms": 1665
   },
   {
    "name": "audio c1 comp=heavy",
@@ -833,13 +833,13 @@
    "did": [
     "audio c1"
    ],
-   "ok": false,
+   "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.047,
+   "audioDiff": 0.152,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.4,
-   "ms": 1966
+   "renderS": 1.3,
+   "ms": 1846
   },
   {
    "name": "audio c1 hp=500",
@@ -849,11 +849,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 1.538,
+   "audioDiff": 1.539,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.1,
-   "ms": 1710
+   "renderS": 1.2,
+   "ms": 1810
   },
   {
    "name": "audio c1 lp=1000",
@@ -863,11 +863,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.645,
+   "audioDiff": 0.644,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1838
+   "renderS": 1.2,
+   "ms": 1726
   },
   {
    "name": "audio c1 fadeIn=1.5",
@@ -877,11 +877,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.303,
+   "audioDiff": 0.304,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.2,
-   "ms": 1887
+   "renderS": 1.1,
+   "ms": 1757
   },
   {
    "name": "audio c1 fadeOut=1.5",
@@ -891,11 +891,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.326,
+   "audioDiff": 0.327,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.3,
-   "ms": 1984
+   "renderS": 1.4,
+   "ms": 2012
   },
   {
    "name": "audio master lufs -24",
@@ -908,8 +908,8 @@
    "audioDiff": 0.678,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 2580
+   "renderS": 1.9,
+   "ms": 2832
   },
   {
    "name": "audio master target podcast",
@@ -919,11 +919,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 0.206,
+   "audioDiff": 0.205,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.9,
-   "ms": 1669
+   "renderS": 1.1,
+   "ms": 2270
   },
   {
    "name": "audio master limiter",
@@ -933,11 +933,11 @@
    ],
    "ok": true,
    "videoDiff": 0,
-   "audioDiff": 1.901,
+   "audioDiff": 1.903,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.9,
-   "ms": 1713
+   "renderS": 2.1,
+   "ms": 3434
   },
   {
    "name": "transition fade",
@@ -947,11 +947,11 @@
    ],
    "ok": true,
    "videoDiff": 25.09,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.7,
-   "ms": 2182
+   "renderS": 1.6,
+   "ms": 2234
   },
   {
    "name": "transition dissolve",
@@ -961,11 +961,11 @@
    ],
    "ok": true,
    "videoDiff": 25.57,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.7,
-   "ms": 2329
+   "renderS": 2.3,
+   "ms": 3128
   },
   {
    "name": "transition fadeblack",
@@ -975,11 +975,11 @@
    ],
    "ok": true,
    "videoDiff": 47.54,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.4,
-   "ms": 1914
+   "renderS": 2.5,
+   "ms": 3156
   },
   {
    "name": "transition fadewhite",
@@ -989,11 +989,11 @@
    ],
    "ok": true,
    "videoDiff": 48.94,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 2082
+   "renderS": 2.2,
+   "ms": 2977
   },
   {
    "name": "transition wipeleft",
@@ -1003,11 +1003,11 @@
    ],
    "ok": true,
    "videoDiff": 24.09,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 1970
+   "renderS": 1.6,
+   "ms": 2296
   },
   {
    "name": "transition wiperight",
@@ -1017,11 +1017,11 @@
    ],
    "ok": true,
    "videoDiff": 25.6,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 1990
+   "renderS": 1.9,
+   "ms": 2694
   },
   {
    "name": "transition slideleft",
@@ -1031,11 +1031,11 @@
    ],
    "ok": true,
    "videoDiff": 26.9,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.6,
-   "ms": 2075
+   "renderS": 1.5,
+   "ms": 2005
   },
   {
    "name": "transition slideright",
@@ -1045,11 +1045,11 @@
    ],
    "ok": true,
    "videoDiff": 26.73,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 1950
+   "renderS": 2.3,
+   "ms": 3163
   },
   {
    "name": "transition slideup",
@@ -1059,11 +1059,11 @@
    ],
    "ok": true,
    "videoDiff": 35.06,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.4,
-   "ms": 1895
+   "renderS": 2.1,
+   "ms": 2589
   },
   {
    "name": "transition smoothleft",
@@ -1073,11 +1073,11 @@
    ],
    "ok": true,
    "videoDiff": 28.59,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
    "renderS": 1.7,
-   "ms": 2151
+   "ms": 2250
   },
   {
    "name": "transition smoothright",
@@ -1087,11 +1087,11 @@
    ],
    "ok": true,
    "videoDiff": 29.18,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.5,
-   "ms": 2059
+   "renderS": 1.6,
+   "ms": 2175
   },
   {
    "name": "transition smoothup",
@@ -1101,11 +1101,11 @@
    ],
    "ok": true,
    "videoDiff": 30.16,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 1.8,
-   "ms": 2420
+   "renderS": 1.7,
+   "ms": 2360
   },
   {
    "name": "transition circleopen",
@@ -1115,11 +1115,11 @@
    ],
    "ok": true,
    "videoDiff": 31.97,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.3,
-   "ms": 3153
+   "renderS": 1.8,
+   "ms": 2399
   },
   {
    "name": "transition zoomin",
@@ -1129,11 +1129,11 @@
    ],
    "ok": true,
    "videoDiff": 28.11,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.4,
-   "ms": 2865
+   "renderS": 1.7,
+   "ms": 2349
   },
   {
    "name": "transition radial",
@@ -1143,11 +1143,11 @@
    ],
    "ok": true,
    "videoDiff": 28.47,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.1,
-   "ms": 2725
+   "renderS": 1.5,
+   "ms": 1999
   },
   {
    "name": "transition luma",
@@ -1157,11 +1157,11 @@
    ],
    "ok": true,
    "videoDiff": 24.87,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 2.2,
-   "ms": 2797
+   "renderS": 1.4,
+   "ms": 1977
   },
   {
    "name": "transition cinematic-dissolve",
@@ -1171,11 +1171,11 @@
    ],
    "ok": true,
    "videoDiff": 25.57,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
    "renderS": 0.4,
-   "ms": 868
+   "ms": 1001
   },
   {
    "name": "transition whip-pan-left",
@@ -1185,11 +1185,11 @@
    ],
    "ok": true,
    "videoDiff": 28.59,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.4,
-   "ms": 930
+   "renderS": 0.3,
+   "ms": 793
   },
   {
    "name": "transition whip-pan-right",
@@ -1199,11 +1199,11 @@
    ],
    "ok": true,
    "videoDiff": 29.18,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.5,
-   "ms": 1213
+   "renderS": 0.4,
+   "ms": 834
   },
   {
    "name": "transition luma-fade",
@@ -1213,11 +1213,11 @@
    ],
    "ok": true,
    "videoDiff": 24.87,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
    "renderS": 0.4,
-   "ms": 1460
+   "ms": 788
   },
   {
    "name": "transition flash-cut",
@@ -1227,11 +1227,11 @@
    ],
    "ok": true,
    "videoDiff": 48.94,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.5,
-   "ms": 1010
+   "renderS": 0.4,
+   "ms": 851
   },
   {
    "name": "transition iris-open",
@@ -1241,11 +1241,11 @@
    ],
    "ok": true,
    "videoDiff": 31.97,
-   "audioDiff": 0.939,
+   "audioDiff": 0.934,
    "dur": 6,
    "baseDur": 6,
-   "renderS": 0.4,
-   "ms": 988
+   "renderS": 0.3,
+   "ms": 673
   }
  ]
 }

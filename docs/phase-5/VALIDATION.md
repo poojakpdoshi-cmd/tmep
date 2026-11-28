@@ -38,18 +38,19 @@ source was pulled below the compressor threshold. Staging is now upward only; th
 |---|---|---|
 | Shot boundaries, 33 CC BY clips | INTELLIGENCE.md §2, `evidence/transitions-eval.json` | Phase 4 held-out P/R 0.89/0.74 → Phase 5 0.94/0.94 (all clips; thresholds revised on held-out errors) |
 | Gradual transitions | same | 5/6 found, 0 false (new in Phase 5) |
-| Effects in complete renders on real video | `bench/phase4/effect-matrix.ts --real=…` → `evidence/effect-matrix-real.json` | MATRIX_RESULT |
+| Effects in complete renders on real video | `bench/phase4/effect-matrix.ts --real=…` → `evidence/effect-matrix-real.json` (real picture from 2 UGC clips; synthetic tones because the clips have no audio) | first run 87/88 (gain-staging regression, fixed); final **88/88** measurable changes. The matrix proves an effect acts on the render, not that it looks right |
 | Audio analysis / ASR on real footage | — | **not evaluated**: the licensed clips are audio-removed; ASR model hosts are blocked |
 
 ## Gates
 
 | Gate | Evidence | Result |
 |---|---|---|
-| All tests pass | `npm run typecheck`; `npm test`; `npm run test:e2e` | typecheck pass; unit **254/254**; e2e E2E_RESULT |
+| All tests pass | `npm run typecheck`; `npm test`; `npm run test:e2e` | typecheck pass; unit **255/255**; e2e **79/79** (local) |
 | CI 6/6 | draft PR CI (ubuntu/windows/macos × Node 22/24) | CI_RESULT |
 | Real-footage results separate from synthetic | INTELLIGENCE.md §2–3 vs `evidence/footage-eval-synthetic.json` | pass |
 | Model accuracy / runtime / memory / storage measured | INTELLIGENCE.md §3–4 | measured (scene types 0.39; 45–78 ms/frame; 256–292 MB; 23.1 MB models) |
-| Public API / MCP / CLI tested | `tests/phase5.test.ts` (API), MCP schemas through the existing tool-schema tests, CLI commands exercised below | pass |
+| Workload benchmark | WORKLOAD_BENCHMARK.md, `evidence/workload-*.json` | measured payloads (provider tokens not measured) |
+| Public API / MCP / CLI tested | `tests/phase5.test.ts` (API), MCP schemas through the existing tool-schema tests, CLI `import`, `edit`, `editplan build/compile`, `inspect footage/qa`, `render --frames`, `models` exercised on a real clip (INTELLIGENCE.md §3) | pass |
 | Cache invalidation and failure handling | layered key includes model files; unavailable adapters not cached (`tests/phase5.test.ts`: missing models → `unavailable`, then plan); worker failure → `E_ANALYSIS_FAILED`; checksum → `E_DOWNLOAD` | pass |
 | No fabricated observations | adapters report `unavailable` with a remedy; event candidates carry `candidate only`; product demos only from `genuine` assets (test) | pass |
 | No unsupported quality claims | scene types published with their measured 9/23 accuracy in every brief; event recognition explicitly not claimed | pass |

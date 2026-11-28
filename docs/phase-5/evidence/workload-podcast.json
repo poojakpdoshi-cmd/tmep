@@ -1,0 +1,42 @@
+{
+ "media": {
+  "file": "Vlog_360P-2e9d_crf_10_ss_00_t_20.0.mp4",
+  "dur": 20,
+  "size": "640x360"
+ },
+ "conventional": {
+  "toolCalls": 2,
+  "agentWrittenTok": 1842,
+  "agentReadTok": 248646,
+  "runtimeMs": 4308,
+  "note": "write script + run; output still needs tracking, scene, event and reframe reasoning"
+ },
+ "conventionalLean": {
+  "toolCalls": 2,
+  "agentWrittenTok": 1902,
+  "agentReadTok": 6908
+ },
+ "frame": {
+  "toolCalls": 1,
+  "agentWrittenTok": 52,
+  "agentReadTok": 398,
+  "runtimeMs": 5465,
+  "cachedMs": 47,
+  "cacheBytes": 9859
+ },
+ "briefKeys": [
+  "ok",
+  "brief",
+  "task",
+  "media",
+  "observed",
+  "inferred",
+  "unavailable",
+  "speakers",
+  "singleShots",
+  "groupShots",
+  "tighten",
+  "captions",
+  "note"
+ ]
+}
