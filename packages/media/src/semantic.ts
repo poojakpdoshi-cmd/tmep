@@ -440,8 +440,9 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
   const t0 = Date.now();
   const av = await semanticAvailability(base);
   // Scene features need two more models; without them scene types fall back to detection rules.
-  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses'])).models.every((m) => m.verified);
-  const tasks = [...base, ...(sceneOk ? ['scene'] : [])];
+  // (Phase 7: the classifier also uses hand detections, so the gesture model is part of the scene set.)
+  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses', 'gestures'])).models.every((m) => m.verified);
+  const tasks = [...base, ...(sceneOk ? ['scene', ...(base.includes('gestures') ? [] : ['gestures'])] : [])];
   if (!av.ok) return { reason: av.reason, ms: Date.now() - t0, loadMs: 0, perFrameMs: 0 };
   const seconds = a.asset.analyzedSeconds;
   const fps = opts.fps ?? semanticFps(seconds);
