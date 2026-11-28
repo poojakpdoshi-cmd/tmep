@@ -127,8 +127,17 @@ export function placeBox(w: number, h: number, prefer: { x: number; y: number },
   return { box: best!.box, overlap: best!.overlap };
 }
 
+/**
+ * Height a single unwrapped line needs on this platform: the font's ascent + descent (what the scene
+ * validator checks) or the line height, whichever is larger, plus 2 px of rounding headroom.
+ */
+function singleLineHeight(c: { measureText: (t: string) => { fontBoundingBoxAscent: number; fontBoundingBoxDescent: number } }, text: string, size: number, lineHeight: number): number {
+  const m = c.measureText(text);
+  return Math.max(size * lineHeight, m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) + 2;
+}
+
 /** Largest font size ≤ max whose measured wrap fits boxW×boxH in ≤ maxLines lines. */
-export function fitText(text: string, weight: 'regular' | 'bold' | 'heavy', boxW: number, boxH: number, max: number, min: number, maxLines: number, lineHeight = 1.22): { size: number; lines: number; shrunk: boolean } {
+export function fitText(text: string, weight: 'regular' | 'bold' | 'heavy', boxW: number, boxH: number, max: number, min: number, maxLines: number, lineHeight = 1.22): { size: number; lines: number; shrunk: boolean; lineH: number } {
   const font = resolveFont(weight);
   const { createCanvas, GlobalFonts } = canvasModule();
   if (font.file) GlobalFonts.registerFromPath(font.file, font.name);
@@ -137,9 +146,10 @@ export function fitText(text: string, weight: 'regular' | 'bold' | 'heavy', boxW
   for (let s = top; s >= min; s -= 1) {
     c.font = `${weight === 'regular' ? '' : '700 '}${s}px "${font.name}"`;
     const lines = wrapMeasuredText(c, text, boxW);
-    if (lines.length <= maxLines && lines.length * s * lineHeight <= boxH) return { size: s, lines: lines.length, shrunk: s < top };
+    if (lines.length <= maxLines && lines.length * s * lineHeight <= boxH) return { size: s, lines: lines.length, shrunk: s < top, lineH: singleLineHeight(c, text, s, lineHeight) };
   }
-  return { size: min, lines: maxLines, shrunk: true };
+  c.font = `${weight === 'regular' ? '' : '700 '}${min}px "${font.name}"`;
+  return { size: min, lines: maxLines, shrunk: true, lineH: singleLineHeight(c, text, min, lineHeight) };
 }
 
 /**
@@ -229,7 +239,7 @@ export function compilePreset(raw: unknown, defaults: { ratio?: Ratio; captionPo
         nameFit = fitText(name, P.head, (w - 0.06) * W, 1e6, px(P.scale.sub * 1.5) * scale, 20, 1);
         // Legibility floor for the role line: 1.3% of frame height (≈25 px at 1080×1920).
         roleFit = inp.subtitle ? fitText(inp.subtitle, P.body, (w - 0.06) * W, 1e6, Math.max(px(0.013), px(P.scale.label) * scale), Math.round(px(0.013)), 1) : undefined;
-        h = (nameFit.size * 1.22 + (roleFit ? roleFit.size * 1.22 : 0)) / H + 0.03;
+        h = (nameFit.lineH + (roleFit ? roleFit.lineH : 0)) / H + 0.03;
         prefer = { x: side === 'left' ? area.x - area.w / 2 + w / 2 : area.x + area.w / 2 - w / 2, y: capTop - h / 2 - 0.015 };
         const band: Box = { x: area.x, y: (0.5 + capTop - 0.015) / 2, w: area.w, h: capTop - 0.015 - 0.5 };
         const textW = Math.max(balancedWidth(name, P.head, nameFit.size, (w - 0.06) * W), roleFit ? balancedWidth(inp.subtitle!, P.body, roleFit.size, (w - 0.06) * W) : 0) / W + 0.07;
@@ -257,7 +267,8 @@ export function compilePreset(raw: unknown, defaults: { ratio?: Ratio; captionPo
         b = r.box;
         if (r.overlap > 0) corrections.push({ code: 'unavoidable-overlap', msg: `lower third overlaps a reserved region by ${(r.overlap * 100).toFixed(2)}% of the frame; consider a smaller avoid region (face only)` });
       }
-      const nH = (nameFit.size * 1.22) / H, rH = roleFit ? (roleFit.size * 1.22) / H : 0;
+      // Single-line boxes get font-ascent headroom (platform fonts differ in ascent + descent).
+      const nH = nameFit.lineH / H, rH = roleFit ? roleFit.lineH / H : 0;
       if (Math.abs(b.y - prefer.y) > 0.02) corrections.push({ code: 'placement', msg: `lower third placed at y=${b.y.toFixed(2)}` });
       const left = b.x - b.w / 2;
       const pw = b.w;

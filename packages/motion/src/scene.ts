@@ -147,7 +147,7 @@ function textFits(
   size: number,
   w: number,
   h: number,
-  opts: { wrap?: boolean; lineHeight?: number; pad?: number; hasBg?: boolean; maxLines?: number } = {},
+  opts: { wrap?: boolean; lineHeight?: number; pad?: number; hasBg?: boolean; maxLines?: number; bold?: boolean } = {},
 ): boolean {
   let canvas: typeof import('@napi-rs/canvas');
   try {
@@ -160,7 +160,8 @@ function textFits(
     metricFonts.add(font.file);
   }
   const ctx = canvas.createCanvas(1, 1).getContext('2d');
-  ctx.font = `${size}px "${font.name}"`;
+  // Measure with the weight the Canvas renderer draws with (bold styles are drawn at 700).
+  ctx.font = `${opts.bold ? '700 ' : ''}${size}px "${font.name}"`;
   const availW = Math.max(8, w - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
   const availH = Math.max(8, h - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
   if (opts.wrap) {
@@ -362,7 +363,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
             if (layer.kind === 'text') {
               const font = resolveFont(style?.font ?? 'regular');
               const fontSize = Math.round(style?.size ?? 48);
-              if (!textFits(layer.text, font, fontSize, width, height, { wrap: layer.wrap, lineHeight: layer.lineHeight, pad: layer.pad, hasBg: Boolean(layer.bg), maxLines: layer.maxLines })) {
+              if (!textFits(layer.text, font, fontSize, width, height, { wrap: layer.wrap, lineHeight: layer.lineHeight, pad: layer.pad, hasBg: Boolean(layer.bg), maxLines: layer.maxLines, bold: style?.font !== 'regular' })) {
                 report('clipping', [layer.id], at, `${name}: text clips its box`);
               }
               paths.set(layerIndex, {
