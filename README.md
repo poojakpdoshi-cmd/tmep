@@ -6,21 +6,13 @@
 
 See [AGENTS.md](AGENTS.md), [INSTRUCTIONS.md](INSTRUCTIONS.md), [QUALITY_STANDARDS.md](QUALITY_STANDARDS.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [ROADMAP.md](ROADMAP.md) for canonical agent instructions and quality gates.
 
-## Focused text-to-image explainer preview
-
-[Download the 1080×1920, 60 fps silent preview](preview/trial-visual-only.mp4) · [View the contact sheet](preview/contact-sheet.png)
-
-The preview has no narration. Voiceover synchronization and real presenter footage still need validation; see the quality report for verified results and limitations.
-
-The rescued 60 fps workflow and its limitations are documented in [RENDER_GUIDE.md](RENDER_GUIDE.md), [AUDIT.md](AUDIT.md), [ARCHITECTURE.md](ARCHITECTURE.md) and [QUALITY_REPORT.md](QUALITY_REPORT.md). Start with `node examples/explainer/render.mjs examples/explainer/preview.json`. Without narration, this produces a clearly labeled silent design preview. The existing editing engine described below remains available.
-
 **Turn raw footage into a finished reel with a handful of tool calls, not thousands of tokens of code.**
 
-TMEP is a local-first video editing engine built for AI coding agents (Claude Code,
+FRAME is local-first video-production infrastructure for AI agents (Claude Code,
 Claude Desktop, OpenAI Codex, Cursor, Google Antigravity, any MCP client, or any agent
-that can run a shell command). The agent makes editorial decisions; TMEP does the heavy
-lifting locally and deterministically: transcription, rough cut, captions, motion
-graphics, zooms, sound design, mixing and rendering.
+that can run a shell command). The agent makes the ambiguous creative decisions; FRAME does
+the deterministic work locally: transcription, rough cut, captions, editing, colour, audio
+post, motion design and composition, rendering and quality inspection.
 
 Its core idea is the **Token-Minimal Editing Protocol (TMEP)**: media, transcripts,
 timelines and renders stay on disk behind short ids; the agent sends small intent-level
@@ -36,7 +28,7 @@ video_render {}                                        -> {"state":"done","out":
 ```
 
 On a measured benchmark task (raw clip -> 20 s captioned, animated reel + one revision),
-the model wrote **217 tokens with TMEP vs 17,937** for a conventional shell-and-files
+the model wrote **217 tokens with FRAME vs 17,937** for a conventional shell-and-files
 workflow, and cumulative context was **~6x lower** ([details and caveats](docs/BENCHMARKS.md)).
 
 ## Reference-reel cut/pacing analysis (Phase 2: initial module)
@@ -57,7 +49,7 @@ flashes for cuts and miss crossfades or very short edits. It does not detect
 typography, animation style, grade, camera movement or music beats. Analysis
 samples at 15 fps and 320 pixels wide by default; scanning is bounded to 120
 seconds by default (300 maximum). Use its pacing statistics as guidance, not
-as proof that TMEP can automatically reproduce another creator's editing style.
+as proof that FRAME can automatically reproduce another creator's editing style.
 
 ## Status
 
@@ -71,17 +63,23 @@ as proof that TMEP can automatically reproduce another creator's editing style.
 | Declarative timeline: cuts, trims, speed, multi-clip, b-roll cutaways, transitions, undo/redo, diffs | Done, tested |
 | Anchors (`@phrase`, `w:N`, `c:ID`) that keep effects synced through later edits | Done, tested |
 | Captions: kinetic, karaoke, clean, boxed; corrections; safe-zone layout | Done, tested |
-| Motion presets: title, lower third, icon cards, stat count-up, badge, bar chart, progress bar, CTA, keyword, icon, flash | Done, tested |
+| Motion presets (ASS, legacy): title, lower third, icon cards, stat count-up, badge, bar chart, progress bar, CTA, keyword, icon, flash | Done, tested |
+| Canvas motion engine: kinetic text, path morphing, motion paths, reveals, 2.5D depth/parallax, motion blur, depth of field, 14 easing curves | Done, pixel-tested (Phase 4A) |
+| Composition presets with placement solver and style profiles: kinetic title, lower third, callout, UI demo, animated diagram, dynamic chart | Done, validated + rendered (Phase 4A) |
+| Pro editing: J/L-cuts, speed ramps, freeze, reverse, punch, match cut, reframe, stabilize, split screen, PiP, parallax | Done; every op verified in full renders, A/V sync measured (Phase 4 Stage 4.0) |
+| Effects & colour: masks (incl. frame-accurate animated concave/bezier), blur, glow, shadow, blend, chroma key, LUTs, grades, BT.601/2020/PQ/HLG → BT.709 | Done; colour checked against reference media |
+| Audio post: dialogue EQ, denoise, de-ess (static notch), compression, limiter, two-pass loudness, platform targets | Done |
+| FRAME Inspector (`video_inspect {what:"qa"}`) | Done |
 | 30 original vector icons + concept dictionary | Done |
 | Storytelling engine (lists -> icons, numbers -> stats, steps, CTA, emphasis zooms) with density limits | Done, tested |
 | Templates: reel, short, talking_head, tutorial, product_demo, cinematic_explainer, youtube | Done, tested |
 | Audio: crossfades, edge de-clicking, ducked music bed, synthesized SFX, loudness normalization | Done, tested |
 | Rendering: content-hashed segments, previews, segment previews, alpha overlays, background jobs, progress, cancellation, verification | Done, tested |
-| MCP server (8 tools, dual-era: 2024-11-05 .. 2025-11-25 handshake + 2026-07-28 stateless) | Done, protocol-tested over stdio; client configs documented, **not tested inside each client** |
+| MCP server (10 tools, dual-era: 2024-11-05 .. 2025-11-25 handshake + 2026-07-28 stateless) | Done, protocol-tested over stdio; client configs documented, **not tested inside each client** |
 | CLI | Done, used by tests and examples |
 | Token benchmark | Done; heuristic tokenizer offline, exact counts via `--anthropic` (not run here) |
-| GitHub Actions (Linux/Windows/macOS x Node 22/24) | Workflow written; **not yet run** |
-| Smart reframing (face/motion-aware crop), motion tracking | Planned |
+| GitHub Actions (Linux/Windows/macOS x Node 22/24) | Running on every PR |
+| Footage intelligence (shot/scene segmentation, subject regions, OCR, candidate moments) | Phase 4B |
 | Remotion bridge for React overlays (optional; license review needed) | Planned |
 | Embedding-based semantic search (current search is BM25 + concept expansion) | Planned |
 | Hardware encoders (NVENC/QSV/VideoToolbox) | Encoder args present, opt-in, untested |
@@ -109,7 +107,7 @@ node bin\tmep.js doctor
 node examples\demo\demo.ts
 ```
 
-No `npm install` is needed to run TMEP (zero runtime dependencies). `npm install` only adds
+`npm install` adds the one runtime dependency (`@napi-rs/canvas`, for Canvas motion graphics) and
 the TypeScript compiler and Node types for development.
 
 ### Speech-to-text (optional, local)
@@ -172,7 +170,7 @@ $T undo                                         # back to the previous revision
 ## How it works
 
 ```
-agent --(8 MCP tools / CLI)--> engine --> core (timeline, ops, anchors, revisions on disk)
+agent --(10 MCP tools / CLI)--> engine --> core (timeline, ops, anchors, revisions on disk)
                                      \--> speech (whisper.cpp | faster-whisper | import)
                                      \--> story (templates + deterministic storytelling rules)
                                      \--> render --> motion (captions/graphics compiled to ASS)
@@ -198,8 +196,8 @@ More: [Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) ·
 ```bash
 npm install          # dev tools only
 npm run typecheck    # tsc 7, strict
-npm test             # 33 unit + MCP protocol tests (no FFmpeg needed)
-npm run test:e2e     # 3 end-to-end suites rendering real video with FFmpeg (~2 min)
+npm test             # unit, protocol and render tests (233 at Phase 4A)
+npm run test:e2e     # end-to-end suites rendering real video with FFmpeg (~7 min)
 npm run bench        # token benchmark -> bench/results/latest.json
 ```
 
@@ -207,13 +205,20 @@ npm run bench        # token benchmark -> bench/results/latest.json
 
 - Speech recognition accuracy and timing precision depend on the engine/model you install
   and were not measured in this repository.
-- Graphics are limited to what libass can animate (transforms, movement, fades, clips, vector
-  shapes, text). No arbitrary CSS, WebGL or 3D.
+- Motion graphics are 2D/2.5D (Canvas and libass). No arbitrary CSS, WebGL or true 3D.
 - The planner's editorial choices are heuristics. Review the preview; adjust with ops.
-- Reframing 16:9 to 9:16 uses a fixed crop centre per clip (`frame cx=...`); automatic
-  subject tracking is planned.
+- Reframing uses a crop centre per clip or keyframes (`reframe`); automatic subject tracking
+  is not implemented yet (Phase 4B).
 - Fonts come from your system. For the intended look install Montserrat, Poppins or Inter
-  (all OFL). TMEP falls back to Arial Black / Segoe UI / DejaVu.
+  (all OFL). FRAME falls back to Arial Black / Segoe UI / DejaVu.
+
+## Legacy: focused text-to-image explainer preview
+
+[Download the 1080×1920, 60 fps silent preview](preview/trial-visual-only.mp4) · [View the contact sheet](preview/contact-sheet.png)
+
+The preview has no narration. Voiceover synchronization and real presenter footage still need validation; see the quality report for verified results and limitations.
+
+The rescued 60 fps workflow and its limitations are documented in [RENDER_GUIDE.md](RENDER_GUIDE.md), [AUDIT.md](AUDIT.md), [ARCHITECTURE.md](ARCHITECTURE.md) and [QUALITY_REPORT.md](QUALITY_REPORT.md). Start with `node examples/explainer/render.mjs examples/explainer/preview.json`. Without narration, this produces a clearly labeled silent design preview. The existing editing engine described below remains available.
 
 ## License
 

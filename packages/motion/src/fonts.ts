@@ -106,7 +106,7 @@ export function readFontFace(file: string, faceOffset = 0): FontFace | undefined
 
 export function fontDirs(): string[] {
   const home = os.homedir();
-  const extra = (process.env.TMEP_FONTS_DIR ?? '').split(path.delimiter).filter(Boolean);
+  const extra = ((process.env.FRAME_FONTS_DIR ?? process.env.TMEP_FONTS_DIR) ?? '').split(path.delimiter).filter(Boolean);
   if (process.platform === 'win32') {
     const win = process.env.WINDIR ?? 'C:\\Windows';
     return [...extra, path.join(win, 'Fonts'), path.join(process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'Microsoft', 'Windows', 'Fonts')];

@@ -24,8 +24,8 @@ export function ffmpegInfo(): Promise<FfmpegInfo> {
 }
 
 async function detect(): Promise<FfmpegInfo> {
-  const ffmpeg = process.env.TMEP_FFMPEG || 'ffmpeg';
-  const ffprobe = process.env.TMEP_FFPROBE || (process.env.TMEP_FFMPEG ? path.join(path.dirname(ffmpeg), path.basename(ffmpeg).replace(/ffmpeg/i, 'ffprobe')) : 'ffprobe');
+  const ffmpeg = (process.env.FRAME_FFMPEG ?? process.env.TMEP_FFMPEG) || 'ffmpeg';
+  const ffprobe = (process.env.FRAME_FFPROBE ?? process.env.TMEP_FFPROBE) || ((process.env.FRAME_FFMPEG ?? process.env.TMEP_FFMPEG) ? path.join(path.dirname(ffmpeg), path.basename(ffmpeg).replace(/ffmpeg/i, 'ffprobe')) : 'ffprobe');
   let ver;
   try {
     ver = await run(ffmpeg, ['-hide_banner', '-version'], { timeoutMs: 20000 });

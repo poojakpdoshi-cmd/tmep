@@ -27,7 +27,7 @@ export interface EngineOptions {
   signal?: AbortSignal;
 }
 
-export const modelsDir = (): string => process.env.TMEP_MODELS_DIR || path.join(os.homedir(), '.cache', 'tmep', 'models');
+export const modelsDir = (): string => (process.env.FRAME_MODELS_DIR ?? process.env.TMEP_MODELS_DIR) || path.join(os.homedir(), '.cache', 'tmep', 'models');
 
 async function which(cmd: string): Promise<string | undefined> {
   const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
@@ -41,12 +41,13 @@ async function which(cmd: string): Promise<string | undefined> {
 }
 
 export async function findWhisperCpp(): Promise<string | undefined> {
-  if (process.env.TMEP_WHISPER_CPP) return (await exists(process.env.TMEP_WHISPER_CPP)) ? process.env.TMEP_WHISPER_CPP : undefined;
+  const explicit = process.env.FRAME_WHISPER_CPP ?? process.env.TMEP_WHISPER_CPP;
+  if (explicit) return (await exists(explicit)) ? explicit : undefined;
   return (await which('whisper-cli')) ?? (await which('whisper-cpp'));
 }
 
 export async function resolveGgmlModel(name?: string): Promise<string | undefined> {
-  const want = name ?? process.env.TMEP_WHISPER_MODEL ?? 'base';
+  const want = name ?? (process.env.FRAME_WHISPER_MODEL ?? process.env.TMEP_WHISPER_MODEL) ?? 'base';
   if (/\.(bin|gguf)$/i.test(want)) return (await exists(want)) ? want : undefined;
   for (const cand of [`ggml-${want}.bin`, `ggml-${want}-q5_1.bin`, `ggml-${want}-q8_0.bin`, `${want}.bin`]) {
     const p = path.join(modelsDir(), cand);
@@ -71,7 +72,7 @@ export async function whisperCppBatch(wavs: string[], workDir: string, o: Engine
   const bin = await findWhisperCpp();
   if (!bin) throw new TmepError('E_ENGINE_MISSING', 'whisper.cpp (whisper-cli) not found', 'download a release from github.com/ggml-org/whisper.cpp/releases and set TMEP_WHISPER_CPP, or use engine:"import"');
   const model = await resolveGgmlModel(o.model);
-  if (!model) throw new TmepError('E_ENGINE_MISSING', `whisper.cpp model "${o.model ?? process.env.TMEP_WHISPER_MODEL ?? 'base'}" not found in ${modelsDir()}`, 'download ggml-<name>.bin from huggingface.co/ggerganov/whisper.cpp into that folder or set TMEP_WHISPER_MODEL');
+  if (!model) throw new TmepError('E_ENGINE_MISSING', `whisper.cpp model "${o.model ?? (process.env.FRAME_WHISPER_MODEL ?? process.env.TMEP_WHISPER_MODEL) ?? 'base'}" not found in ${modelsDir()}`, 'download ggml-<name>.bin from huggingface.co/ggerganov/whisper.cpp into that folder or set TMEP_WHISPER_MODEL');
   await fsp.mkdir(workDir, { recursive: true });
   const lang = !o.lang || o.lang === 'auto' ? 'auto' : o.lang === 'hinglish' ? 'hi' : o.lang;
   // LRC output enables token timestamps in whisper-cli; its sidecar stays in scratch.
@@ -113,7 +114,7 @@ export const HINGLISH_PROMPT = 'Haan toh dosto, aaj hum AI ke baare mein baat ka
 const FW_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'fw_transcribe.py');
 
 export async function findPython(): Promise<string | undefined> {
-  if (process.env.TMEP_PYTHON) return process.env.TMEP_PYTHON;
+  if ((process.env.FRAME_PYTHON ?? process.env.TMEP_PYTHON)) return (process.env.FRAME_PYTHON ?? process.env.TMEP_PYTHON);
   for (const c of process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']) {
     if (await which(c)) return c;
   }

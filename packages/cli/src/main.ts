@@ -46,9 +46,10 @@ export function parseArgs(argv: string[]): Args {
 
 const coerce = (v: string): unknown => (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v === 'true' ? true : v === 'false' ? false : v);
 
-const HELP = `tmep ${VERSION} - token-minimal video editing engine for AI agents
+const HELP = `frame ${VERSION} - FRAME (Footage Reasoning and Agent-driven Media Editing), formerly TMEP
 
-usage: tmep <command> [args] [-p project_dir] [--detail minimal|standard|debug] [--pretty]
+usage: frame <command> [args] [-p project_dir] [--detail minimal|standard|debug] [--pretty]
+       (legacy alias: tmep; project directories .tmep/ and the tmep/1 protocol are unchanged)
 
   init [dir]                         create a project (default: current dir)
   import <files...>                  register media -> asset ids (v1, a1, i1)
@@ -85,7 +86,7 @@ export async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const cmd = args._.shift() ?? 'help';
   const pretty = !!args.pretty;
-  const ctx: api.Ctx = { project: path.resolve(String(args.project ?? process.env.TMEP_PROJECT ?? '.')), detail: (args.detail as Detail) ?? 'standard' };
+  const ctx: api.Ctx = { project: path.resolve(String(args.project ?? (process.env.FRAME_PROJECT ?? process.env.TMEP_PROJECT) ?? '.')), detail: (args.detail as Detail) ?? 'standard' };
   try {
     switch (cmd) {
       case 'help':
