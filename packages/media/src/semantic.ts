@@ -36,6 +36,8 @@ export interface SemFrame {
   embL?: number[];
   cls?: [number, number][];
   clsTop?: [string, number][];
+  /** Phase 7: faces with mouth opening [x, y, w, h, jawOpen, lipGap] (FaceLandmarker). */
+  mouths?: [number, number, number, number, number, number][];
   ms?: number;
 }
 

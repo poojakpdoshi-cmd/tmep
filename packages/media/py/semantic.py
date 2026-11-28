@@ -3,7 +3,7 @@
 Reads raw RGB frames from an FFmpeg pipe and prints one JSON object per frame:
   {"t": s, "objects": [[label, score, x, y, w, h]], "faces": [[score, x, y, w, h]],
    "poses": [{"box": [x, y, w, h], "kp": {name: [x, y, visibility]}}],
-   "hands": [[gesture, score, handedness, x, y, w, h]], "emb": [..], "embL": [..], "cls": [[i, p]]}
+   "hands": [[gesture, score, handedness, x, y, w, h]], "emb": [..], "embL": [..], "cls": [[i, p]], "mouths": [[x, y, w, h, jawOpen, lipGap]]}
 Boxes are normalized, top-left origin. Nothing is identified: faces are locations only.
 Usage: semantic.py MODELS FFMPEG FILE FPS W H MAXSEC TASKS(comma list) [START_SECONDS]
 """
@@ -29,6 +29,7 @@ pose = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(ba
 ges = vision.GestureRecognizer.create_from_options(vision.GestureRecognizerOptions(base_options=opt('gesture_recognizer.task'), num_hands=2)) if 'gestures' in tasks else None
 embl = vision.ImageEmbedder.create_from_options(vision.ImageEmbedderOptions(base_options=opt('mobilenet_v3_large.tflite'), l2_normalize=True)) if 'scene' in tasks else None
 cls2 = vision.ImageClassifier.create_from_options(vision.ImageClassifierOptions(base_options=opt('efficientnet_lite2.tflite'), max_results=1001)) if 'scene' in tasks else None
+mesh = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(base_options=opt('face_landmarker.task'), num_faces=4, output_face_blendshapes=True, min_face_detection_confidence=0.4)) if 'mouth' in tasks else None
 emb = vision.ImageEmbedder.create_from_options(vision.ImageEmbedderOptions(base_options=opt('mobilenet_v3_small.tflite'), l2_normalize=True)) if 'embed' in tasks else None
 print(json.dumps({"ready": True, "loadMs": int((time.time() - t_load) * 1000)}), flush=True)
 
@@ -80,6 +81,15 @@ while True:
         cats = cls2.classify(img).classifications[0].categories
         out["cls"] = [[c.index, round(float(c.score), 5)] for c in cats if c.score >= 1e-4]
         out["clsTop"] = [[c.category_name, round(float(c.score), 3)] for c in cats[:5]]
+    if mesh:
+        # Per face: box from landmarks and mouth opening (jawOpen blendshape, plus lip gap for robustness).
+        res = mesh.detect(img); faces = []
+        for k, lm in enumerate(res.face_landmarks):
+            xs, ys = [l.x for l in lm], [l.y for l in lm]
+            bs = {b.category_name: b.score for b in (res.face_blendshapes[k] if res.face_blendshapes else [])}
+            gap = abs(lm[14].y - lm[13].y) / max(1e-6, max(ys) - min(ys))  # inner lip gap / face height
+            faces.append([r3(min(xs)), r3(min(ys)), r3(max(xs) - min(xs)), r3(max(ys) - min(ys)), r3(bs.get('jawOpen', 0)), r3(gap)])
+        out["mouths"] = faces
     out["ms"] = int((time.time() - t0) * 1000)
     print(json.dumps(out), flush=True)
     n += 1
