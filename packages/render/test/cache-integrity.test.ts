@@ -6,6 +6,11 @@ import { promises as fsp } from 'node:fs';
 import { Project, emptyTimeline, newClip, mediaHash } from '../../core/src/index.ts';
 import { renderTimeline } from '../src/render.ts';
 import { ffmpeg, probe } from '../../media/src/ffmpeg.ts';
+import { spawnSync } from 'node:child_process';
+
+// Same convention as the other render tests: skip (visibly) without FFmpeg; CI's preflight step makes
+// FFmpeg mandatory there, so these never skip in CI.
+const noFFmpeg = spawnSync('ffprobe', ['-version']).status !== 0 ? 'ffmpeg/ffprobe not installed' : false;
 
 async function makeSampleMp4(file: string, color = 'blue', dur = 1.5) {
   await ffmpeg({
@@ -17,7 +22,7 @@ async function makeSampleMp4(file: string, color = 'blue', dur = 1.5) {
   });
 }
 
-test('cache-integrity: corrupt cached output with matching .tmep marker is rejected and re-rendered', async () => {
+test('cache-integrity: corrupt cached output with matching .tmep marker is rejected and re-rendered', { skip: noFFmpeg }, async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frame-cache-int-'));
   try {
     const src = path.join(dir, 'src.mp4');
@@ -58,7 +63,7 @@ test('cache-integrity: corrupt cached output with matching .tmep marker is rejec
   }
 });
 
-test('cache-integrity: modified source media on disk invalidates cache', async () => {
+test('cache-integrity: modified source media on disk invalidates cache', { skip: noFFmpeg }, async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frame-cache-media-'));
   try {
     const src = path.join(dir, 'src.mp4');

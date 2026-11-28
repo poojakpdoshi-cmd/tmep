@@ -11,7 +11,8 @@ import { AssDoc } from '../../motion/src/ass.ts';
 import { planUnits, unitArgs, type GfxOverlay } from '../src/graph.ts';
 
 const W = 64, H = 64, FPS = 10;
-const hasFFmpeg = spawnSync('ffmpeg', ['-filters']).stdout.toString().includes('subtitles');
+// stdout is null when ffmpeg is not on PATH (the file must still load and skip, not crash).
+const hasFFmpeg = (spawnSync('ffmpeg', ['-filters']).stdout?.toString() ?? '').includes('subtitles');
 const ctx = { transcripts: {}, assets: { v1: { dur: 4, kind: 'video' } }, presets: ['title'] };
 
 test('fx addresses graphics gN, while no-target fx stays main-track only', () => {

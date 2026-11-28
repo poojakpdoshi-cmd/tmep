@@ -1111,6 +1111,22 @@ export async function models(inp: { install?: string[]; confirm?: boolean } = {}
   return { dir: st.dir, models: st.models.map((m) => ({ name: m.name, file: m.file, MB: +(m.bytes / 1e6).toFixed(1), licence: m.licence, task: m.task, state: m.verified ? 'ok' : m.installed ? 'checksum mismatch' : 'missing' })), downloadMB: +(st.downloadBytes / 1e6).toFixed(1), runtime: st.runtime };
 }
 
+/**
+ * Explicit FFmpeg/ffprobe preflight (Phase 7): what a render needs, checked before any work starts.
+ * Returns the problems found (empty = ready) with a remedy per platform.
+ */
+export async function preflight(): Promise<{ ok: boolean; problems: string[]; remedy?: string }> {
+  const problems: string[] = [];
+  try {
+    const info = await ffmpegInfo(); // throws E_FFMPEG_MISSING when ffmpeg or ffprobe is absent
+    for (const f of ['subtitles', 'ass', 'xfade', 'loudnorm', 'amix', 'overlay', 'scale', 'crop']) if (!info.filters.has(f)) problems.push(`ffmpeg lacks the ${f} filter`);
+    for (const e of ['libx264', 'aac']) if (!info.encoders.has(e)) problems.push(`ffmpeg lacks the ${e} encoder`);
+  } catch (e) { problems.push((e as Error).message); }
+  const remedy = process.platform === 'win32' ? 'choco install ffmpeg (or a full build from github.com/BtbN/FFmpeg-Builds) and put ffmpeg.exe/ffprobe.exe on PATH, or set FRAME_FFMPEG/FRAME_FFPROBE'
+    : process.platform === 'darwin' ? 'brew install ffmpeg-full (the minimal formula lacks libass)' : 'apt install ffmpeg (with libass), or set FRAME_FFMPEG/FRAME_FFPROBE';
+  return { ok: !problems.length, problems, ...(problems.length && { remedy }) };
+}
+
 export async function doctor(inp: { models?: boolean; install?: string[]; confirm?: boolean } = {}): Promise<Record<string, unknown>> {
   if (inp.install?.length) return models(inp);
   const out: Record<string, unknown> = { tmep: VERSION, protocol: PROTOCOL, node: process.version, platform: `${process.platform}-${process.arch}` };
