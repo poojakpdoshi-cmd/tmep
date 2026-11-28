@@ -130,6 +130,21 @@ function maskKeyExpr(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather', T
   return expr;
 }
 
+function sampleMaskKey(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather', t: number, fallback: number): number {
+  const ks = keys.filter((k) => k[prop] !== undefined);
+  if (!ks.length) return fallback;
+  if (t <= ks[0]!.t) return ks[0]![prop]!;
+  for (let i = 1; i < ks.length; i++) {
+    const a = ks[i - 1]!;
+    const b = ks[i]!;
+    if (t < b.t) {
+      const p = (t - a.t) / Math.max(1e-6, b.t - a.t);
+      return a[prop]! + (b[prop]! - a[prop]!) * ease(b.e ?? 'io', p);
+    }
+  }
+  return ks[ks.length - 1]![prop]!;
+}
+
 /** Rasterize a concave or bezier mask into a grayscale PNG buffer at MW x MH using @napi-rs/canvas. */
 export function rasterizeComplexMaskPng(m: FxMask, MW: number, MH: number, t = 0): Buffer {
   const { createCanvas } = canvasModule();
@@ -137,10 +152,22 @@ export function rasterizeComplexMaskPng(m: FxMask, MW: number, MH: number, t = 0
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, MW, MH);
-  const featherPx = Math.max(0, m.feather * Math.min(MW, MH));
+  const mx = m.keys?.length ? sampleMaskKey(m.keys, 'x', t, m.x) : m.x;
+  const my = m.keys?.length ? sampleMaskKey(m.keys, 'y', t, m.y) : m.y;
+  const mw = m.keys?.length ? sampleMaskKey(m.keys, 'w', t, m.w) : m.w;
+  const mh = m.keys?.length ? sampleMaskKey(m.keys, 'h', t, m.h) : m.h;
+  const mf = m.keys?.length ? sampleMaskKey(m.keys, 'feather', t, m.feather) : m.feather;
+  const featherPx = Math.max(0, mf * Math.min(MW, MH));
   ctx.save();
   if (featherPx > 0.5) {
     ctx.filter = `blur(${featherPx.toFixed(1)}px)`;
+  }
+  if (m.keys?.length && (m.shape === 'concave' || m.shape === 'bezier')) {
+    const sx = mw / Math.max(1e-4, m.w);
+    const sy = mh / Math.max(1e-4, m.h);
+    ctx.translate(mx * MW, my * MH);
+    ctx.scale(sx, sy);
+    ctx.translate(-m.x * MW, -m.y * MH);
   }
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();

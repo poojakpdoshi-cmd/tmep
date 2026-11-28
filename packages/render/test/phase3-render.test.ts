@@ -97,4 +97,31 @@ test('Phase 3 E2E public API: pro ops, concave/bezier masks, colour grade, two-p
   const qa = await api.inspect(ctx, { what: 'qa', file: outMp4 });
   assert.equal(qa.ok, 1, JSON.stringify(qa.findings));
   assert.equal(qa.defects, 0);
+
+  // J-cut & L-cut audio + LUT path traversal rejection
+  await api.edit(ctx, { ops: ['jcut c2 0.4', 'lcut c1 0.4'] });
+  const outJL = path.join(proj, 'renders', 'p3-jl.mp4');
+  const renJL = await api.render(ctx, { out: outJL, quality: 'draft', wait: 120 });
+  assert.equal(renJL.state, 'done', JSON.stringify(renJL));
+  const qaJL = await api.inspect(ctx, { what: 'qa', file: outJL });
+  assert.equal(qaJL.ok, 1, JSON.stringify(qaJL.findings));
+
+  await assert.rejects(
+    () => api.edit(ctx, { ops: [{ op: 'color', clip: 'c1', lut: '../outside.cube' }] }),
+    (e: { code?: string }) => e.code === 'E_SECURITY',
+  );
+});
+
+test('Phase 3 animated concave mask keys rasterize distinct frames', async () => {
+  const { rasterizeComplexMaskPng } = await import('../src/effects.ts');
+  const mask = {
+    type: 'mask' as const,
+    shape: 'concave' as const,
+    x: 0.5, y: 0.5, w: 0.5, h: 0.5, feather: 0, invert: false,
+    pts: [[0.2, 0.2], [0.8, 0.2], [0.5, 0.5], [0.8, 0.8], [0.2, 0.8]] as [number, number][],
+    keys: [{ t: 0, x: 0.2, y: 0.2 }, { t: 1, x: 0.8, y: 0.8 }],
+  };
+  const b0 = rasterizeComplexMaskPng(mask, 64, 64, 0);
+  const b1 = rasterizeComplexMaskPng(mask, 64, 64, 1);
+  assert.notEqual(Buffer.compare(b0, b1), 0, 'animated mask keys must produce distinct frames');
 });

@@ -535,8 +535,15 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
     const c = await opContext(p, base);
     // transcripts for sources introduced by this batch
     for (const raw of inp.ops!) {
-      const src = typeof raw === 'object' && raw ? (raw as Record<string, unknown>).src : undefined;
-      if (typeof src === 'string' && !(src in c.transcripts) && c.assets[src]) Object.assign(c.transcripts, await transcriptsFor(p, [src]));
+      if (typeof raw === 'object' && raw) {
+        const o = raw as Record<string, unknown>;
+        if (typeof o.src === 'string' && !(o.src in c.transcripts) && c.assets[o.src]) {
+          Object.assign(c.transcripts, await transcriptsFor(p, [o.src]));
+        }
+        if (o.op === 'color' && typeof o.lut === 'string' && o.lut.length > 0) {
+          o.lut = await resolveSafePath(o.lut, p.root, ctx.mediaRoots ?? [p.root], 'LUT file');
+        }
+      }
     }
     const { tl, notes, created } = applyOps(base, inp.ops!, c);
     if (tl.scenes?.length) {
@@ -699,8 +706,9 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
     case 'qa': {
       const tl = await p.timeline(inp.rev);
       const words = timelineWords(tl, await transcriptsFor(p, tl.clips.map((c) => c.src)));
+      const assets = new Map((await p.assets()).map((a) => [a.id, a]));
       const renderedPath = inp.file ? await resolveSafePath(inp.file, p.root, ctx.outRoots ?? [p.root], 'qa file') : undefined;
-      const report = await runInspector(tl, words, { renderedPath, targetLufs: inp.targetLufs });
+      const report = await runInspector(tl, words, { renderedPath, targetLufs: inp.targetLufs, assets });
       return { ...report, ok: report.ok ? 1 : 0 };
     }
     default:

@@ -26,7 +26,7 @@ import {
   toPosix,
 } from '../../core/src/index.ts';
 import { rasterizeComplexMaskPng } from './effects.ts';
-import { BT709_OUTPUT_TAGS } from './color.ts';
+import { BT709_OUTPUT_TAGS, detectColorSpace } from './color.ts';
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
 import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
@@ -112,7 +112,13 @@ async function mediaMap(project: Project, tl: Timeline): Promise<Record<string, 
         await project.updateAsset(id, { hash: fresh, size: st.size }).catch(() => {});
       }
     }
-    out[id] = { path: a.path, kind: a.kind, hash, audio: a.audio, dur: a.dur };
+    let colorSpace: string | undefined;
+    if (a.kind === 'video') {
+      const cs = await detectColorSpace(a.path).catch(() => undefined);
+      const trc = cs?.colorTransfer?.toLowerCase();
+      colorSpace = trc === 'smpte2084' ? 'pq' : trc === 'arib-std-b67' ? 'hlg' : cs?.colorSpace?.toLowerCase();
+    }
+    out[id] = { path: a.path, kind: a.kind, hash, audio: a.audio, dur: a.dur, ...(colorSpace ? { colorSpace } : {}) };
   }
   return out;
 }

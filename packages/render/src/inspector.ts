@@ -6,7 +6,7 @@
  * instructions.
  */
 import {
-  type Timeline, type TlWord, type FxMask,
+  type Timeline, type TlWord, type FxMask, type Asset,
   layout, duration, totalFrames,
 } from '../../core/src/index.ts';
 import { ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
@@ -60,6 +60,7 @@ export interface InspectOptions {
   renderedPath?: string;
   targetLufs?: number;
   safeZonePlatform?: 'reels' | 'shorts' | 'tiktok' | 'youtube' | 'square' | 'default';
+  assets?: Map<string, Asset>;
 }
 
 export async function runInspector(tl: Timeline, words: TlWord[], opts: InspectOptions = {}): Promise<QaReport> {
@@ -106,7 +107,7 @@ export async function runInspector(tl: Timeline, words: TlWord[], opts: InspectO
 
   // 2. Scene safe-zone, text overflow, and composition collision checks
   if (tl.scenes?.length) {
-    const diag = diagnoseScenes(tl, words, new Map());
+    const diag = diagnoseScenes(tl, words, opts.assets ?? new Map());
     for (const issue of diag.issues) {
       if (issue.code === 'safe-area') {
         findings.push({ code: 'safe-zone-violation', severity: 'defect', msg: `scene ${issue.scene}: ${issue.msg}` });

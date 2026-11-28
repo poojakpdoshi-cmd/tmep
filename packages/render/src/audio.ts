@@ -97,12 +97,15 @@ export interface ClipAudio {
   path?: string;
   in: number;
   out?: number;
+  mediaDur?: number;
   speed: number;
   vol: number;
   /** Length in samples. */
   n: number;
   /** Crossfade with the previous clip in samples (0 = hard cut). */
   x: number;
+  jcut?: number;
+  lcut?: number;
   reverse?: boolean;
   speedRamp?: SpeedKey[];
   audio?: AudioClipPost;
@@ -140,6 +143,8 @@ export function clipAudio(placed: Placed[], media: Record<string, MediaRef>, fps
       audible
         ? {
             h: m.hash, in: c.in, out: c.out, sp: c.speed, vol: c.vol, n, x,
+            ...(c.jcut ? { jcut: c.jcut } : {}),
+            ...(c.lcut ? { lcut: c.lcut } : {}),
             ...(c.reverse ? { rev: true } : {}),
             ...(c.speedRamp ? { sr: c.speedRamp } : {}),
             ...(c.audio ? { ap: c.audio } : {}),
@@ -150,10 +155,13 @@ export function clipAudio(placed: Placed[], media: Record<string, MediaRef>, fps
       ...(audible ? { path: m.path } : {}),
       in: c.in,
       out: c.out,
+      mediaDur: m.dur,
       speed: c.speed,
       vol: c.vol,
       n,
       x,
+      ...(c.jcut ? { jcut: c.jcut } : {}),
+      ...(c.lcut ? { lcut: c.lcut } : {}),
       ...(c.reverse ? { reverse: true } : {}),
       ...(c.speedRamp ? { speedRamp: c.speedRamp } : {}),
       ...(c.audio ? { audio: c.audio } : {}),
@@ -178,14 +186,19 @@ export function planSpeech(clips: ClipAudio[], limits: AudioLimits = AUDIO_LIMIT
   const end = cursor;
   // A chunk may start at clip j when the clip can be split after its fade-in: that needs the
   // fade-in and the following fade-out to fit in the clip without overlapping.
-  const canStart = (j: number) => clips[j]!.x === 0 || clips[j]!.x + (clips[j + 1]?.x ?? 0) <= clips[j]!.n;
+  // Also keep J/L-cut pairs together unless forced by chunk limits.
+  const canStart = (j: number, forced: boolean) => {
+    if (clips[j]!.x > 0 && clips[j]!.x + (clips[j + 1]?.x ?? 0) > clips[j]!.n) return false;
+    if (!forced && ((clips[j]!.jcut ?? 0) > 0 || (clips[j - 1]!.lcut ?? 0) > 0)) return false;
+    return true;
+  };
   let size = 1;
   let chars = inputChars(clips[0]!);
   for (let j = 1; j < clips.length; j++) {
     const c = clips[j]!;
     const forced = size >= limits.maxClips || chars + inputChars(c) > limits.maxInputChars;
     const natural = size >= limits.minClips && parseInt(c.hash.slice(0, 8), 16) % limits.every === 0;
-    if ((forced || natural) && canStart(j)) {
+    if ((forced || natural) && canStart(j, forced)) {
       starts.push(j);
       size = 1;
       chars = inputChars(c);
@@ -251,21 +264,56 @@ export function speechChunkArgs(chunk: SpeechChunk, out: string): StemArgs {
   const inputs: string[] = [];
   const g: string[] = [];
   let k = 0;
+  const hasJL = chunk.clips.some((c) => (c.jcut ?? 0) > 0 || (c.lcut ?? 0) > 0);
+  // Compute chunk-relative timeline start sample for each clip (used when J/L-cuts are active)
+  const clipPos: number[] = [];
+  let cursor = 0;
+  for (let j = 0; j < chunk.clips.length; j++) {
+    const c = chunk.clips[j]!;
+    if (j === 0) clipPos.push(-chunk.head);
+    else clipPos.push(cursor - c.x);
+    cursor = (j === 0 ? -chunk.head : clipPos[j]!) + c.n;
+  }
+
   chunk.clips.forEach((c, j) => {
+    const jSamples = hasJL && c.jcut && j > 0 && c.path !== undefined
+      ? Math.min(Math.round(c.jcut * SR), Math.floor((c.in / c.speed) * SR), Math.max(0, clipPos[j]!))
+      : 0;
+    const lSamples = hasJL && c.lcut && j < chunk.clips.length - 1 && c.path !== undefined
+      ? Math.min(Math.round(c.lcut * SR), Math.floor((Math.max(0, (c.mediaDur ?? (c.out ?? c.in) + 10) - (c.out ?? c.in)) / c.speed) * SR), chunk.clips[j + 1]!.n)
+      : 0;
+    const targetSamples = jSamples + c.n + lSamples;
+    const inSec = Math.max(0, c.in - (jSamples / SR) * c.speed);
+
     const chain: string[] = [];
     let src: string;
     if (c.path !== undefined) {
-      const srcDur = c.speedRamp?.length ? Math.max(0.1, (c.out ?? c.in + 1) - c.in) : (c.n / SR) * c.speed;
-      inputs.push('-ss', n3(c.in), '-t', n3(srcDur + 0.3), '-i', c.path);
+      const srcDur = c.speedRamp?.length
+        ? Math.max(0.1, (c.out ?? c.in + 1) - c.in)
+        : (targetSamples / SR) * c.speed;
+      inputs.push('-ss', n3(inSec), '-t', n3(srcDur + 0.3), '-i', c.path);
       src = `[${k++}:a]`;
       chain.push(`aresample=${SR}`, STEREO, 'asetpts=PTS-STARTPTS');
       if (c.reverse) {
         chain.push(`atrim=duration=${n3(srcDur)}`, 'areverse', 'asetpts=PTS-STARTPTS');
       }
       if (c.speedRamp?.length) {
-        // Piecewise tempo approximation over 4 segments for synchronized speed ramps
-        const effSpeed = srcDur / Math.max(0.01, c.n / SR);
-        pushTempo(chain, effSpeed);
+        const segs = 8;
+        const du = srcDur / segs;
+        const rawIn = `${src}${chain.join(',')}`;
+        const splitLabels = Array.from({ length: segs }, (_, si) => `[sr${j}_${si}]`).join('');
+        g.push(`${rawIn},asplit=${segs}${splitLabels}`);
+        const segOuts: string[] = [];
+        for (let si = 0; si < segs; si++) {
+          const sp = Math.max(0.1, sampleSpeedRamp(c.speedRamp, (si + 0.5) * du));
+          const segChain = [`atrim=start=${n3(si * du)}:end=${n3((si + 1) * du)}`, 'asetpts=PTS-STARTPTS'];
+          pushTempo(segChain, sp);
+          g.push(`[sr${j}_${si}]${segChain.join(',')}[sro${j}_${si}]`);
+          segOuts.push(`[sro${j}_${si}]`);
+        }
+        g.push(`${segOuts.join('')}concat=n=${segs}:v=0:a=1[srfin${j}]`);
+        src = `[srfin${j}]`;
+        chain.length = 0;
       } else {
         pushTempo(chain, c.speed);
       }
@@ -273,21 +321,39 @@ export function speechChunkArgs(chunk: SpeechChunk, out: string): StemArgs {
       if (c.vol !== 1) chain.push(`volume=${n3(c.vol)}`);
       const fIn = c.audio?.fadeIn ? Math.round(c.audio.fadeIn * SR) : FADE_IN;
       const fOut = c.audio?.fadeOut ? Math.round(c.audio.fadeOut * SR) : FADE_OUT;
-      chain.push(`atrim=end_sample=${c.n}`, `apad=whole_len=${c.n}`, `afade=t=in:ss=0:ns=${fIn}`, `afade=t=out:ss=${Math.max(0, c.n - fOut)}:ns=${fOut}`);
+      chain.push(`atrim=end_sample=${targetSamples}`, `apad=whole_len=${targetSamples}`, `afade=t=in:ss=0:ns=${fIn}`, `afade=t=out:ss=${Math.max(0, targetSamples - fOut)}:ns=${fOut}`);
     } else {
       src = '';
-      chain.push(`anullsrc=r=${SR}:cl=stereo`, STEREO, `atrim=end_sample=${c.n}`);
+      chain.push(`anullsrc=r=${SR}:cl=stereo`, STEREO, `atrim=end_sample=${targetSamples}`);
     }
     // the previous chunk rendered this clip's fade-in: continue right after it
     if (j === 0 && chunk.head > 0) chain.push(`atrim=start_sample=${chunk.head}`, RESTAMP);
-    g.push(`${src}${chain.join(',')}[a${j}]`);
+
+    if (hasJL) {
+      const startSample = j === 0 ? 0 : Math.max(0, clipPos[j]! - jSamples);
+      if (startSample > 0) {
+        g.push(`${src}${chain.join(',')}[ac${j}]`);
+        g.push(`anullsrc=r=${SR}:cl=stereo,${STEREO},atrim=end_sample=${startSample}[ap${j}]`);
+        g.push(`[ap${j}][ac${j}]concat=n=2:v=0:a=1,apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[a${j}]`);
+      } else {
+        g.push(`${src}${chain.join(',')},apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[a${j}]`);
+      }
+    } else {
+      g.push(`${src}${chain.join(',')}[a${j}]`);
+    }
   });
   let cur = 'a0';
-  for (let j = 1; j < chunk.clips.length; j++) {
-    const c = chunk.clips[j]!;
-    if (c.x > 0) g.push(`[${cur}][a${j}]acrossfade=ns=${c.x}:c1=tri:c2=tri[m${j}]`);
-    else g.push(`[${cur}][a${j}]concat=n=2:v=0:a=1[m${j}]`);
-    cur = `m${j}`;
+  if (hasJL && chunk.clips.length > 1) {
+    const mixInputs = chunk.clips.map((_, j) => `[a${j}]`).join('');
+    g.push(`${mixInputs}amix=inputs=${chunk.clips.length}:duration=longest:normalize=0[jlout]`);
+    cur = 'jlout';
+  } else {
+    for (let j = 1; j < chunk.clips.length; j++) {
+      const c = chunk.clips[j]!;
+      if (c.x > 0) g.push(`[${cur}][a${j}]acrossfade=ns=${c.x}:c1=tri:c2=tri[m${j}]`);
+      else g.push(`[${cur}][a${j}]concat=n=2:v=0:a=1[m${j}]`);
+      cur = `m${j}`;
+    }
   }
   // exact length whatever happens upstream; this is also where a borrowed clip is cut off
   g.push(`[${cur}]apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[aout]`);

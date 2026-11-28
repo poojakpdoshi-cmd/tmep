@@ -18,6 +18,7 @@ export interface MediaRef {
   hash: string;
   audio: boolean;
   dur: number;
+  colorSpace?: string;
 }
 
 export interface EncParams {
@@ -179,7 +180,8 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     if (z) chain.push(perspective(z));
     const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`, maskFiles);
     if (fx) chain.push(fx);
-    const clipCol = colorFilterChain(c.color);
+    const detectedCS = m.colorSpace && m.colorSpace !== 'bt709' ? m.colorSpace : undefined;
+    const clipCol = colorFilterChain(c.color ?? (detectedCS ? {} : undefined), detectedCS);
     if (clipCol) chain.push(clipCol);
     const globalCol = colorFilterChain(tl.color);
     if (globalCol) chain.push(globalCol);

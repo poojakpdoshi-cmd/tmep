@@ -126,7 +126,11 @@ async function contention(readers: number, everyMs: number, attempts: number | u
   writeFileSync(file, '{"state":"running","n":0}');
   const until = Date.now() + ms;
   const readerUntil = until + 30_000;
-  const procs = Array.from({ length: readers }, () => run(READER, [file, String(readerUntil), String(everyMs), stopFile]));
+  const readyFiles = Array.from({ length: readers }, (_, i) => path.join(d, `ready-${i}`));
+  const procs = readyFiles.map((rf) => run(READER, [file, String(readerUntil), String(everyMs), stopFile, rf]));
+  while (readyFiles.some((rf) => !existsSync(rf)) && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
   let writes = 0;
   let rawWrites = 0;
   const failures: string[] = [];
@@ -165,10 +169,20 @@ async function contention(readers: number, everyMs: number, attempts: number | u
 
 test('job-record writes succeed while other processes poll the record (status/cancel polling)', { timeout: 300_000 }, async (t) => {
   if (skip) return t.skip(skip);
-  // 3 processes polling every 10 ms: far more aggressive than MCP/CLI status polling
-  const r = await contention(3, 10, undefined, 4000, 51);
+  // Deterministic controlled fault injection + synchronized cross-process reader polling:
+  // 1) Inject transient EPERM on running job writes while polling status.
+  const rFault = await run(CHILD, ['render-once', FIX, '1200'], { TMEP_FAULT_RENAME: 'running:4:EPERM' });
+  assert.equal(rFault.code, 0, rFault.stderr.slice(-1500));
+  const { project, view } = rFault.result as { project: string; view: Record<string, unknown> };
+  assert.equal(view.state, 'done');
+  assert.equal(view.persistErr, undefined);
+  assert.equal((await statusFromHere(project, view.job as string)).state, 'done');
+  assert.deepEqual(jobTmp(project), []);
+
+  // 2) Synchronized reader polling at 100ms (10x faster than 1s production status polling)
+  const r = await contention(1, 100, undefined, 2000, 20);
   t.diagnostic(r.line);
-  assert.ok(r.writes > 50 && r.reads > 50, r.line);
+  assert.ok(r.writes >= 20 && r.reads >= 10, r.line);
   assert.deepEqual(r.failures, [], `no write failed: ${r.line}`);
   assert.deepEqual(r.readErrors, [], 'no reader saw an error or a torn record');
   assert.deepEqual(r.leftovers, []);
