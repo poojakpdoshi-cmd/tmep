@@ -83,13 +83,14 @@ export function mapToTimeline(ranges: [number, number][], t: number): number | u
 export const FOLLOW_MAX_SPEED = 0.35;
 /**
  * Follow keys from raw reframe keys: limit crop-centre speed (no whip pans), drop keys that a straight
- * line between neighbours already explains (≤ 0.01), keep shot changes as hard steps.
+ * line between neighbours already explains (≤ 0.01), keep shot changes (keys ≤ 0.05 s apart) as hard steps.
  */
 export function smoothFollow(keys: { t: number; cx: number; cy: number }[], maxSpeed = FOLLOW_MAX_SPEED): { t: number; cx: number; cy: number }[] {
   if (!keys.length) return [];
   const out = [{ ...keys[0]! }];
   for (const k of keys.slice(1)) {
-    const prev = out.at(-1)!, dt = Math.max(1e-3, k.t - prev.t), lim = maxSpeed * dt;
+    // Keys ≤ 0.05 s apart mark a cut (hard step): no speed limit there (Phase 7; it used to pan across cuts).
+    const prev = out.at(-1)!, dt = Math.max(1e-3, k.t - prev.t), lim = dt <= 0.05 ? Infinity : maxSpeed * dt;
     const step = (a: number, b: number) => a + Math.max(-lim, Math.min(lim, b - a));
     out.push({ t: k.t, cx: r2(step(prev.cx, k.cx)), cy: r2(step(prev.cy, k.cy)) });
   }
@@ -113,11 +114,15 @@ export function buildPlan(i: PlanInputs): EditPlan {
     const ms = inf.moments.filter((m) => m.confidence >= 0.6 && mapToTimeline(ret.ranges, m.t) !== undefined).sort((x, y) => y.score - x.score).slice(0, Math.max(1, Math.floor(i.dur / 30)));
     for (const m of ms) add({ kind: 'moment', at: [m.t0, m.t1], ops: [{ op: 'punch', at: `tl:${m.t}`, to: 1.12, d: 0.6 }], reason: 'emphasize a strong moment with a restrained punch-in', evidence: m.evidence, confidence: m.confidence, deps: ['footage', 'transcript'] });
     // Jump cuts: a removed pause inside one continuous shot of one person.
+    // Phase 7: only where the jump shows (≥ 0.4 s removed) and at most one every 4 s, so the punches
+    // follow the speech instead of a fixed alternation on every removed pause.
+    let lastJump = -Infinity;
     for (let k = 1; k < ret.ranges.length; k++) {
       const t = ret.ranges[k]![0], prev = ret.ranges[k - 1]![1];
+      if (t - prev < 0.4 || t - lastJump < 4) continue;
       const shot = a.observed.shots.find((s) => s.t0 <= prev && s.t1 >= t);
       const type = shot && inf.sceneTypes?.find((x) => x.shot === shot.id)?.label;
-      if (shot && (type === 'talking-head' || inf.presenter)) add({ kind: 'jump-cut', at: [r2(prev), r2(t)], ops: [{ op: 'punch', at: `tl:${t}`, to: k % 2 ? 1.08 : 1.0, d: 0 }], reason: 'a pause was removed inside one shot; alternate framing hides the jump', evidence: [`shot ${shot.id}${type ? ` (${type})` : ''} spans the removed pause ${r2(prev)}–${r2(t)} s`], confidence: 0.5, deps: ['footage', 'transcript'] });
+      if (shot && (type === 'talking-head' || inf.presenter) && (lastJump = t)) add({ kind: 'jump-cut', at: [r2(prev), r2(t)], ops: [{ op: 'punch', at: `tl:${t}`, to: k % 2 ? 1.08 : 1.0, d: 0 }], reason: 'a pause was removed inside one shot; alternate framing hides the jump', evidence: [`shot ${shot.id}${type ? ` (${type})` : ''} spans the removed pause ${r2(prev)}–${r2(t)} s`], confidence: 0.5, deps: ['footage', 'transcript'] });
     }
   }
 
@@ -149,7 +154,7 @@ export function buildPlan(i: PlanInputs): EditPlan {
     const cx = xs[Math.floor(xs.length / 2)]!, cy = ys[Math.floor(ys.length / 2)]!;
     const travels = xs.at(-1)! - xs[0]! > 0.15;
     const follow = travels ? smoothFollow(off) : undefined;
-    add({ kind: 'reframe', ops: [follow ? { op: 'reframe', cx, cy, follow } : { op: 'reframe', cx, cy }], reason: follow ? `follow ${rf.subject} with a smoothed ${i.ratio} crop (${follow.length} keys)` : `centre the ${i.ratio} crop on ${rf.subject}`, evidence: [rf.basis, `subject inside the crop in ${Math.round(rf.subjectInside * 100)}% of samples`, ...(travels ? [`subject travels (crop centre ${xs[0]}–${xs.at(-1)}): keyframed follow, speed-limited to ${FOLLOW_MAX_SPEED} frame widths/s`] : [])], confidence: r2(0.4 + 0.5 * rf.subjectInside), deps: ['footage', 'format'] });
+    add({ kind: 'reframe', ops: [follow ? { op: 'reframe', cx, cy, follow } : { op: 'reframe', cx, cy }], reason: rf.subject === 'active speaker' ? `frame the active speaker in ${i.ratio} (${follow ? `${follow.length} keys, eased moves at speaker changes, steps at cuts` : 'static: speakers share the crop'})` : follow ? `follow ${rf.subject} with a smoothed ${i.ratio} crop (${follow.length} keys)` : `centre the ${i.ratio} crop on ${rf.subject}`, evidence: [rf.basis, `subject inside the crop in ${Math.round(rf.subjectInside * 100)}% of samples`, ...(travels ? [`subject travels (crop centre ${xs[0]}–${xs.at(-1)}): keyframed follow, speed-limited to ${FOLLOW_MAX_SPEED} frame widths/s`] : [])], confidence: r2(0.4 + 0.5 * rf.subjectInside), deps: ['footage', 'format'] });
   }
 
   // Audio and colour: measured, conservative.

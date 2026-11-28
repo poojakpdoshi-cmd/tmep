@@ -18,7 +18,7 @@ export type BriefTask = (typeof BRIEF_TASKS)[number];
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 /** Measured on an untouched real-footage test set (docs/phase-6/INTELLIGENCE.md); kept in sync by bench/phase6/scene-eval.ts. */
-export const SCENE_NOTE = 'scene types are hints: 0.74 accurate on 149 frames of unseen real clips (group and close-up below 0.15 recall) — verify before relying on them';
+export const SCENE_NOTE = 'scene types are hints: 0.70 accurate on 92 frames of unseen real clips (Phase 7 test; group shots not recognised) — verify before relying on them';
 const span = (a: number, b: number): [number, number] => [r1(a), r1(b)];
 
 export function editingBrief(a: FootageAnalysis, task: BriefTask = 'generic', words: Word[] = [], max = 6): Record<string, unknown> {

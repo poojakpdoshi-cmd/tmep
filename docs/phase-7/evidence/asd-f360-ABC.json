@@ -1,0 +1,118 @@
+{
+ "summary": {
+  "frames": 790,
+  "workerMs": 0,
+  "maxRssMB": 0,
+  "totalMs": 6264,
+  "speechSource": "transcript words",
+  "twoShotSpeakerAccuracy": 0.963,
+  "twoShotCoverage": 0.643,
+  "twoShotSteps": 42,
+  "visibleSpeakerRecall": 0.814,
+  "visibleSpeakerSteps": 43,
+  "reactionFalseSpeakerRate": 0,
+  "reactionSteps": 8,
+  "offscreenAttributed": 0,
+  "speakerInCrop": {
+   "phase6": 0.479,
+   "phase7": 0.957,
+   "steps": 94
+  },
+  "cropTravelPerMin": {
+   "phase6": 0.19,
+   "phase7": 0.49
+  },
+  "speakerSwitches": {
+   "phase7": 0,
+   "labelled": 3
+  },
+  "splitScreenRecommendations": 0
+ },
+ "windows": [
+  {
+   "window": "A",
+   "faceTracks": 4,
+   "cuts": 1,
+   "segments": [
+    [
+     27.5,
+     31.25,
+     "face2"
+    ]
+   ],
+   "p6": {
+    "subject": "person2",
+    "keys": 3
+   },
+   "p7": {
+    "keys": 9,
+    "recommendations": []
+   }
+  },
+  {
+   "window": "B",
+   "faceTracks": 10,
+   "cuts": 13,
+   "segments": [
+    [
+     318,
+     320,
+     "face1"
+    ],
+    [
+     322.25,
+     323,
+     "face3"
+    ],
+    [
+     325.75,
+     327.5,
+     "face4"
+    ],
+    [
+     346.75,
+     348.5,
+     "face8"
+    ],
+    [
+     357,
+     361.75,
+     "face9"
+    ]
+   ],
+   "p6": {
+    "subject": "person17",
+    "keys": 1
+   },
+   "p7": {
+    "keys": 21,
+    "recommendations": []
+   }
+  },
+  {
+   "window": "C",
+   "faceTracks": 7,
+   "cuts": 6,
+   "segments": [
+    [
+     387,
+     389,
+     "face4"
+    ],
+    [
+     390.25,
+     392.5,
+     "face6"
+    ]
+   ],
+   "p6": {
+    "subject": "person5",
+    "keys": 3
+   },
+   "p7": {
+    "keys": 13,
+    "recommendations": []
+   }
+  }
+ ]
+}

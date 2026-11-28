@@ -70,7 +70,7 @@ usage: frame <command> [args] [-p project_dir] [--detail minimal|standard|debug]
   status <job> [--cancel] [--wait s] | jobs
   render --scene id [--range localStart,localEnd]
   help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene|storyboard]
-  doctor [--models]                  check ffmpeg, filters, speech engines (and semantic models)
+  doctor [--models] [--require]      check ffmpeg, filters, speech engines (and semantic models); --require exits 2 if FFmpeg is unusable
   produce [start|resume|revise|status|report] --asset v1 --genre g [--id id] [--target s] [--ratio r] [--captions b] [--reference v2] [--until stage]
   editplan [build|show|refresh|override|compile] --asset v1 [--task t] [--accept ids] [--drop ids] [--dryRun] [--rebase] [--semantic]
   library [list|add <files>|search <words>|dups|recommend --asset v1|licence <id>] [--kind k --tags a,b --licence ID --attribution s --genuine]
@@ -249,9 +249,12 @@ export async function main(argv: string[]): Promise<number> {
       case 'jobs':
         print(await api.inspect(ctx, { what: 'jobs' }), pretty);
         return 0;
-      case 'doctor':
+      case 'doctor': {
+        // --require: fail (exit 2) unless ffmpeg/ffprobe with the needed filters and encoders are usable.
+        if (args.require) { const pf = await api.preflight(); print(pf, true); return pf.ok ? 0 : 2; }
         print(await api.doctor({ models: !!args.models }), true);
         return 0;
+      }
       case 'models':
         // tmep models            -> status;  tmep models install [names] [--yes] -> plan, or download with --yes
         if (args._[0] === 'install') {

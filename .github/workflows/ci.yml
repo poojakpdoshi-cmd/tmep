@@ -34,7 +34,26 @@ jobs:
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: |
+          # Chocolatey occasionally fails or leaves no shim; retry, verify, then fall back to the
+          # GitHub-hosted build. A missing FFmpeg must fail here, never as skipped tests later.
+          $ok = $false
+          for ($i = 1; $i -le 3 -and -not $ok; $i++) {
+            choco install ffmpeg -y --no-progress
+            $ok = (Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue)
+            if (-not $ok) { Write-Host "choco attempt $i did not provide ffmpeg/ffprobe"; Start-Sleep -Seconds (10 * $i) }
+          }
+          if (-not $ok) {
+            $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+            Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile $zip -MaximumRetryCount 3 -RetryIntervalSec 10
+            Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'ffmpeg')
+            $bin = (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ffmpeg') -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+            Add-Content $env:GITHUB_PATH $bin
+            $env:PATH = "$bin;$env:PATH"
+          }
+          ffmpeg -version | Select-Object -First 1
+          ffprobe -version | Select-Object -First 1
 
       - name: Install dev dependencies (typescript, @types/node)
         run: npm install --no-audit --no-fund
@@ -42,13 +61,7 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
-      - name: Unit + protocol tests
-        run: npm test
-
-      - name: Doctor
-        run: node bin/tmep.js doctor
-
-      - name: Verify FFmpeg E2E capabilities
+      - name: FFmpeg preflight (ffmpeg, ffprobe, libass, encoders)
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -61,6 +74,15 @@ jobs:
           }
           console.log('E2E capabilities verified: libass subtitles/ass, libx264, aac, mpeg4, ffprobe');
           NODE
+
+      - name: Preflight through the product (tmep doctor --require)
+        run: node bin/tmep.js doctor --require
+
+      - name: Unit + protocol tests
+        run: npm test
+
+      - name: Doctor
+        run: node bin/tmep.js doctor
 
       - name: End-to-end render tests
         run: npm run test:e2e

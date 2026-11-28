@@ -1,0 +1,27 @@
+{
+ "dataset": "en_us/test.tsv",
+ "model": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+ "lang": "en",
+ "utterances": 150,
+ "words": 3276,
+ "wer": 0.096,
+ "cer": 0.061,
+ "audioSeconds": 1456,
+ "rtf": 0.058,
+ "wallSeconds": 88,
+ "maxRssMB": 1052.4,
+ "samples": [
+  {
+   "ref": "unfortunately studying traffic flow is difficult because driver behavior cannot be predicted with one hundred percent certainty",
+   "hyp": "unfortunately studying traffic flow is difficult because driver behavior cannot be predicted with 100 certainty"
+  },
+  {
+   "ref": "twentieth century research has shown that there are two pools of genetic variation hidden and expressed",
+   "hyp": "twentieth century research has shown that there are two quotes of genetic variation hidden and expressed"
+  },
+  {
+   "ref": "remember that even though music on the main stages may have finished there may be sections of the festival that will keep playing music until late into the night",
+   "hyp": "remember that even though music on the main stages may have finished there may be sections of the festival that will keep playing music until late into the night"
+  }
+ ]
+}

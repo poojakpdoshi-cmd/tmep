@@ -20,7 +20,7 @@ import { run } from './exec.ts';
 import { analyzeSemantics, eventCandidates, textOverTime, type SemanticRecord, type Track } from './semantic.ts';
 
 export const FOOTAGE_SCHEMA = 'frame.footage/1';
-export const FOOTAGE_VERSION = '6a.1';
+export const FOOTAGE_VERSION = '7a.1';
 
 export interface Box { x: number; y: number; w: number; h: number }
 export interface Shot { id: string; t0: number; t1: number; cutScore: number; /** How the shot begins (absent on the first shot). */ boundary?: 'cut' | 'gradual'; keyframe: number; luma: number; motion: number; detail: number; signature: number[] }
@@ -72,6 +72,8 @@ export interface FootageAnalysis {
     duplicates?: SemanticRecord['inferred']['duplicates'];
     textChanges?: SemanticRecord['inferred']['textChanges'];
     alignment?: SemanticRecord['inferred']['alignment'];
+    /** Phase 7: audio-visual active speakers (when the face-landmarker model is installed). */
+    speakers?: SemanticRecord['inferred']['speakers'];
     /** Moments where independent signals coincide; candidates only, never recognized event types. */
     events?: SemanticRecord['inferred']['events'];
   };
@@ -597,8 +599,8 @@ async function addAdapters(bin: string, file: string, a: FootageAnalysis, opts: 
         caps.semantic = { status: 'ok', tool: 'MediaPipe Tasks (EfficientDet-Lite0, BlazeFace, BlazePose lite, MobileNetV3 embedder' + (opts.gestures ? ', gesture recognizer' : '') + ')' };
         const { observed: o, inferred: n } = r.record;
         observed.tracks = o.tracks; if (o.gestures.length) observed.gestures = o.gestures;
-        Object.assign(inferred, { subjects: n.subjects, reframe: n.reframe, activities: n.activities, sceneTypes: n.sceneTypes, duplicates: n.duplicates, ...(n.alignment.length ? { alignment: n.alignment } : {}) });
-        provenance.push({ analyzer: 'frame.semantic', version: FOOTAGE_VERSION, method: `MediaPipe CPU @ ${o.fps} fps (${o.frames} frames): IoU tracking, subjects, reframe keys, pose activity, scene rules, embedding similarity`, params: { fps: o.fps, frames: o.frames, gestures: !!opts.gestures, loadMs: r.loadMs, perFrameMs: r.perFrameMs, workerMaxRssMB: r.maxRssMB }, ms: r.ms });
+        Object.assign(inferred, { subjects: n.subjects, reframe: n.reframe, activities: n.activities, sceneTypes: n.sceneTypes, duplicates: n.duplicates, ...(n.alignment.length ? { alignment: n.alignment } : {}), ...(n.speakers && { speakers: n.speakers }) });
+        provenance.push({ analyzer: 'frame.semantic', version: FOOTAGE_VERSION, method: `MediaPipe CPU @ ${o.fps} fps (${o.frames} frames): IoU tracking, subjects, reframe keys, pose activity, scene rules, embedding similarity${n.speakers ? `; active speakers @ ${n.speakers.fps} fps (face landmarks, ${n.speakers.speech})` : ''}`, params: { fps: o.fps, frames: o.frames, gestures: !!opts.gestures, ...(n.speakers && { speakerMs: n.speakers.ms, speakerSegments: n.speakers.segments.length }), loadMs: r.loadMs, perFrameMs: r.perFrameMs, workerMaxRssMB: r.maxRssMB }, ms: r.ms });
       }
     }
   } finally {

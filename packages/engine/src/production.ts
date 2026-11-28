@@ -65,7 +65,7 @@ function strategySection(st: Stage, s?: Strategy): unknown {
   switch (st) {
     case 'roughcut': return [s.pacing, s.ratio, s.target];
     case 'assets': return s.assets;
-    case 'motion': return [s.graphics, s.ratio];
+    case 'motion': return [s.graphics, s.ratio, s.sfx, s.framing];
     case 'fine': return [s.zooms, s.jumpCuts, s.captions, s.effectBudgetPerMinute, s.graphics.allowed];
     case 'finish': return [s.colour, s.audio];
     default: return null;
@@ -83,10 +83,12 @@ function stageHash(pr: Production, st: Stage, upstream: string): string {
 }
 
 /** Shorten retained ranges to a target length: drop the least informative sentences first; honour keep/avoid. */
-export function fitRanges(ranges: [number, number][], words: { w: string; s: number; e: number }[], c: Constraints, moments: number[]): { ranges: [number, number][]; dropped: number } {
+export function fitRanges(ranges: [number, number][], words: { w: string; s: number; e: number }[], c: Constraints, momentsIn: (number | { t: number; t0?: number; t1?: number; confidence?: number })[]): { ranges: [number, number][]; dropped: number; beats?: [number, number][] } {
+  const moments = momentsIn.map((m) => (typeof m === 'number' ? m : m.t));
   let rs = ranges.map((r) => [...r] as [number, number]);
   for (const [a, b] of c.avoid ?? []) rs = rs.flatMap(([s, e]) => (e <= a || s >= b ? [[s, e]] : [...(s < a ? [[s, a]] : []), ...(e > b ? [[b, e]] : [])]) as [number, number][]);
   const len = () => rs.reduce((s, [a, b]) => s + b - a, 0);
+  if (c.min && len() < c.min) return extendWithBeats(rs, c, momentsIn);
   if (!c.target || len() <= c.target) return { ranges: rs.filter(([a, b]) => b - a > 0.2), dropped: 0 };
   const ss = sentences(words as never);
   const kw = new Set(keywords(words as never, 8).map((k) => k.k));
@@ -99,6 +101,28 @@ export function fitRanges(ranges: [number, number][], words: { w: string; s: num
     dropped++;
   }
   return { ranges: rs.filter(([a, b]) => b - a > 0.2).map(([a, b]) => [Math.round(a * 100) / 100, Math.round(b * 100) / 100]), dropped };
+}
+
+/**
+ * Phase 7: speech shorter than the requested minimum is extended with motivated beats — candidate moments
+ * (motion/audio evidence) of up to 3 s, strongest first, merged in source order — never with silence.
+ */
+export function extendWithBeats(ranges: [number, number][], c: Constraints, moments: (number | { t: number; t0?: number; t1?: number; confidence?: number })[]): { ranges: [number, number][]; dropped: number; beats: [number, number][] } {
+  let rs = ranges.map((r) => [...r] as [number, number]);
+  const len = () => rs.reduce((s, [a, b]) => s + b - a, 0);
+  const beats: [number, number][] = [];
+  const ms = moments.map((m) => (typeof m === 'number' ? { t: m, t0: m - 1, t1: m + 1, confidence: 0.5 } : { t: m.t, t0: m.t0 ?? m.t - 1, t1: m.t1 ?? m.t + 1, confidence: m.confidence ?? 0.5 }))
+    .filter((m) => !(c.avoid ?? []).some(([a, b]) => m.t1 > a && m.t0 < b) && !rs.some(([a, b]) => m.t >= a && m.t <= b)).sort((x, y) => y.confidence - x.confidence);
+  for (const m of ms) {
+    if (len() >= (c.min ?? 0)) break;
+    const half = Math.min(1.5, (m.t1 - m.t0) / 2), b: [number, number] = [Math.max(0, m.t - half), m.t + half];
+    beats.push([Math.round(b[0] * 100) / 100, Math.round(b[1] * 100) / 100]);
+    rs.push(b);
+    rs.sort((x, y) => x[0] - y[0]);
+    rs = rs.reduce<[number, number][]>((acc, r) => { const l = acc.at(-1); if (l && r[0] <= l[1] + 0.3) l[1] = Math.max(l[1], r[1]); else acc.push([...r]); return acc; }, []);
+    if (c.target && len() > c.target) break;
+  }
+  return { ranges: rs.filter(([a, b]) => b - a > 0.2).map(([a, b]) => [Math.round(a * 100) / 100, Math.round(b * 100) / 100]), dropped: 0, beats };
 }
 
 /** Plan items allowed by the strategy, within the effect budget (lowest confidence dropped first). */
@@ -245,10 +269,10 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         const lib = (await api.readLibrary(p)).entries;
         pr.plan = buildPlan({ asset: pr.asset, dur: a.asset.dur, analysis: a, words: words as never, library: lib, ratio: s.ratio, task: pr.genre, baseRev: (await p.manifest()).head, pause: s.pacing.removePausesOver, pad: s.pacing.padding });
         const retain = pr.plan.items.find((i) => i.kind === 'retain')!;
-        const fit = fitRanges(retain.ops[0]!.ranges as [number, number][], words, pr.constraints, a.inferred.moments.map((m) => m.t));
+        const fit = fitRanges(retain.ops[0]!.ranges as [number, number][], words, pr.constraints, a.inferred.moments);
         retain.ops[0]!.ranges = fit.ranges;
         const res = await applyOps([{ op: 'format', ratio: s.ratio }, ...retain.ops], 'rough cut');
-        return { ...res, ranges: fit.ranges.length, seconds: Math.round(fit.ranges.reduce((x, [u, v]) => x + v - u, 0) * 10) / 10, droppedSentences: fit.dropped };
+        return { ...res, ranges: fit.ranges.length, seconds: Math.round(fit.ranges.reduce((x, [u, v]) => x + v - u, 0) * 10) / 10, droppedSentences: fit.dropped, ...(fit.beats?.length && { beats: fit.beats }) };
       }
       case 'assets': case 'motion': case 'fine': case 'finish': {
         const s = pr.strategy!, plan = pr.plan!;
@@ -262,6 +286,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         }
         const ranges = plan.items.find((i) => i.kind === 'retain')!.ops[0]!.ranges as [number, number][];
         const { ops, skipped } = compilePlan({ ...plan, items }, (id) => imported.get(id) ?? id, { ranges });
+        if (st === 'motion' && s.sfx?.allowed) for (const o of [...ops]) if (o.op === 'gfx' && o.at !== undefined) ops.push({ op: 'sfx', kind: s.sfx.kind ?? 'pop', at: o.at, vol: 0.35 });
         if (st === 'fine') ops.push(s.captions.burn ? { op: 'captions', pos: s.captions.position } : { op: 'captions', style: 'none' });
         if (st === 'finish') { if (s.colour.look?.saturation) ops.push({ op: 'color', saturation: s.colour.look.saturation }); if (s.audio.music) ops.push({ op: 'music', src: s.audio.music }); }
         items = items.filter((i) => !skipped.some((x) => x.id === i.id));
@@ -274,7 +299,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         if (r.state !== 'done') throw new TmepError('E_INTERNAL', `preview render ${r.state}`);
         return { file: path.relative(p.root, out), seconds: r.s };
       }
-      case 'inspect': return { findings: prioritize(await qa()) };
+      case 'inspect': { const f = prioritize(await qa()); return { findings: f, objective: f.filter(objective).length, note: 'no objective findings is not proof of creative quality' }; }
       case 'correct': return correct();
       case 'final': {
         const out = path.join(p.root, 'renders', `${pr.id}.mp4`);
@@ -285,38 +310,91 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
     }
   }
 
-  async function qa(): Promise<Finding[]> {
-    const prev = pr.stages.preview.out?.file as string | undefined;
-    const r = await api.inspect(ctx, { what: 'qa', ...(prev && { file: path.join(p.root, prev) }) }) as { findings: Finding[] };
+  async function qa(file?: string | null): Promise<Finding[]> {
+    const prev = file === null ? undefined : file ?? (pr.stages.preview.out?.file as string | undefined);
+    const r = await api.inspect(ctx, { what: 'qa', ...(prev && { file: path.join(p.root, prev) }), constraints: pr.constraints, transcript: { approx, ...(unverified && { unverified }) } }) as { findings: Finding[] };
     return r.findings;
   }
 
-  /** Bounded, deterministic corrections that never contradict an explicit instruction. */
+  /**
+   * Phase 7.4 verified corrections. Each candidate (the fix ops of one objective finding, or a Phase 6
+   * placement fix) becomes a new revision; the affected range is re-rendered as a preview and the edit is
+   * re-inspected. The candidate is kept only when its finding is gone, no new objective finding appears,
+   * the objective count drops and no explicit instruction is contradicted; otherwise the previous
+   * revision is restored. A finding is tried once, cycles are bounded, and the best verified revision is
+   * what remains. Zero objective findings afterwards is not proof of creative quality.
+   */
   async function correct(): Promise<Record<string, unknown>> {
-    const c = pr.constraints;
-    const applied: string[] = [], refused: string[] = [];
+    const attempts: Record<string, unknown>[] = [];
+    let base = (await p.manifest()).head;
     let findings = prioritize(await qa());
-    let cycles = 0, seen = '';
+    const tried = new Set<string>();
+    let cycles = 0, previewMs = 0;
     while (cycles < MAX_CORRECTION_CYCLES) {
-      const key = findings.map((f) => f.code).sort().join(',');
-      if (!findings.length || key === seen) break; // nothing left, or the same defects persist: stop
-      seen = key; cycles++;
-      const ops: Record<string, unknown>[] = [];
-      for (const f of findings) {
-        if (f.fix && /^reframe /.test(f.fix)) { ops.push(parseOpString(f.fix) as Record<string, unknown>); applied.push(`${f.code}: ${f.fix}`); }
-        else if (f.code === 'captions-over-presenter' && c.captions !== false) { const tl = await p.timeline(); const pos = tl.captions.pos === 'upper' ? 'lower' : 'upper'; ops.push({ op: 'captions', pos }); applied.push(`${f.code}: captions ${pos}`); }
-        else if (f.code === 'repetitive-zoom') refused.push(`${f.code}: ${c.zooms === true ? 'zooms were explicitly requested' : 'zoom count comes from the plan; lower zooms.perMinute or drop moment items'}`);
+      const cands = findings.map((f) => ({ f, ops: fixFor(f) })).filter((x) => x.ops.length && !tried.has(sig(x.f)));
+      if (!cands.length) break;
+      cycles++;
+      let progressed = false;
+      for (const { f, ops } of cands) {
+        tried.add(sig(f));
+        const conflict = conflicts(ops, pr.constraints);
+        if (conflict) { attempts.push({ finding: sig(f), verdict: 'refused', reason: conflict }); continue; }
+        const t0 = Date.now();
+        const r = await api.edit(ctx, { ops, note: `production ${pr.id}: correct ${f.code}` }) as { rev: number };
+        // Incremental check: render only the affected range (plus 0.5 s of context) as a preview.
+        let preview: string | undefined;
+        if (f.at) {
+          const out = path.join(p.root, 'renders', `${pr.id}-fix-${r.rev}.mp4`), tp = Date.now();
+          const rr = await api.render(ctx, { out, preview: true, range: [Math.max(0, f.at[0] - 0.5), f.at[1] + 0.5], wait: 600 }).catch((e: Error) => ({ state: `failed: ${e.message}` })) as { state: string };
+          previewMs += Date.now() - tp;
+          if (rr.state !== 'done') { await api.edit(ctx, { checkout: base }); attempts.push({ finding: sig(f), ops, verdict: 'rejected', reason: `preview of the affected range ${rr.state}` }); continue; }
+          preview = path.relative(p.root, out);
+        }
+        const next = prioritize(await qa(null));
+        const before = new Set(findings.filter(objective).map(sig)), after = new Set(next.filter(objective).map(sig));
+        const introduced = [...after].filter((x) => !before.has(x));
+        const gone = !next.some((x) => sig(x) === sig(f));
+        const ok = gone && !introduced.length && (after.size < before.size || !objective(f));
+        attempts.push({ finding: sig(f), ops, verdict: ok ? 'accepted' : 'rejected', reason: ok ? `objective findings ${before.size} → ${after.size}` : !gone ? 'the finding persists' : introduced.length ? `introduces ${introduced.join(', ')}` : 'no objective improvement', ...(preview && { preview }), ms: Date.now() - t0 });
+        if (ok) { base = r.rev; findings = next; progressed = true; } else await api.edit(ctx, { checkout: base });
       }
-      if (!ops.length) break;
-      await api.edit(ctx, { ops, note: `production ${pr.id}: correction ${cycles}` });
-      findings = prioritize(await qa());
+      if (!progressed) break;
     }
-    const unresolved = findings.filter((f) => f.severity !== 'info').map((f) => `${f.code}: ${f.msg}`.slice(0, 200));
-    return { cycles, applied, refused, unresolved, rev: (await p.manifest()).head };
+    if ((await p.manifest()).head !== base) await api.edit(ctx, { checkout: base });
+    const unresolved = findings.filter((f) => f.severity !== 'info').map((f) => `${f.code}${f.class ? ` [${f.class}]` : ''}: ${f.msg}`.slice(0, 200));
+    return {
+      cycles, attempts, applied: attempts.filter((x) => x.verdict === 'accepted').map((x) => x.finding), refused: attempts.filter((x) => x.verdict === 'refused').map((x) => `${x.finding}: ${x.reason}`),
+      unresolved, objectiveRemaining: findings.filter(objective).length, previewMs, rev: base,
+      note: 'Verified against the Inspector only: no objective findings is not proof of creative quality.',
+    };
   }
 }
 
-interface Finding { code: string; severity: string; msg: string; fix?: string }
+interface Finding { code: string; severity: string; msg: string; fix?: string; class?: string; at?: [number, number]; fixOps?: Record<string, unknown>[]; detail?: Record<string, unknown> }
+const objective = (f: Finding) => f.class === 'objective' || (f.class === undefined && f.severity === 'defect');
+const sig = (f: Finding) => [f.code, f.detail?.clip, f.detail?.edge].filter((x) => x !== undefined).join(':');
+/** Fix ops for a finding: the Inspector's own (objective only), or the Phase 6 placement fixes. */
+function fixFor(f: Finding): Record<string, unknown>[] {
+  if (f.class === 'objective' && f.fixOps?.length) return f.fixOps;
+  if (f.fix && /^reframe /.test(f.fix)) return [parseOpString(f.fix) as Record<string, unknown>];
+  if (f.code === 'captions-over-presenter') return [{ op: 'captions', pos: /upper/.test(f.msg) ? 'lower' : 'upper' }];
+  return [];
+}
+/** A correction may never contradict an explicit instruction (Phase 6 rule, now checked per op). */
+export function conflicts(ops: Record<string, unknown>[], c: Constraints): string | undefined {
+  for (const o of ops) {
+    if (o.op === 'captions' && c.captions === false && o.style !== 'none') return 'captions were declined';
+    if (o.op === 'captions' && c.captions === true && o.style === 'none') return 'captions were requested';
+    if (o.op === 'color' && !o.clear && !c.allowLook) return 'colour looks need authorization';
+    if ((o.op === 'zoom' || o.op === 'punch') && c.zooms === false) return 'zooms were declined';
+    if ((o.op === 'gfx' || o.op === 'scene') && c.graphics === false) return 'graphics were declined';
+    if (o.op === 'transition' && c.transitions === false) return 'transitions were declined';
+    if (o.op === 'format' && c.ratio && o.ratio !== c.ratio) return `ratio ${c.ratio} was requested`;
+    if (o.op === 'fx' && !c.allowBackgroundChange && /chroma|mask/.test(String(o.kind ?? o.type ?? ''))) return 'background changes need authorization';
+  }
+  return undefined;
+}
+
 const SEV: Record<string, number> = { defect: 0, error: 0, advisory: 1, warning: 1, info: 2 };
 /** Defects first, then advisories by kind (subject/legibility before taste). */
 export function prioritize(f: Finding[]): Finding[] {
@@ -326,10 +404,12 @@ export function prioritize(f: Finding[]): Finding[] {
 
 /** Small local ASR models whose measured accuracy (docs/phase-6/INTELLIGENCE.md) is too low for unreviewed captions. */
 const UNVERIFIED_ENGINES = new Set(['sherpa-onnx']);
+/** Models measured caption-grade in Phase 7 (Parakeet-TDT 0.6B: FLEURS-en WER 9.6 %; film dialogue 33 % vs condensed subtitles). */
+const CAPTION_GRADE_MODELS = /parakeet/i;
 async function transcriptQuality(p: Awaited<ReturnType<typeof api.openProject>>, asset: string): Promise<{ approx: boolean; unverified?: string }> {
   const a = await p.asset(asset);
   const tr = await readJsonOr<{ approx?: boolean; engine?: string; model?: string } | undefined>(p.cachePath('tr', `${a.tr}.json`), undefined);
-  return { approx: !!tr?.approx, ...(tr?.engine && UNVERIFIED_ENGINES.has(tr.engine) && { unverified: `${tr.engine}${tr.model ? ` ${tr.model}` : ''}` }) };
+  return { approx: !!tr?.approx, ...(tr?.engine && UNVERIFIED_ENGINES.has(tr.engine) && !CAPTION_GRADE_MODELS.test(tr.model ?? '') && { unverified: `${tr.engine}${tr.model ? ` ${tr.model}` : ''}` }) };
 }
 
 function report(pr: Production): Record<string, unknown> {

@@ -24,7 +24,7 @@ for (const c of labels.clips) {
   const pr = await probe(file);
   const w = Math.min(640, pr.w!) & ~1, h = Math.round((w * pr.h!) / pr.w! / 2) * 2;
   // start 2.5 s, one frame every 2.5 s; keep 2.5, 7.5, 12.5, 17.5 (the fps filter can drop a last 5 s step)
-  const { frames } = await runWorker(rt.python, rt.env, 'ffmpeg', file, { fps: 0.4, w, h, maxSeconds: 17.5, tasks: ['objects', 'faces', 'pose', 'embed', 'scene'], start: 2.5 });
+  const { frames } = await runWorker(rt.python, rt.env, 'ffmpeg', file, { fps: 0.4, w, h, maxSeconds: 17.5, tasks: ['objects', 'faces', 'pose', 'embed', 'scene', 'gestures'], start: 2.5 });
   [2.5, 7.5, 12.5, 17.5].forEach((t, i) => { const f = frames.find((x) => Math.abs(x.t - t) < 0.3); if (f) rows.push({ id: c.id, t, label: c.labels[i] ?? null, frame: f }); });
   process.stderr.write('.');
 }

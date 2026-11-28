@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { TmepError } from '../../core/src/index.ts';
 import type { Box, FootageAnalysis, Shot } from './footage.ts';
 import { modelDir, modelStatus, semanticRuntime } from './models.ts';
+import { activeSpeakers, audioEnvelope, faceTracks, speakerFraming, speechMask, type Recommendation, type SpeakerSegment } from './speaker.ts';
 import { classifyFrames, sceneModel, type SceneClass } from './scenes.ts';
 
 const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'semantic.py');
@@ -36,6 +37,8 @@ export interface SemFrame {
   embL?: number[];
   cls?: [number, number][];
   clsTop?: [string, number][];
+  /** Phase 7: faces with mouth opening [x, y, w, h, jawOpen, lipGap] (FaceLandmarker). */
+  mouths?: [number, number, number, number, number, number][];
   ms?: number;
 }
 
@@ -69,7 +72,13 @@ export interface SemanticRecord {
     textChanges: { t: number; before: string; after: string; kind: 'number-change' | 'text-change'; confidence: number }[];
     alignment: { word: string; t: number; target: 'text' | 'object'; ref: string; dt: number }[];
     events: EventCandidate[];
+    /** Phase 7: audio-visual active speakers (face tracks + mouth movement + speech), when the face-landmarker model is installed. */
+    speakers?: SpeakerRecord;
   };
+}
+export interface SpeakerRecord {
+  fps: number; faceTracks: { id: string; t0: number; t1: number; x: number; area: number }[];
+  segments: SpeakerSegment[]; recommendations: Recommendation[]; speech: 'transcript' | 'audio level'; basis: string; ms: number;
 }
 /** Phase 6 taxonomy (docs/phase-6/PROGRESS.md); `other` when neither the classifier nor a rule applies. */
 export type SceneType = SceneClass | 'other';
@@ -214,6 +223,7 @@ export function findSubjects(tracks: Track[], dur: number): SemanticRecord['infe
  * subject stays inside its middle 60 %, and every shot starts from the subject's own position.
  */
 /** Renderer crop offset (0..1, the `cx`/`cy`/`follow` convention) that puts a window of relative size `crop` centred on `centre`. */
+const keyAt = (keys: { t: number; cx: number }[], t: number) => { if (!keys.length) return 0.5; if (t <= keys[0]!.t) return keys[0]!.cx; for (let i = 1; i < keys.length; i++) if (t < keys[i]!.t) { const p = keys[i - 1]!, q = keys[i]!; return p.cx + ((q.cx - p.cx) * (t - p.t)) / (q.t - p.t); } return keys.at(-1)!.cx; };
 export const centreToOffset = (centre: number, crop: number) => (crop >= 0.999 ? 0.5 : Math.round(Math.min(1, Math.max(0, (centre - crop / 2) / (1 - crop))) * 1000) / 1000);
 
 export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }, aspect: [number, number], shots: Pick<Shot, 't0'>[]): SemanticRecord['inferred']['reframe'][number] {
@@ -225,7 +235,12 @@ export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }
   for (const [t, x, y, w, h] of tr.boxes) {
     const si = shots.filter((s) => s.t0 <= t).length - 1;
     const sx = x + w / 2, sy = y + h * 0.4; // bias towards the head
-    if (si !== shotIdx) { cx = sx; cy = sy; shotIdx = si; } else {
+    if (si !== shotIdx) {
+      // Hold the previous framing up to the cut (a hard step, not a pan across it; Phase 7).
+      const prevKey = keys.at(-1), cutT = shots[si]?.t0;
+      if (prevKey && cutT !== undefined && cutT - 0.04 > prevKey.t) keys.push({ t: r3(cutT - 0.04), cx: prevKey.cx, cy: prevKey.cy });
+      cx = sx; cy = sy; shotIdx = si;
+    } else {
       if (Math.abs(sx - cx) > cw * 0.3) cx += (sx - cx) - Math.sign(sx - cx) * cw * 0.3;
       if (Math.abs(sy - cy) > ch * 0.3) cy += (sy - cy) - Math.sign(sy - cy) * ch * 0.3;
     }
@@ -412,7 +427,7 @@ export function eventCandidates(a: FootageAnalysis, tracks: Track[], changes: Se
 
 // ---------- entry ----------
 
-export interface SemanticOptions { fps?: number; gestures?: boolean; maxSeconds?: number; signal?: AbortSignal; words?: { w: string; s: number; e: number }[]; textStep?: number }
+export interface SemanticOptions { fps?: number; gestures?: boolean; /** Phase 7 active-speaker pass (default: on when the faceMesh model is installed). */ speakers?: boolean; maxSeconds?: number; signal?: AbortSignal; words?: { w: string; s: number; e: number }[]; textStep?: number }
 
 /** One frame's scene features of a file (image or a video at `at`), or undefined when the models are absent. */
 export async function embedFile(ffmpeg: string, file: string, at = 0, size?: { w: number; h: number }): Promise<{ emb: number[]; labels: [string, number][] } | undefined> {
@@ -440,8 +455,9 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
   const t0 = Date.now();
   const av = await semanticAvailability(base);
   // Scene features need two more models; without them scene types fall back to detection rules.
-  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses'])).models.every((m) => m.verified);
-  const tasks = [...base, ...(sceneOk ? ['scene'] : [])];
+  // (Phase 7: the classifier also uses hand detections, so the gesture model is part of the scene set.)
+  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses', 'gestures'])).models.every((m) => m.verified);
+  const tasks = [...base, ...(sceneOk ? ['scene', ...(base.includes('gestures') ? [] : ['gestures'])] : [])];
   if (!av.ok) return { reason: av.reason, ms: Date.now() - t0, loadMs: 0, perFrameMs: 0 };
   const seconds = a.asset.analyzedSeconds;
   const fps = opts.fps ?? semanticFps(seconds);
@@ -467,6 +483,33 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
       events: eventCandidates(a, tracks, text.changes, dups),
     },
   };
+  // Phase 7 active speakers: a second, denser pass (mouth movement needs ≥ 5 fps) over footage with faces
+  // and audio, when the face-landmarker model is installed. Its framing replaces the single-subject
+  // reframe when two or more faces share the screen.
+  const faced = frames.some((f) => (f.faces?.length ?? 0) > 0 || (f.poses?.length ?? 0) > 0);
+  if (opts.speakers !== false && a.asset.audio && faced && seconds <= 900 && (await modelStatus(['faceMesh'])).models.every((m) => m.verified)) {
+    const ts = Date.now(), sfps = seconds <= 180 ? 8 : 5;
+    const sw = Math.min(1280, a.asset.w), sh = Math.max(2, Math.round((sw * a.asset.h) / a.asset.w / 2) * 2);
+    const r = await runWorker(av.python!, av.env, ffmpeg, a.asset.file, { fps: sfps, w: sw - (sw % 2), h: sh, maxSeconds: opts.maxSeconds ?? seconds, tasks: ['mouth'], signal: opts.signal });
+    const ft = faceTracks(r.frames, cuts, sfps);
+    const env = await audioEnvelope(ffmpeg, a.asset.file, 0.1, seconds);
+    const sp = activeSpeakers(ft, env, speechMask(env, 0.1, opts.words), 0.1, 0, seconds);
+    const multi = ft.some((x, i) => ft.some((y, j) => j > i && y.samples[0]!.t < x.samples.at(-1)!.t - 1 && x.samples[0]!.t < y.samples.at(-1)!.t - 1));
+    const recs: Recommendation[] = [];
+    if (multi && sp.segments.length) {
+      record.inferred.reframe = record.inferred.reframe.map((rf) => {
+        const [aw, ah] = rf.aspect.split(':').map(Number) as [number, number];
+        const cw = Math.min(1, (a.asset.h * aw) / ah / a.asset.w), ch = Math.min(1, (a.asset.w * ah) / aw / a.asset.h);
+        if (cw >= 0.999 && ch >= 0.999) return rf;
+        const f = speakerFraming(ft, sp.windows, { w: cw, h: ch }, a.observed.shots);
+        if (rf.aspect === '9:16') recs.push(...f.recommendations);
+        const spk = sp.windows.filter((w) => w.speaker);
+        const inside = spk.filter((w) => { const tr = ft.find((x) => x.id === w.speaker)!; const s = tr.samples.reduce((b, x) => (Math.abs(x.t - w.t) < Math.abs(b.t - w.t) ? x : b)); const c = keyAt(f.keys, w.t); return Math.abs(s.box[0] + s.box[2] / 2 - c) <= cw / 2; }).length;
+        return { aspect: rf.aspect, subject: 'active speaker', keys: f.keys, crop: { w: r3(cw), h: r3(ch) }, subjectInside: r3(inside / Math.max(1, spk.length)), basis: `frames the active speaker (mouth movement during speech, hysteresis 1.2 s dwell / 0.5 s lead); faces that fit together share the crop; speaker changes ease over 0.5 s, cuts step; in-shot crop travel ${f.travelPerMin} frame widths/min` };
+      });
+    }
+    record.inferred.speakers = { fps: sfps, faceTracks: ft.map((x) => ({ id: x.id, t0: x.samples[0]!.t, t1: x.samples.at(-1)!.t, x: x.x, area: x.area })), segments: sp.segments, recommendations: recs, speech: opts.words?.length ? 'transcript' : 'audio level', basis: 'MediaPipe FaceLandmarker jawOpen + inner-lip gap per face (head crops from pose for small faces); active = mouth-opening variability over ±1 s during speech', ms: Date.now() - ts };
+  }
   const per = frames.map((f) => f.ms ?? 0);
   return { record, ms: Date.now() - t0, loadMs, perFrameMs: r3(mean(per)), maxRssMB };
 }

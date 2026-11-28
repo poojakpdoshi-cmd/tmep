@@ -13,7 +13,7 @@ export const SCENE_CLASSES = ['talking-head', 'group', 'performance', 'screen', 
 export type SceneClass = (typeof SCENE_CLASSES)[number];
 export interface SceneModel { classes: readonly string[]; dims: number; mu: number[]; sd: number[]; W: number[][]; b: number[]; meta?: Record<string, unknown> }
 
-export const EMB_DIMS = 1280, CLS_DIMS = 1001, DET_DIMS = 6;
+export const EMB_DIMS = 1280, CLS_DIMS = 1001, DET_DIMS = 6, EXT_DIMS = 7;
 
 /** Feature vector of one frame, or undefined when the scene models did not run on it. */
 export function sceneFeatures(f: SemFrame): number[] | undefined {
@@ -29,7 +29,18 @@ export function sceneFeatures(f: SemFrame): number[] | undefined {
     Math.min(poses.length, 4) / 4,
     Math.min(1, Math.max(0, ...poses.map((p) => p.box[2] * p.box[3])) * 2),
   ];
-  return [...f.embL, ...cls, ...det];
+  // Phase 7 extras: hands (gesture adapter), large people, sizeable faces, non-person objects.
+  const hands = f.hands ?? [], objs = (f.objects ?? []).filter((o) => o[0] !== 'person');
+  const ext = [
+    Math.min(hands.length, 2) / 2,
+    Math.min(1, Math.max(0, ...hands.map((h) => h[5] * h[6])) * 10),
+    people.filter((p) => p[4] * p[5] > 0.05).length / 4,
+    Math.min(1, people.reduce((s, p) => s + p[4] * p[5], 0)),
+    faces.filter((x) => x[3] * x[4] > 0.005).length / 3,
+    Math.min(1, Math.max(0, ...objs.map((o) => o[4] * o[5])) * 2),
+    Math.min(objs.length, 6) / 6,
+  ];
+  return [...f.embL, ...cls, ...det, ...ext];
 }
 
 export function predict(m: SceneModel, x: number[]): number[] {
@@ -49,7 +60,7 @@ export function sceneModel(): SceneModel | null {
 /** Classify a set of frames (a shot): mean class probability over the frames that carry scene features. */
 export function classifyFrames(frames: SemFrame[], m = sceneModel()): { label: SceneClass; confidence: number; frames: number; runnerUp: string } | undefined {
   if (!m) return undefined;
-  const ps = frames.map(sceneFeatures).filter((x): x is number[] => !!x).map((x) => predict(m, x));
+  const ps = frames.map(sceneFeatures).filter((x): x is number[] => !!x).map((x) => predict(m, m.dims === x.length ? x : x.slice(0, m.dims)));
   if (!ps.length) return undefined;
   const mean = m.classes.map((_, k) => ps.reduce((s, p) => s + p[k]!, 0) / ps.length);
   const order = mean.map((p, k) => [p, k] as const).sort((a, b) => b[0] - a[0]);
