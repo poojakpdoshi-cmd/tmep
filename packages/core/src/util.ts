@@ -73,7 +73,8 @@ export async function retryTransient<T>(fn: () => Promise<T>, attempts: number):
       return await fn();
     } catch (e) {
       if (i >= attempts || !TRANSIENT_FS.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
-      await new Promise((r) => setTimeout(r, Math.min(250, 10 * 2 ** (i - 1))));
+      const base = Math.min(250, 10 * 2 ** (i - 1));
+      await new Promise((r) => setTimeout(r, base + Math.floor(Math.random() * 17)));
     }
   }
 }

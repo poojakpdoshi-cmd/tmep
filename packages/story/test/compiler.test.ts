@@ -28,21 +28,21 @@ test('compiler: compiles all 5 intent kinds with platform safe-zones and determi
     platform: 'youtube',
     ratio: '16:9',
   });
-  assert.ok(demo.spec.layers.some((l) => l.kind === 'image' && l.asset === 'i1'));
+  assert.ok(demo.spec!.layers.some((l) => l.kind === 'image' && l.asset === 'i1'));
 
   const sports = compileIntent({
     kind: 'sports_stat',
     title: 'Match Telemetry',
     chart: { chartType: 'hbar', data: [{ label: 'Possession', value: 64 }, { label: 'Shots', value: 18 }], max: 100, unit: '%' },
   });
-  assert.ok(sports.spec.layers.some((l) => l.kind === 'chart'));
+  assert.ok(sports.spec!.layers.some((l) => l.kind === 'chart'));
 
   const diagram = compileIntent({
     kind: 'diagram',
     title: 'Three-Stage Pipeline',
     steps: ['Ingest footage', 'Compile layout', 'Verify frames'],
   });
-  assert.equal(diagram.spec.layers.filter((l) => l.id.startsWith('step')).length, 3);
+  assert.equal(diagram.spec!.layers.filter((l) => l.id.startsWith('step')).length, 3);
 
   const talk = compileIntent({
     kind: 'talking_head_callout',

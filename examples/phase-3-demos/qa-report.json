@@ -1,0 +1,205 @@
+{
+  "generatedAt": "2026-11-28T04:06:14.351Z",
+  "sourceNote": "Source footage is locally generated representative media (testsrc2, mandelbrot, Canvas UI mockup, synthesized audio) to avoid external unverified stock/API dependencies.",
+  "demos": [
+    {
+      "name": "01-talking-head-reel",
+      "state": "done",
+      "dur": 30,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 19185,
+      "decisions": [
+        "9:16 Reels safe zones with presenter reserve",
+        "talking_head_reel workflow + dialogue EQ + two-pass loudnorm (-14 LUFS)",
+        "Smooth punch-in zooms at 6s and 18s + PiP cutaway at 12s"
+      ],
+      "qa": {
+        "ok": 1,
+        "defects": 0,
+        "advisories": 1,
+        "metrics": {
+          "expectedDur": 30,
+          "videoDur": 30,
+          "audioDur": 30,
+          "maxVolumeDb": -11.7,
+          "integratedLufs": -13.05,
+          "truePeakDbtp": -11.69,
+          "lra": 0,
+          "silentSegments": 0,
+          "blackSegments": 0,
+          "yMin": 0,
+          "yMax": 255
+        },
+        "findings": [
+          {
+            "code": "colour-clipping",
+            "severity": "advisory",
+            "msg": "full-range luma extremes detected (YMIN=0, YMAX=255)"
+          }
+        ]
+      },
+      "out": "examples/phase-3-demos/out/01-talking-head-reel.mp4",
+      "sheet": "examples/phase-3-demos/out/01-talking-head-reel-sheet.jpg"
+    },
+    {
+      "name": "02-cinematic-montage",
+      "state": "done",
+      "dur": 31.5,
+      "w": 1920,
+      "h": 1080,
+      "audio": true,
+      "ms": 66856,
+      "decisions": [
+        "4-clip 30s 16:9 montage with cinematic-dissolve and luma-fade transitions",
+        "J-cut and L-cut audio overlaps + deterministic shot matching (colormatch)",
+        "Warm colour grade + subtle vignette + BT.709 output tagging"
+      ],
+      "qa": {
+        "ok": 1,
+        "defects": 0,
+        "advisories": 1,
+        "metrics": {
+          "expectedDur": 31.466666666666665,
+          "videoDur": 31.466667,
+          "audioDur": 31.5,
+          "maxVolumeDb": -7,
+          "integratedLufs": -13.95,
+          "truePeakDbtp": -6.95,
+          "lra": 0.4,
+          "silentSegments": 0,
+          "blackSegments": 0,
+          "yMin": 0,
+          "yMax": 255
+        },
+        "findings": [
+          {
+            "code": "colour-clipping",
+            "severity": "advisory",
+            "msg": "full-range luma extremes detected (YMIN=0, YMAX=255)"
+          }
+        ]
+      },
+      "out": "examples/phase-3-demos/out/02-cinematic-montage.mp4",
+      "sheet": "examples/phase-3-demos/out/02-cinematic-montage-sheet.jpg"
+    },
+    {
+      "name": "03-sports-highlights",
+      "state": "done",
+      "dur": 28.5,
+      "w": 1080,
+      "h": 1920,
+      "audio": true,
+      "ms": 31671,
+      "decisions": [
+        "sports_highlights workflow driven by supplied event timestamps [5, 12, 20, 26]",
+        "Variable speed ramp on clip 1 + 1.5s freeze-frame callout at 14s",
+        "Animated bar chart telemetry overlay in safe zone"
+      ],
+      "qa": {
+        "ok": 1,
+        "defects": 0,
+        "advisories": 1,
+        "metrics": {
+          "expectedDur": 28.5,
+          "videoDur": 28.5,
+          "audioDur": 28.5,
+          "maxVolumeDb": -10.1,
+          "integratedLufs": -14.01,
+          "truePeakDbtp": -10.07,
+          "lra": 0.9,
+          "silentSegments": 1,
+          "blackSegments": 0,
+          "yMin": 0,
+          "yMax": 255
+        },
+        "findings": [
+          {
+            "code": "colour-clipping",
+            "severity": "advisory",
+            "msg": "full-range luma extremes detected (YMIN=0, YMAX=255)"
+          }
+        ]
+      },
+      "out": "examples/phase-3-demos/out/03-sports-highlights.mp4",
+      "sheet": "examples/phase-3-demos/out/03-sports-highlights-sheet.jpg"
+    },
+    {
+      "name": "04-product-demo",
+      "state": "done",
+      "dur": 30,
+      "w": 1920,
+      "h": 1080,
+      "audio": true,
+      "ms": 61189,
+      "decisions": [
+        "product_demo workflow with crisp-callout drop shadow and measured Canvas UI card",
+        "2-up horizontal splitscreen comparison at 12s + PiP presenter at 20s",
+        "Smooth reframe pan on primary track + YouTube -14 LUFS two-pass master"
+      ],
+      "qa": {
+        "ok": 1,
+        "defects": 0,
+        "advisories": 1,
+        "metrics": {
+          "expectedDur": 30,
+          "videoDur": 30,
+          "audioDur": 30,
+          "maxVolumeDb": -7.7,
+          "integratedLufs": -13.05,
+          "truePeakDbtp": -7.71,
+          "lra": 0.1,
+          "silentSegments": 0,
+          "blackSegments": 0,
+          "yMin": 0,
+          "yMax": 255
+        },
+        "findings": [
+          {
+            "code": "colour-clipping",
+            "severity": "advisory",
+            "msg": "full-range luma extremes detected (YMIN=0, YMAX=255)"
+          }
+        ]
+      },
+      "out": "examples/phase-3-demos/out/04-product-demo.mp4",
+      "sheet": "examples/phase-3-demos/out/04-product-demo-sheet.jpg"
+    },
+    {
+      "name": "05-educational-explainer",
+      "state": "done",
+      "dur": 60,
+      "w": 1920,
+      "h": 1080,
+      "audio": true,
+      "ms": 64858,
+      "decisions": [
+        "60-second 16:9 multi-chapter educational explainer",
+        "educational_explainer + diagram + animated_data_viz workflows",
+        "Audio enhancement (dialogue EQ, light compression, -14 LUFS) + subtle glow"
+      ],
+      "qa": {
+        "ok": 1,
+        "defects": 0,
+        "advisories": 0,
+        "metrics": {
+          "expectedDur": 60,
+          "videoDur": 60,
+          "audioDur": 60,
+          "maxVolumeDb": -11.6,
+          "integratedLufs": -13.06,
+          "truePeakDbtp": -11.58,
+          "lra": 0,
+          "silentSegments": 0,
+          "blackSegments": 0,
+          "yMin": 5,
+          "yMax": 248
+        },
+        "findings": []
+      },
+      "out": "examples/phase-3-demos/out/05-educational-explainer.mp4",
+      "sheet": "examples/phase-3-demos/out/05-educational-explainer-sheet.jpg"
+    }
+  ]
+}

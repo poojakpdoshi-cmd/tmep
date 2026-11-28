@@ -33,8 +33,9 @@
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
-import { type Timeline, type Placed, TmepError, hashOf, exists, toPosix } from '../../core/src/index.ts';
-import { ffmpeg } from '../../media/src/ffmpeg.ts';
+import { type Timeline, type Placed, type AudioClipPost, type AudioMaster, type SpeedKey, TmepError, hashOf, exists, toPosix, sampleSpeedRamp } from '../../core/src/index.ts';
+import { ffmpeg, ffmpegInfo } from '../../media/src/ffmpeg.ts';
+import { run } from '../../media/src/exec.ts';
 import type { MediaRef } from './graph.ts';
 import { pool, tmpFor, publish, maybeScript } from './stage.ts';
 
@@ -80,17 +81,34 @@ export const AUDIO_LIMITS: AudioLimits = { minClips: 8, maxClips: 32, every: 8, 
 /** Sample position of a timeline frame. */
 export const samplePos = (frame: number, fps: number): number => Math.round((frame * SR) / fps);
 
+export const PLATFORM_AUDIO_TARGETS: Record<NonNullable<AudioMaster['target']>, { lufs: number; tp: number; lra: number }> = {
+  reels: { lufs: -14, tp: -1.0, lra: 11 },
+  shorts: { lufs: -14, tp: -1.0, lra: 11 },
+  tiktok: { lufs: -14, tp: -1.0, lra: 11 },
+  youtube: { lufs: -14, tp: -1.0, lra: 11 },
+  podcast: { lufs: -16, tp: -1.5, lra: 9 },
+  broadcast: { lufs: -23, tp: -1.0, lra: 7 },
+  cinema: { lufs: -24, tp: -2.0, lra: 14 },
+};
+
 /** One clip as the audio stage sees it. */
 export interface ClipAudio {
-  /** Source file; undefined for a clip without sound (image, muted, no audio stream). */
+  /** Source file; undefined for a clip without sound (image, muted, no audio stream, freeze). */
   path?: string;
   in: number;
+  out?: number;
+  mediaDur?: number;
   speed: number;
   vol: number;
   /** Length in samples. */
   n: number;
   /** Crossfade with the previous clip in samples (0 = hard cut). */
   x: number;
+  jcut?: number;
+  lcut?: number;
+  reverse?: boolean;
+  speedRamp?: SpeedKey[];
+  audio?: AudioClipPost;
   /** Hash of everything above except the path (the media content hash stands in for it). */
   hash: string;
 }
@@ -116,12 +134,39 @@ export function clipAudio(placed: Placed[], media: Record<string, MediaRef>, fps
   return placed.map((p) => {
     const c = p.clip;
     const m = media[c.src]!;
-    const audible = m.kind !== 'image' && m.audio && !c.mute;
+    const isFreeze = c.freeze !== undefined && c.freeze > 0;
+    const audible = m.kind !== 'image' && m.audio && !c.mute && !isFreeze;
     const at = samplePos(p.startFrame, fps);
     const n = samplePos(p.startFrame + p.frames, fps) - at;
     const x = p.transFrames > 0 ? samplePos(p.startFrame + p.transFrames, fps) - at : 0;
-    const hash = hashOf(audible ? { h: m.hash, in: c.in, sp: c.speed, vol: c.vol, n, x } : { silent: true, n, x });
-    return { ...(audible ? { path: m.path } : {}), in: c.in, speed: c.speed, vol: c.vol, n, x, hash };
+    const hash = hashOf(
+      audible
+        ? {
+            h: m.hash, in: c.in, out: c.out, sp: c.speed, vol: c.vol, n, x,
+            ...(c.jcut ? { jcut: c.jcut } : {}),
+            ...(c.lcut ? { lcut: c.lcut } : {}),
+            ...(c.reverse ? { rev: true } : {}),
+            ...(c.speedRamp ? { sr: c.speedRamp } : {}),
+            ...(c.audio ? { ap: c.audio } : {}),
+          }
+        : { silent: true, n, x },
+    );
+    return {
+      ...(audible ? { path: m.path } : {}),
+      in: c.in,
+      out: c.out,
+      mediaDur: m.dur,
+      speed: c.speed,
+      vol: c.vol,
+      n,
+      x,
+      ...(c.jcut ? { jcut: c.jcut } : {}),
+      ...(c.lcut ? { lcut: c.lcut } : {}),
+      ...(c.reverse ? { reverse: true } : {}),
+      ...(c.speedRamp ? { speedRamp: c.speedRamp } : {}),
+      ...(c.audio ? { audio: c.audio } : {}),
+      hash,
+    };
   });
 }
 
@@ -141,14 +186,19 @@ export function planSpeech(clips: ClipAudio[], limits: AudioLimits = AUDIO_LIMIT
   const end = cursor;
   // A chunk may start at clip j when the clip can be split after its fade-in: that needs the
   // fade-in and the following fade-out to fit in the clip without overlapping.
-  const canStart = (j: number) => clips[j]!.x === 0 || clips[j]!.x + (clips[j + 1]?.x ?? 0) <= clips[j]!.n;
+  // Also keep J/L-cut pairs together unless forced by chunk limits.
+  const canStart = (j: number, forced: boolean) => {
+    if (clips[j]!.x > 0 && clips[j]!.x + (clips[j + 1]?.x ?? 0) > clips[j]!.n) return false;
+    if (!forced && ((clips[j]!.jcut ?? 0) > 0 || (clips[j - 1]!.lcut ?? 0) > 0)) return false;
+    return true;
+  };
   let size = 1;
   let chars = inputChars(clips[0]!);
   for (let j = 1; j < clips.length; j++) {
     const c = clips[j]!;
     const forced = size >= limits.maxClips || chars + inputChars(c) > limits.maxInputChars;
     const natural = size >= limits.minClips && parseInt(c.hash.slice(0, 8), 16) % limits.every === 0;
-    if ((forced || natural) && canStart(j)) {
+    if ((forced || natural) && canStart(j, forced)) {
       starts.push(j);
       size = 1;
       chars = inputChars(c);
@@ -176,43 +226,134 @@ export interface StemArgs {
 }
 
 /** FFmpeg arguments for one speech chunk: at most `maxClips` + 1 inputs, PCM out. */
+function audioPostFilters(ap: AudioClipPost): string[] {
+  const f: string[] = [];
+  if (ap.hp) f.push(`highpass=f=${Math.round(ap.hp)}`);
+  if (ap.lp) f.push(`lowpass=f=${Math.round(ap.lp)}`);
+  if (ap.denoise && ap.denoise > 0) f.push(`afftdn=nf=${Math.round(-15 - ap.denoise * 25)}`);
+  if (ap.eq === 'dialogue') {
+    f.push('equalizer=f=120:t=q:w=1:g=-3', 'equalizer=f=3000:t=q:w=1.4:g=3', 'equalizer=f=8000:t=q:w=1.2:g=1.5');
+  } else if (ap.eq === 'warm') {
+    f.push('equalizer=f=200:t=q:w=1.2:g=2.5', 'equalizer=f=4500:t=q:w=1.2:g=-1.5');
+  } else if (ap.eq === 'crisp') {
+    f.push('equalizer=f=250:t=q:w=1:g=-2', 'equalizer=f=6000:t=q:w=1.2:g=3');
+  }
+  if (ap.deess && ap.deess > 0) {
+    f.push(`equalizer=f=6500:t=q:w=2.2:g=${n3(-ap.deess * 6)}`);
+  }
+  if (ap.comp === 'light') f.push('acompressor=threshold=-20dB:ratio=2:attack=15:release=150');
+  else if (ap.comp === 'medium') f.push('acompressor=threshold=-18dB:ratio=3.5:attack=10:release=120');
+  else if (ap.comp === 'heavy') f.push('acompressor=threshold=-16dB:ratio=6:attack=5:release=90');
+  return f;
+}
+
+function pushTempo(chain: string[], speed: number): void {
+  let sp = speed;
+  while (sp > 2.0) {
+    chain.push('atempo=2.0');
+    sp /= 2;
+  }
+  while (sp < 0.5) {
+    chain.push('atempo=0.5');
+    sp /= 0.5;
+  }
+  if (Math.abs(sp - 1) > 1e-6) chain.push(`atempo=${n3(sp)}`);
+}
+
 export function speechChunkArgs(chunk: SpeechChunk, out: string): StemArgs {
   const inputs: string[] = [];
   const g: string[] = [];
   let k = 0;
+  const hasJL = chunk.clips.some((c) => (c.jcut ?? 0) > 0 || (c.lcut ?? 0) > 0);
+  // Compute chunk-relative timeline start sample for each clip (used when J/L-cuts are active)
+  const clipPos: number[] = [];
+  let cursor = 0;
+  for (let j = 0; j < chunk.clips.length; j++) {
+    const c = chunk.clips[j]!;
+    if (j === 0) clipPos.push(-chunk.head);
+    else clipPos.push(cursor - c.x);
+    cursor = (j === 0 ? -chunk.head : clipPos[j]!) + c.n;
+  }
+
   chunk.clips.forEach((c, j) => {
+    const jSamples = hasJL && c.jcut && j > 0 && c.path !== undefined
+      ? Math.min(Math.round(c.jcut * SR), Math.floor((c.in / c.speed) * SR), Math.max(0, clipPos[j]!))
+      : 0;
+    const lSamples = hasJL && c.lcut && j < chunk.clips.length - 1 && c.path !== undefined
+      ? Math.min(Math.round(c.lcut * SR), Math.floor((Math.max(0, (c.mediaDur ?? (c.out ?? c.in) + 10) - (c.out ?? c.in)) / c.speed) * SR), chunk.clips[j + 1]!.n)
+      : 0;
+    const targetSamples = jSamples + c.n + lSamples;
+    const inSec = Math.max(0, c.in - (jSamples / SR) * c.speed);
+
     const chain: string[] = [];
     let src: string;
     if (c.path !== undefined) {
-      inputs.push('-ss', n3(c.in), '-t', n3((c.n / SR) * c.speed + 0.3), '-i', c.path);
+      const srcDur = c.speedRamp?.length
+        ? Math.max(0.1, (c.out ?? c.in + 1) - c.in)
+        : (targetSamples / SR) * c.speed;
+      inputs.push('-ss', n3(inSec), '-t', n3(srcDur + 0.3), '-i', c.path);
       src = `[${k++}:a]`;
       chain.push(`aresample=${SR}`, STEREO, 'asetpts=PTS-STARTPTS');
-      let sp = c.speed;
-      while (sp > 2.0) {
-        chain.push('atempo=2.0');
-        sp /= 2;
+      if (c.reverse) {
+        chain.push(`atrim=duration=${n3(srcDur)}`, 'areverse', 'asetpts=PTS-STARTPTS');
       }
-      while (sp < 0.5) {
-        chain.push('atempo=0.5');
-        sp /= 0.5;
+      if (c.speedRamp?.length) {
+        const segs = 8;
+        const du = srcDur / segs;
+        const rawIn = `${src}${chain.join(',')}`;
+        const splitLabels = Array.from({ length: segs }, (_, si) => `[sr${j}_${si}]`).join('');
+        g.push(`${rawIn},asplit=${segs}${splitLabels}`);
+        const segOuts: string[] = [];
+        for (let si = 0; si < segs; si++) {
+          const sp = Math.max(0.1, sampleSpeedRamp(c.speedRamp, (si + 0.5) * du));
+          const segChain = [`atrim=start=${n3(si * du)}:end=${n3((si + 1) * du)}`, 'asetpts=PTS-STARTPTS'];
+          pushTempo(segChain, sp);
+          g.push(`[sr${j}_${si}]${segChain.join(',')}[sro${j}_${si}]`);
+          segOuts.push(`[sro${j}_${si}]`);
+        }
+        g.push(`${segOuts.join('')}concat=n=${segs}:v=0:a=1[srfin${j}]`);
+        src = `[srfin${j}]`;
+        chain.length = 0;
+      } else {
+        pushTempo(chain, c.speed);
       }
-      if (Math.abs(sp - 1) > 1e-6) chain.push(`atempo=${n3(sp)}`);
+      if (c.audio) chain.push(...audioPostFilters(c.audio));
       if (c.vol !== 1) chain.push(`volume=${n3(c.vol)}`);
-      chain.push(`atrim=end_sample=${c.n}`, `apad=whole_len=${c.n}`, `afade=t=in:ss=0:ns=${FADE_IN}`, `afade=t=out:ss=${Math.max(0, c.n - FADE_OUT)}:ns=${FADE_OUT}`);
+      const fIn = c.audio?.fadeIn ? Math.round(c.audio.fadeIn * SR) : FADE_IN;
+      const fOut = c.audio?.fadeOut ? Math.round(c.audio.fadeOut * SR) : FADE_OUT;
+      chain.push(`atrim=end_sample=${targetSamples}`, `apad=whole_len=${targetSamples}`, `afade=t=in:ss=0:ns=${fIn}`, `afade=t=out:ss=${Math.max(0, targetSamples - fOut)}:ns=${fOut}`);
     } else {
       src = '';
-      chain.push(`anullsrc=r=${SR}:cl=stereo`, STEREO, `atrim=end_sample=${c.n}`);
+      chain.push(`anullsrc=r=${SR}:cl=stereo`, STEREO, `atrim=end_sample=${targetSamples}`);
     }
     // the previous chunk rendered this clip's fade-in: continue right after it
     if (j === 0 && chunk.head > 0) chain.push(`atrim=start_sample=${chunk.head}`, RESTAMP);
-    g.push(`${src}${chain.join(',')}[a${j}]`);
+
+    if (hasJL) {
+      const startSample = j === 0 ? 0 : Math.max(0, clipPos[j]! - jSamples);
+      if (startSample > 0) {
+        g.push(`${src}${chain.join(',')}[ac${j}]`);
+        g.push(`anullsrc=r=${SR}:cl=stereo,${STEREO},atrim=end_sample=${startSample}[ap${j}]`);
+        g.push(`[ap${j}][ac${j}]concat=n=2:v=0:a=1,apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[a${j}]`);
+      } else {
+        g.push(`${src}${chain.join(',')},apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[a${j}]`);
+      }
+    } else {
+      g.push(`${src}${chain.join(',')}[a${j}]`);
+    }
   });
   let cur = 'a0';
-  for (let j = 1; j < chunk.clips.length; j++) {
-    const c = chunk.clips[j]!;
-    if (c.x > 0) g.push(`[${cur}][a${j}]acrossfade=ns=${c.x}:c1=tri:c2=tri[m${j}]`);
-    else g.push(`[${cur}][a${j}]concat=n=2:v=0:a=1[m${j}]`);
-    cur = `m${j}`;
+  if (hasJL && chunk.clips.length > 1) {
+    const mixInputs = chunk.clips.map((_, j) => `[a${j}]`).join('');
+    g.push(`${mixInputs}amix=inputs=${chunk.clips.length}:duration=longest:normalize=0[jlout]`);
+    cur = 'jlout';
+  } else {
+    for (let j = 1; j < chunk.clips.length; j++) {
+      const c = chunk.clips[j]!;
+      if (c.x > 0) g.push(`[${cur}][a${j}]acrossfade=ns=${c.x}:c1=tri:c2=tri[m${j}]`);
+      else g.push(`[${cur}][a${j}]concat=n=2:v=0:a=1[m${j}]`);
+      cur = `m${j}`;
+    }
   }
   // exact length whatever happens upstream; this is also where a borrowed clip is cut off
   g.push(`[${cur}]apad=whole_len=${chunk.samples},atrim=end_sample=${chunk.samples},${RESTAMP}[aout]`);
@@ -320,6 +461,14 @@ function silenceArgs(out: string): StemArgs {
   return { args: ['-filter_complex', graph, '-map', '[aout]', ...PCM, out], graph };
 }
 
+export interface LoudnormMeasured {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  target_offset: string;
+}
+
 export interface FinalMix {
   /** Concat list of the speech stems (relative to the working directory). */
   speechList: string;
@@ -331,6 +480,8 @@ export interface FinalMix {
   out: string;
   /** Output encoder arguments (default: the AAC settings of the final mix). */
   codec?: string[];
+  /** Optional pass-1 loudnorm measurements for two-pass mastering. */
+  loudnormMeasured?: LoudnormMeasured;
 }
 
 /**
@@ -371,7 +522,25 @@ export function finalMixArgs(tl: Timeline, mix: FinalMix): StemArgs {
     master = 'mix';
   }
   const post: string[] = [];
-  if (tl.loudness < 0) post.push(`loudnorm=I=${tl.loudness}:TP=-1.5:LRA=11`, `aresample=${SR}`);
+  const tgt = tl.master?.target ? PLATFORM_AUDIO_TARGETS[tl.master.target] : undefined;
+  const lufs = tl.master?.lufs ?? tgt?.lufs ?? tl.loudness;
+  const tp = tl.master?.tp ?? tgt?.tp ?? -1.5;
+  const lra = tl.master?.lra ?? tgt?.lra ?? 11;
+  if (lufs < 0) {
+    if (mix.loudnormMeasured) {
+      const m = mix.loudnormMeasured;
+      post.push(
+        `loudnorm=I=${lufs}:TP=${tp}:LRA=${lra}:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`,
+        `aresample=${SR}`,
+      );
+    } else {
+      post.push(`loudnorm=I=${lufs}:TP=${tp}:LRA=${lra}`, `aresample=${SR}`);
+    }
+  }
+  if (tl.master?.limiter !== undefined) {
+    const lin = Math.min(1, Math.max(0.0625, 10 ** (tl.master.limiter / 20)));
+    post.push(`alimiter=limit=${n3(lin)}:attack=5:release=50`);
+  }
   let len = mix.totalSamples;
   if (mix.range) {
     const a = Math.round(mix.range.s * SR);
@@ -502,6 +671,30 @@ export async function renderAudio(job: AudioJob): Promise<AudioStats> {
     await fsp.writeFile(path.join(job.work, 'sfx.txt'), lines.join('\n') + '\n');
   }
   const music = job.tl.music ? job.media[job.tl.music.src] : undefined;
+  const tgt = job.tl.master?.target ? PLATFORM_AUDIO_TARGETS[job.tl.master.target] : undefined;
+  const targetLufs = job.tl.master?.lufs ?? tgt?.lufs ?? job.tl.loudness;
+  let loudnormMeasured: LoudnormMeasured | undefined;
+  if (job.tl.master?.twoPass && targetLufs < 0) {
+    const pass1 = finalMixArgs(job.tl, {
+      speechList: 'speech.txt',
+      ...(windows.length ? { sfxList: 'sfx.txt' } : {}),
+      ...(music && (music.kind === 'audio' || music.audio) ? { music } : {}),
+      totalSamples,
+      ...(job.range ? { range: job.range } : {}),
+      out: '-',
+      codec: ['-f', 'null'],
+    });
+    // Replace loudnorm in pass 1 with print_format=json
+    const p1Args = pass1.args.map((a) =>
+      a.includes('loudnorm=') ? a.replace(/loudnorm=[^,]+/, (m) => `${m}:print_format=json`) : a,
+    );
+    const { ffmpeg: bin } = await ffmpegInfo();
+    const res = await run(bin, p1Args, { cwd: job.work, signal: job.signal });
+    const match = /\{[\s\S]*?"input_i"[\s\S]*?\}/.exec(`${res.stdout}\n${res.stderr}`);
+    if (match) {
+      loudnormMeasured = JSON.parse(match[0]) as LoudnormMeasured;
+    }
+  }
   const { args } = finalMixArgs(job.tl, {
     speechList: 'speech.txt',
     ...(windows.length ? { sfxList: 'sfx.txt' } : {}),
@@ -510,6 +703,7 @@ export async function renderAudio(job: AudioJob): Promise<AudioStats> {
     ...(job.range ? { range: job.range } : {}),
     out: job.out,
     ...(job.codec ? { codec: job.codec } : {}),
+    ...(loudnormMeasured ? { loudnormMeasured } : {}),
   });
   maxInputs = Math.max(maxInputs, args.filter((a) => a === '-i').length);
   await ffmpeg({ args: await maybeScript(args, job.work), cwd: job.work, signal: job.signal });

@@ -3,15 +3,16 @@
  * polling MCP client or a second CLI would) until a deadline, recording any error or torn read.
  *   node tests/json-reader-child.ts <file> <deadlineEpochMs> [intervalMs]   (0 / omitted = tight loop)
  */
-import { writeSync, promises as fsp } from 'node:fs';
+import { existsSync, writeFileSync, writeSync, promises as fsp } from 'node:fs';
 import { readJson } from '../packages/core/src/util.ts';
 
-const [file, until, every = '0'] = process.argv.slice(2) as [string, string, string?];
+const [file, until, every = '0', stopFile, readyFile] = process.argv.slice(2) as [string, string, string?, string?, string?];
 const pause = Number(every);
 const errors: string[] = [];
 const rawErrors: string[] = [];
 let reads = 0;
-while (Date.now() < Number(until)) {
+if (readyFile) writeFileSync(readyFile, '1');
+while (Date.now() < Number(until) && (!stopFile || !existsSync(stopFile))) {
   // diagnostic: a plain read without retries (pre-A3 readJson) — counts real sharing violations
   try {
     JSON.parse(await fsp.readFile(file, 'utf8'));

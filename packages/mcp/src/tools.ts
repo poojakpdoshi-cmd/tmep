@@ -50,8 +50,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_inspect',
-    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes. For scene diagnostics pass scene ID or draft spec.',
-    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), ...project, ...detail }),
+    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa. Pass file for QA on a rendered MP4.',
+    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), file: str().optional(), targetLufs: num().optional(), ...project, ...detail }),
     annotations: { readOnlyHint: true },
   },
   {
