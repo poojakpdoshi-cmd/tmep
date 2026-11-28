@@ -47,6 +47,8 @@ export interface OpContext {
 const anchor = union([num(), str({ min: 1 })]);
 const ratio = oneOf(['9:16', '16:9', '1:1', '4:5'] as const);
 const fit = oneOf(['cover', 'contain', 'blur'] as const);
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
 export const TRANSITIONS = ['fade', 'dissolve', 'fadeblack', 'fadewhite', 'wipeleft', 'wiperight', 'slideleft', 'slideright', 'slideup', 'smoothleft', 'smoothright', 'smoothup', 'circleopen', 'zoomin', 'radial', 'luma', 'none', ...Object.keys(TRANSITION_PRESETS)] as const;
 
 export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
@@ -670,13 +672,28 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `loudness ${tl.loudness}`;
     }
     case 'jcut': {
+      // The incoming clip's audio starts early, so it needs source audio before its in-point.
       const c = findClip(tl, op.clip as string);
       c.jcut = op.d as number;
+      const first = tl.clips[0] === c;
+      const avail = first ? 0 : c.in / c.speed;
+      if (avail + 1e-6 < c.jcut) {
+        const why = first ? 'the first clip has no previous clip to overlap' : `only ${r3(avail)}s of source audio before its in-point`;
+        return `jcut ${c.id} ${r3(Math.min(avail, c.jcut))}s (requested ${c.jcut}s; ${why})`;
+      }
       return `jcut ${c.id} ${c.jcut}s`;
     }
     case 'lcut': {
+      // The outgoing clip's audio continues under the next clip, so it needs source audio after its out-point.
       const c = findClip(tl, op.clip as string);
       c.lcut = op.d as number;
+      const last = tl.clips[tl.clips.length - 1] === c;
+      const dur = ctx.assets[c.src]?.dur ?? Infinity;
+      const avail = last ? 0 : Math.max(0, (dur - c.out) / c.speed);
+      if (avail + 1e-6 < c.lcut) {
+        const why = last ? 'the last clip has no next clip to overlap' : `only ${r3(avail)}s of source audio after its out-point`;
+        return `lcut ${c.id} ${r3(Math.min(avail, c.lcut))}s (requested ${c.lcut}s; ${why})`;
+      }
       return `lcut ${c.id} ${c.lcut}s`;
     }
     case 'ramp': {

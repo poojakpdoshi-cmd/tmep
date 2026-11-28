@@ -33,7 +33,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { promises as fsp } from 'node:fs';
-import { type Timeline, type Placed, type AudioClipPost, type AudioMaster, type SpeedKey, TmepError, hashOf, exists, toPosix, sampleSpeedRamp } from '../../core/src/index.ts';
+import { type Timeline, type Placed, type AudioClipPost, type AudioMaster, type SpeedKey, TmepError, hashOf, exists, toPosix, speedRampSegments } from '../../core/src/index.ts';
 import { ffmpeg, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { run } from '../../media/src/exec.ts';
 import type { MediaRef } from './graph.ts';
@@ -298,19 +298,24 @@ export function speechChunkArgs(chunk: SpeechChunk, out: string): StemArgs {
         chain.push(`atrim=duration=${n3(srcDur)}`, 'areverse', 'asetpts=PTS-STARTPTS');
       }
       if (c.speedRamp?.length) {
-        const segs = 8;
-        const du = srcDur / segs;
+        // Same segment map as the video (speedRampSegments), cut on exact sample boundaries.
+        const map = speedRampSegments(c.speedRamp, srcDur);
+        const segs = map.length;
         const rawIn = `${src}${chain.join(',')}`;
         const splitLabels = Array.from({ length: segs }, (_, si) => `[sr${j}_${si}]`).join('');
         g.push(`${rawIn},asplit=${segs}${splitLabels}`);
         const segOuts: string[] = [];
-        for (let si = 0; si < segs; si++) {
-          const sp = Math.max(0.1, sampleSpeedRamp(c.speedRamp, (si + 0.5) * du));
-          const segChain = [`atrim=start=${n3(si * du)}:end=${n3((si + 1) * du)}`, 'asetpts=PTS-STARTPTS'];
-          pushTempo(segChain, sp);
+        map.forEach((sg, si) => {
+          // atempo emits slightly less than in/speed for short inputs; over many segments that
+          // drifts audio ahead of picture. Give it 80 ms of extra input and cut its output to the
+          // exact sample length of the segment in the shared map.
+          const outN = Math.round(sg.outEnd * SR) - Math.round(sg.outStart * SR);
+          const segChain = [`atrim=start_sample=${Math.round(sg.srcStart * SR)}:end_sample=${Math.round(Math.min(srcDur + 0.3, sg.srcEnd + 0.08) * SR)}`, 'asetpts=PTS-STARTPTS'];
+          pushTempo(segChain, sg.speed);
+          segChain.push(`atrim=end_sample=${outN}`, `apad=whole_len=${outN}`, 'asetpts=PTS-STARTPTS');
           g.push(`[sr${j}_${si}]${segChain.join(',')}[sro${j}_${si}]`);
           segOuts.push(`[sro${j}_${si}]`);
-        }
+        });
         g.push(`${segOuts.join('')}concat=n=${segs}:v=0:a=1[srfin${j}]`);
         src = `[srfin${j}]`;
         chain.length = 0;
@@ -482,6 +487,8 @@ export interface FinalMix {
   codec?: string[];
   /** Optional pass-1 loudnorm measurements for two-pass mastering. */
   loudnormMeasured?: LoudnormMeasured;
+  /** The programme is digital silence: skip loudness normalization (FFmpeg's loudnorm emits NaN on it). */
+  silent?: boolean;
 }
 
 /**
@@ -526,7 +533,7 @@ export function finalMixArgs(tl: Timeline, mix: FinalMix): StemArgs {
   const lufs = tl.master?.lufs ?? tgt?.lufs ?? tl.loudness;
   const tp = tl.master?.tp ?? tgt?.tp ?? -1.5;
   const lra = tl.master?.lra ?? tgt?.lra ?? 11;
-  if (lufs < 0) {
+  if (lufs < 0 && !mix.silent) {
     if (mix.loudnormMeasured) {
       const m = mix.loudnormMeasured;
       post.push(
@@ -619,6 +626,16 @@ export interface AudioStats {
 const stemBytes = (samples: number) => samples * 8; // 32-bit float, stereo
 
 /** Render the mix for a timeline: stems (cached, a bounded number at a time), then the final pass. */
+/** True when the concatenated speech stems (speech.txt in `work`) contain no signal at all. */
+async function stemsSilent(work: string, signal?: AbortSignal): Promise<boolean> {
+  const { ffmpeg: bin } = await ffmpegInfo();
+  const res = await run(bin, ['-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', 'speech.txt', '-af', 'astats=metadata=0:reset=0', '-f', 'null', '-'], { cwd: work, signal });
+  const peaks = [...`${res.stdout}\n${res.stderr}`.matchAll(/Peak level dB:\s*(-?inf|-?[\d.]+)/g)].map((m) => m[1]!);
+  if (!peaks.length) return false;
+  const overall = peaks[peaks.length - 1]!;
+  return overall.endsWith('inf') || Number(overall) < -120;
+}
+
 export async function renderAudio(job: AudioJob): Promise<AudioStats> {
   const limits = job.limits ?? AUDIO_LIMITS;
   const fps = job.tl.settings.fps;
@@ -674,7 +691,11 @@ export async function renderAudio(job: AudioJob): Promise<AudioStats> {
   const tgt = job.tl.master?.target ? PLATFORM_AUDIO_TARGETS[job.tl.master.target] : undefined;
   const targetLufs = job.tl.master?.lufs ?? tgt?.lufs ?? job.tl.loudness;
   let loudnormMeasured: LoudnormMeasured | undefined;
-  if (job.tl.master?.twoPass && targetLufs < 0) {
+  // A programme of pure digital silence (e.g. a source whose audio track is silent, with no music
+  // or effects) makes loudnorm output NaN and the AAC encoder abort. Detect it on the PCM stems.
+  const hasMusic = !!(music && (music.kind === 'audio' || music.audio));
+  const silent = targetLufs < 0 && !windows.length && !hasMusic && (await stemsSilent(job.work, job.signal));
+  if (job.tl.master?.twoPass && targetLufs < 0 && !silent) {
     const pass1 = finalMixArgs(job.tl, {
       speechList: 'speech.txt',
       ...(windows.length ? { sfxList: 'sfx.txt' } : {}),
@@ -704,6 +725,7 @@ export async function renderAudio(job: AudioJob): Promise<AudioStats> {
     out: job.out,
     ...(job.codec ? { codec: job.codec } : {}),
     ...(loudnormMeasured ? { loudnormMeasured } : {}),
+    ...(silent ? { silent } : {}),
   });
   maxInputs = Math.max(maxInputs, args.filter((a) => a === '-i').length);
   await ffmpeg({ args: await maybeScript(args, job.work), cwd: job.work, signal: job.signal });
