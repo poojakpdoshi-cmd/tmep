@@ -299,6 +299,16 @@ export function parsePoints(v: unknown, requireConvex = true): [number, number][
     sign = Math.sign(cr);
   }
   if (Math.abs(area2) < 1e-9) throw bad('poly mask is degenerate (zero area)');
+  if (requireConvex) {
+    // Same-sign turns are not enough: a pentagram turns one way but winds twice. A simple convex
+    // polygon's exterior angles sum to exactly one full turn.
+    let turn = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, ay] = pts[i]!, [bx, by] = pts[(i + 1) % pts.length]!, [cx, cy] = pts[(i + 2) % pts.length]!;
+      turn += Math.atan2((bx - ax) * (cy - by) - (by - ay) * (cx - bx), (bx - ax) * (cx - bx) + (by - ay) * (cy - by));
+    }
+    if (Math.abs(Math.abs(turn) - 2 * Math.PI) > 1e-6) throw bad('poly mask must be a simple convex polygon (it crosses itself)', 'use shape=concave for other shapes');
+  }
   return pts.map(([x, y]) => [x, y]);
 }
 
@@ -339,6 +349,7 @@ export function presetKeys(kind: (typeof FX_PRESETS)[number], at: number, d: num
     default: {
       // pans: scale up just enough that the travel never exposes the frame edge
       const a = amt ?? 0.12;
+      if (a < 0) throw bad(`pan amount must be >= 0 (got ${a})`, 'reverse the direction with panleft/panright instead');
       const m = a / 2;
       const axis = kind === 'panleft' || kind === 'panright' ? 'x' : 'y';
       const dir = kind === 'panleft' || kind === 'panup' ? -1 : 1;
@@ -355,6 +366,8 @@ export function validateMask(m: FxMask): FxMask {
     throw bad(`unknown mask shape "${m.shape}"`, 'shapes: rect,ellipse,poly,concave,bezier');
   }
   if ((m.shape === 'rect' || m.shape === 'ellipse') && (!(m.w > 0) || !(m.h > 0))) throw bad('mask w and h must be > 0');
+  // rect/ellipse are defined by x/y/w/h: stray point data is rejected rather than stored.
+  if ((m.shape === 'rect' || m.shape === 'ellipse') && m.pts !== undefined) throw bad(`${m.shape} masks take x, y, w, h — not pts`, 'use shape=poly or concave for point lists');
   if (m.shape === 'poly') m.pts = parsePoints(m.pts, true);
   if (m.shape === 'concave') m.pts = parsePoints(m.pts, false);
   if (m.shape === 'bezier') {
