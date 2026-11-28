@@ -17,6 +17,7 @@ import path from 'node:path';
 import { TmepError } from '../../core/src/index.ts';
 import { ffmpegInfo, probe } from './ffmpeg.ts';
 import { run } from './exec.ts';
+import { analyzeSemantics, eventCandidates, textOverTime, type SemanticRecord, type Track } from './semantic.ts';
 
 export const FOOTAGE_SCHEMA = 'frame.footage/1';
 export const FOOTAGE_VERSION = '5a.1';
@@ -32,7 +33,7 @@ export interface FootageAnalysis {
   schema: typeof FOOTAGE_SCHEMA;
   asset: { file: string; dur: number; w: number; h: number; fps: number; audio: boolean; analyzedSeconds: number; truncated: boolean };
   provenance: { analyzer: string; version: string; method: string; params: Record<string, unknown>; ms: number }[];
-  capabilities: Record<'shots' | 'motion' | 'quality' | 'audio' | 'speech' | 'faces' | 'text', Capability>;
+  capabilities: Record<'shots' | 'motion' | 'quality' | 'audio' | 'speech' | 'faces' | 'text', Capability> & Partial<Record<'semantic', Capability>>;
   observed: {
     shots: Shot[];
     /** Mean absolute frame difference (0–255) per 0.5 s window. */
@@ -48,6 +49,11 @@ export interface FootageAnalysis {
     quality: QualityFlag[];
     /** 3×3 grid activity (motion + detail), normalized 0–1, row-major from top-left. */
     gridActivity: number[];
+    /** Phase 5 semantic layer: detections linked into tracks (no identity). */
+    tracks?: Track[];
+    gestures?: SemanticRecord['observed']['gestures'];
+    /** OCR tokens linked over time (temporal OCR). */
+    textTracks?: SemanticRecord['observed']['textTracks'];
   };
   inferred: {
     scenes: Scene[];
@@ -56,6 +62,15 @@ export interface FootageAnalysis {
     quietRegions: (Box & { activity: number })[];
     presenter?: Box & { confidence: number; basis: string };
     pacing: { cutsPerMinute: number; meanShotSec: number; label: 'low' | 'medium' | 'high' };
+    subjects?: SemanticRecord['inferred']['subjects'];
+    reframe?: SemanticRecord['inferred']['reframe'];
+    activities?: SemanticRecord['inferred']['activities'];
+    sceneTypes?: SemanticRecord['inferred']['sceneTypes'];
+    duplicates?: SemanticRecord['inferred']['duplicates'];
+    textChanges?: SemanticRecord['inferred']['textChanges'];
+    alignment?: SemanticRecord['inferred']['alignment'];
+    /** Moments where independent signals coincide; candidates only, never recognized event types. */
+    events?: SemanticRecord['inferred']['events'];
   };
 }
 
@@ -66,6 +81,12 @@ export interface FootageOptions {
   words?: { w: string; s: number; e: number }[];
   faces?: boolean;
   ocr?: boolean;
+  /** OCR every `textEvery` seconds (default 1) instead of only on shot keyframes. */
+  temporalText?: boolean;
+  textEvery?: number;
+  /** MediaPipe semantic layer (objects, faces, pose, embeddings; gestures on request). */
+  semantic?: boolean;
+  gestures?: boolean;
   signal?: AbortSignal;
   /** A previous analysis of the same media and settings: only the requested adapters run again. */
   base?: FootageAnalysis;
@@ -511,14 +532,17 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
     asset: { file, dur: r3(pr.dur), w: pr.w, h: pr.h, fps: pr.fps ?? 0, audio: pr.audio, analyzedSeconds: r3(seconds), truncated: pr.dur > maxSeconds },
     provenance, capabilities: caps, observed, inferred,
   };
-  return opts.faces || opts.ocr ? addAdapters(info.ffmpeg, file, result, opts) : result;
+  result.inferred.events = eventCandidates(result, [], [], []);
+  return opts.faces || opts.ocr || opts.temporalText || opts.semantic ? addAdapters(info.ffmpeg, file, result, opts) : result;
 }
+
+const textEvery = (prov: FootageAnalysis['provenance']) => prov.find((p) => p.analyzer === 'frame.ocr')?.params.every as number | undefined;
 
 /** Run the optional adapters (faces, visible text) on shot keyframes and derive the presenter region. */
 async function addAdapters(bin: string, file: string, a: FootageAnalysis, opts: FootageOptions): Promise<FootageAnalysis> {
   const keyTimes = a.observed.shots.slice(0, 40).map((s) => s.keyframe);
   const { observed, inferred, capabilities: caps, provenance } = a;
-  if (!(opts.faces || opts.ocr)) return a;
+  if (!(opts.faces || opts.ocr || opts.temporalText || opts.semantic)) return a;
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'frame-footage-'));
   try {
     if (opts.faces && caps.faces.status !== 'ok') {
@@ -527,15 +551,37 @@ async function addAdapters(bin: string, file: string, a: FootageAnalysis, opts: 
       caps.faces = r.cap; if (r.faces) observed.faces = r.faces;
       if (r.cap.status === 'ok') provenance.push({ analyzer: 'frame.faces', version: FOOTAGE_VERSION, method: r.cap.tool + ' on shot keyframes (location only, no identity)', params: { frames: keyTimes.length }, ms: Date.now() - t });
     }
-    if (opts.ocr && caps.text.status !== 'ok') {
+    const temporal = provenance.some((p) => p.analyzer === 'frame.ocr' && p.params.every);
+    if ((opts.ocr && caps.text.status !== 'ok') || (opts.temporalText && !temporal)) {
       const t = Date.now();
-      const r = await readText(bin, file, keyTimes, tmp);
+      const every = opts.textEvery ?? 1;
+      const times = opts.temporalText ? Array.from({ length: Math.min(180, Math.floor(a.asset.analyzedSeconds / every)) }, (_, i) => r3(i * every + every / 2)) : keyTimes;
+      const r = await readText(bin, file, times, tmp);
       caps.text = r.cap; if (r.text) observed.text = r.text;
-      if (r.cap.status === 'ok') provenance.push({ analyzer: 'frame.ocr', version: FOOTAGE_VERSION, method: 'tesseract psm 11 on shot keyframes, words ≥ 70% confidence', params: { frames: keyTimes.length }, ms: Date.now() - t });
+      if (r.cap.status === 'ok') {
+        for (let i = provenance.length - 1; i >= 0; i--) if (provenance[i]!.analyzer === 'frame.ocr') provenance.splice(i, 1);
+        provenance.push({ analyzer: 'frame.ocr', version: FOOTAGE_VERSION, method: `tesseract psm 11 on ${opts.temporalText ? `frames every ${every} s` : 'shot keyframes'}, words ≥ 70% confidence`, params: opts.temporalText ? { frames: times.length, every } : { frames: times.length }, ms: Date.now() - t });
+      }
+    }
+    if (opts.semantic && caps.semantic?.status !== 'ok') {
+      const r = await analyzeSemantics(bin, a, { gestures: opts.gestures, words: opts.words, signal: opts.signal, maxSeconds: a.asset.analyzedSeconds, textStep: textEvery(provenance) });
+      if (!r.record) caps.semantic = { status: 'unavailable', reason: r.reason ?? 'unknown' };
+      else {
+        caps.semantic = { status: 'ok', tool: 'MediaPipe Tasks (EfficientDet-Lite0, BlazeFace, BlazePose lite, MobileNetV3 embedder' + (opts.gestures ? ', gesture recognizer' : '') + ')' };
+        const { observed: o, inferred: n } = r.record;
+        observed.tracks = o.tracks; if (o.gestures.length) observed.gestures = o.gestures;
+        Object.assign(inferred, { subjects: n.subjects, reframe: n.reframe, activities: n.activities, sceneTypes: n.sceneTypes, duplicates: n.duplicates, ...(n.alignment.length ? { alignment: n.alignment } : {}) });
+        provenance.push({ analyzer: 'frame.semantic', version: FOOTAGE_VERSION, method: `MediaPipe CPU @ ${o.fps} fps (${o.frames} frames): IoU tracking, subjects, reframe keys, pose activity, scene rules, embedding similarity`, params: { fps: o.fps, frames: o.frames, gestures: !!opts.gestures, loadMs: r.loadMs, perFrameMs: r.perFrameMs, workerMaxRssMB: r.maxRssMB }, ms: r.ms });
+      }
     }
   } finally {
     await fsp.rm(tmp, { recursive: true, force: true });
   }
+  if (observed.text?.length) {
+    const tt = textOverTime(observed.text, textEvery(provenance) ?? 1);
+    observed.textTracks = tt.tracks; inferred.textChanges = tt.changes;
+  }
+  inferred.events = eventCandidates(a, observed.tracks ?? [], inferred.textChanges ?? [], inferred.duplicates ?? []);
   if (observed.faces?.some((f) => f.boxes.length)) {
     // Presenter region: the most persistent face box across keyframes, expanded to head and shoulders.
     const all = observed.faces.flatMap((f) => f.boxes);

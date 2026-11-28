@@ -1,0 +1,724 @@
+{
+ "spans": 23,
+ "spanAccuracy": 0.26,
+ "timeWeightedAccuracy": 0.3,
+ "confusion": {
+  "screen/slides": {
+   "other": 6,
+   "action": 1
+  },
+  "object close-up": {
+   "multi-person conversation": 1,
+   "screen/slides": 1,
+   "object close-up": 2,
+   "crowd/field": 1
+  },
+  "crowd/field": {
+   "multi-person conversation": 1
+  },
+  "talking-head": {
+   "action": 2,
+   "talking-head": 1
+  },
+  "empty/landscape": {
+   "other": 4
+  },
+  "action": {
+   "action": 2
+  },
+  "multi-person conversation": {
+   "multi-person conversation": 1
+  }
+ },
+ "rows": [
+  {
+   "id": "Gaming_360P-187a",
+   "ms": 12868,
+   "semanticMs": 3975,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 138,
+   "perFrameMs": 48.55,
+   "workerMaxRssMB": 257,
+   "recordKB": 7.2,
+   "shots": [
+    [
+     0,
+     20,
+     "other"
+    ]
+   ],
+   "tracks": [
+    "person1 0-8.5 n17 v0.006",
+    "truck1 0-2 n4 v0.044",
+    "person4 9-10.5 n3 v0.019",
+    "person5 11.5-15 n6 v0.034",
+    "bus1 12-15 n7 v0.073",
+    "person7 14-16 n5 v0.004"
+   ],
+   "subjects": {
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "primary person1: largest persistent person (17 samples, area 0.014)"
+    ]
+   },
+   "activities": [],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Gaming_360P-2330",
+   "ms": 11512,
+   "semanticMs": 3732,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 132,
+   "perFrameMs": 54.4,
+   "workerMaxRssMB": 283.5,
+   "recordKB": 4.1,
+   "shots": [
+    [
+     0,
+     20,
+     "other"
+    ]
+   ],
+   "tracks": [],
+   "subjects": {
+    "moving": [],
+    "basis": []
+   },
+   "activities": [],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Gaming_360P-3794",
+   "ms": 9120,
+   "semanticMs": 3545,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 131,
+   "perFrameMs": 47.625,
+   "workerMaxRssMB": 281.6,
+   "recordKB": 6.9,
+   "shots": [
+    [
+     0,
+     20,
+     "action"
+    ]
+   ],
+   "tracks": [
+    "person5 11.5-16 n9 v0.099",
+    "person6 12.5-15.5 n7 v0.064",
+    "person7 13.5-18 n10 v0.039",
+    "person8 16-17.5 n4 v0.066"
+   ],
+   "subjects": {
+    "primary": "person7",
+    "moving": [],
+    "basis": [
+     "primary person7: largest persistent person (10 samples, area 0.009)"
+    ]
+   },
+   "activities": [],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "HowTo_360P-06be",
+   "ms": 11869,
+   "semanticMs": 4025,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 160,
+   "perFrameMs": 59.025,
+   "workerMaxRssMB": 282.9,
+   "recordKB": 9.1,
+   "shots": [
+    [
+     0,
+     20,
+     "multi-person conversation"
+    ]
+   ],
+   "tracks": [
+    "person1 0-19.5 n39 v0.025",
+    "person2 0-19.5 n40 v0.004",
+    "person3 7.5-9 n3 v0.032",
+    "person4 10.5-11.5 n3 v0.023",
+    "person5 13.5-15.5 n4 v0.067",
+    "person6 17-19 n4 v0.041",
+    "book2 18-19 n3 v0"
+   ],
+   "subjects": {
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "primary person1: largest persistent person (39 samples, area 0.675)"
+    ]
+   },
+   "activities": [],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "HowTo_360P-09f8",
+   "ms": 9030,
+   "semanticMs": 3185,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 147,
+   "perFrameMs": 40.8,
+   "workerMaxRssMB": 264.8,
+   "recordKB": 7.7,
+   "shots": [
+    [
+     0,
+     1.7,
+     "object close-up"
+    ],
+    [
+     1.7,
+     11.1,
+     "other"
+    ],
+    [
+     11.1,
+     13,
+     "other"
+    ],
+    [
+     13,
+     19.967,
+     "other"
+    ]
+   ],
+   "tracks": [
+    "bottle2 7.5-10.5 n7 v0.022",
+    "traffic-light1 18-19 n3 v0.008"
+   ],
+   "subjects": {
+    "moving": [],
+    "basis": []
+   },
+   "activities": [],
+   "duplicates": [],
+   "events": [
+    {
+     "t": 1.5,
+     "signals": {
+      "moment": 1,
+      "cutAfter": 1
+     }
+    },
+    {
+     "t": 12,
+     "signals": {
+      "moment": 1,
+      "cutAfter": 1
+     }
+    }
+   ],
+   "textChanges": []
+  },
+  {
+   "id": "HowTo_360P-127f",
+   "ms": 14570,
+   "semanticMs": 3942,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 143,
+   "perFrameMs": 56.075,
+   "workerMaxRssMB": 281.8,
+   "recordKB": 8.8,
+   "shots": [
+    [
+     0,
+     3.5,
+     "talking-head"
+    ],
+    [
+     3.5,
+     17,
+     "screen/slides"
+    ],
+    [
+     17,
+     19.967,
+     "talking-head"
+    ]
+   ],
+   "tracks": [
+    "person1 0-3 n7 v0.072",
+    "clock1 0-3 n7 v0.003",
+    "book1 2-3 n3 v0.011",
+    "person2 17-19.5 n6 v0.091"
+   ],
+   "subjects": {
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "primary person1: largest persistent person (7 samples, area 0.301)"
+    ]
+   },
+   "activities": [
+    "person1:stationary",
+    "person2:gesturing"
+   ],
+   "duplicates": [
+    {
+     "a": "s1",
+     "b": "s3",
+     "similarity": 0.914,
+     "kind": "similar",
+     "basis": "mean MobileNetV3 embedding cosine"
+    }
+   ],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Lecture_360P-114f",
+   "ms": 12279,
+   "semanticMs": 3576,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 136,
+   "perFrameMs": 49.975,
+   "workerMaxRssMB": 282.9,
+   "recordKB": 5.7,
+   "shots": [
+    [
+     0,
+     19.967,
+     "other"
+    ]
+   ],
+   "tracks": [
+    "person1 0-8 n15 v0.063",
+    "horse2 4.5-7 n5 v0.057",
+    "person2 11-19 n16 v0.116",
+    "frisbee1 16.5-17.5 n3 v0.005"
+   ],
+   "subjects": {
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "primary person1: largest persistent person (15 samples, area 0.417)"
+    ]
+   },
+   "activities": [
+    "person2:stationary"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Lecture_360P-2276",
+   "ms": 11986,
+   "semanticMs": 3556,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 125,
+   "perFrameMs": 48.825,
+   "workerMaxRssMB": 279.8,
+   "recordKB": 11,
+   "shots": [
+    [
+     0,
+     13.3,
+     "other"
+    ],
+    [
+     13.3,
+     18.3,
+     "multi-person conversation"
+    ],
+    [
+     18.3,
+     19.967,
+     "other"
+    ]
+   ],
+   "tracks": [
+    "person2 2-3 n3 v0.041",
+    "person5 13.5-18 n10 v0.003",
+    "person6 13.5-18 n10 v0.003",
+    "person7 13.5-18 n10 v0.011",
+    "person8 13.5-18 n10 v0.014",
+    "person9 13.5-18 n10 v0.011",
+    "person10 13.5-16.5 n7 v0.049",
+    "person12 14-15 n3 v0",
+    "person13 14-18 n9 v0.034",
+    "person14 14.5-15.5 n3 v0.127",
+    "person15 16.5-18 n4 v0.015",
+    "person16 17-18 n3 v0.028",
+    "person17 18.5-19.5 n3 v0.065"
+   ],
+   "subjects": {
+    "primary": "person4",
+    "moving": [],
+    "basis": [
+     "primary person4: largest persistent person (2 samples, area 0.19)"
+    ]
+   },
+   "activities": [
+    "person17:stationary"
+   ],
+   "duplicates": [],
+   "events": [
+    {
+     "t": 11.5,
+     "signals": {
+      "moment": 0.782,
+      "cutAfter": 1
+     }
+    }
+   ],
+   "textChanges": []
+  },
+  {
+   "id": "NewsClip_360P-1093",
+   "ms": 11856,
+   "semanticMs": 3801,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 138,
+   "perFrameMs": 52.55,
+   "workerMaxRssMB": 282.5,
+   "recordKB": 10.7,
+   "shots": [
+    [
+     0,
+     8.4,
+     "action"
+    ],
+    [
+     8.4,
+     17.4,
+     "object close-up"
+    ],
+    [
+     17.4,
+     19.967,
+     "action"
+    ]
+   ],
+   "tracks": [
+    "person1 0-1 n3 v0.878",
+    "person2 3.5-8 n10 v0.108",
+    "truck1 8.5-10 n4 v0.08",
+    "person3 8.5-14 n11 v0.136",
+    "car1 8.5-15 n13 v0.124",
+    "person4 9-13.5 n9 v0.096",
+    "truck2 9.5-11.5 n5 v0.128",
+    "car3 10.5-11.5 n3 v0.076",
+    "car4 12-16 n7 v0.139",
+    "person5 12-14 n4 v0.059",
+    "car5 12.5-14 n4 v0.102",
+    "person6 14-15.5 n3 v0.122",
+    "person8 17.5-19.5 n3 v0.309",
+    "person9 17.5-19.5 n4 v0.288"
+   ],
+   "subjects": {
+    "primary": "person2",
+    "moving": [
+     "person1",
+     "person8",
+     "person9"
+    ],
+    "basis": [
+     "primary person2: largest persistent person (10 samples, area 0.217)",
+     "moving: tracks with median speed ≥ 0.25 frame widths/s for ≥ 1 s"
+    ]
+   },
+   "activities": [
+    "person8:moving across frame",
+    "person9:moving across frame"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "NewsClip_360P-1e1c",
+   "ms": 12243,
+   "semanticMs": 3842,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 167,
+   "perFrameMs": 50.95,
+   "workerMaxRssMB": 282.1,
+   "recordKB": 11.3,
+   "shots": [
+    [
+     0,
+     0.4,
+     "other"
+    ],
+    [
+     0.4,
+     6,
+     "other"
+    ],
+    [
+     6,
+     10,
+     "crowd/field"
+    ],
+    [
+     10,
+     14.5,
+     "other"
+    ],
+    [
+     14.5,
+     18.1,
+     "other"
+    ],
+    [
+     18.1,
+     19.967,
+     "crowd/field"
+    ]
+   ],
+   "tracks": [
+    "person2 3.5-5.5 n4 v0.084",
+    "person3 6-9.5 n8 v0.021",
+    "person4 6-9.5 n8 v0.024",
+    "person5 6-9.5 n7 v0.007",
+    "boat1 6-9.5 n7 v0.049",
+    "boat2 6-9.5 n8 v0.03",
+    "boat3 6.5-8 n4 v0.07",
+    "person6 7.5-9.5 n5 v0.018",
+    "boat4 14.5-18 n8 v0.009",
+    "person9 18.5-19.5 n3 v0.023",
+    "boat5 18.5-19.5 n3 v0.058",
+    "person10 18.5-19.5 n3 v0.059",
+    "person11 18.5-19.5 n3 v0.006",
+    "person12 18.5-19.5 n3 v0.007",
+    "person13 18.5-19.5 n3 v0.038"
+   ],
+   "subjects": {
+    "primary": "person4",
+    "moving": [],
+    "basis": [
+     "primary person4: largest persistent person (8 samples, area 0.024)"
+    ]
+   },
+   "activities": [
+    "person3:gesturing",
+    "person6:stationary"
+   ],
+   "duplicates": [],
+   "events": [
+    {
+     "t": 17,
+     "signals": {
+      "moment": 0.613,
+      "cutAfter": 1
+     }
+    }
+   ],
+   "textChanges": []
+  },
+  {
+   "id": "Sports_360P-1d5c",
+   "ms": 14191,
+   "semanticMs": 4018,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 161,
+   "perFrameMs": 56.625,
+   "workerMaxRssMB": 291.8,
+   "recordKB": 6.2,
+   "shots": [
+    [
+     0,
+     8.7,
+     "talking-head"
+    ],
+    [
+     8.7,
+     15.8,
+     "other"
+    ],
+    [
+     15.8,
+     20,
+     "empty/landscape"
+    ]
+   ],
+   "tracks": [
+    "person1 0-8 n17 v0.025",
+    "frisbee1 0-5 n10 v0.003"
+   ],
+   "subjects": {
+    "presenter": "person1",
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "presenter person1: on screen 40% of the time, face in 17/17 samples, speed 0.025 widths/s"
+    ]
+   },
+   "activities": [
+    "person1:moving across frame"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Sports_360P-2725",
+   "ms": 12883,
+   "semanticMs": 4425,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 143,
+   "perFrameMs": 62.65,
+   "workerMaxRssMB": 291.6,
+   "recordKB": 8.8,
+   "shots": [
+    [
+     0,
+     19.967,
+     "action"
+    ]
+   ],
+   "tracks": [
+    "person1 0-8 n16 v0.373",
+    "car1 0-6.5 n13 v0.041",
+    "car2 0-3.5 n8 v0.035",
+    "person2 0-1.5 n3 v0.71",
+    "person3 2-19.5 n31 v0.1",
+    "car3 5-6.5 n4 v0.033",
+    "person5 14.5-19.5 n10 v0.207"
+   ],
+   "subjects": {
+    "primary": "person3",
+    "moving": [
+     "person1",
+     "person2"
+    ],
+    "basis": [
+     "primary person3: largest persistent person (31 samples, area 0.462)",
+     "moving: tracks with median speed ≥ 0.25 frame widths/s for ≥ 1 s"
+    ]
+   },
+   "activities": [
+    "person1:moving across frame",
+    "person3:moving across frame",
+    "person5:moving across frame"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Sports_360P-27b0",
+   "ms": 27766,
+   "semanticMs": 4232,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 178,
+   "perFrameMs": 61.85,
+   "workerMaxRssMB": 290.8,
+   "recordKB": 10.5,
+   "shots": [
+    [
+     0,
+     20,
+     "action"
+    ]
+   ],
+   "tracks": [
+    "person3 0.5-2 n4 v0.179",
+    "person4 1-3 n4 v0.085",
+    "person6 3.5-14 n17 v0.071",
+    "person7 5-6 n3 v0.122",
+    "person9 5.5-8.5 n6 v0.08",
+    "person10 6-8 n5 v0.242",
+    "person11 6-7.5 n4 v0.086",
+    "person12 6.5-7.5 n3 v0.118",
+    "person15 8-9.5 n4 v0.085",
+    "person18 10-11.5 n3 v0.201",
+    "person20 14-19 n10 v0.146",
+    "person21 14.5-19 n9 v0.224"
+   ],
+   "subjects": {
+    "primary": "person14",
+    "moving": [],
+    "basis": [
+     "primary person14: largest persistent person (2 samples, area 0.253)"
+    ]
+   },
+   "activities": [
+    "person20:gesturing"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  },
+  {
+   "id": "Vlog_360P-2e9d",
+   "ms": 13696,
+   "semanticMs": 4790,
+   "fps": 2,
+   "frames": 40,
+   "gestures": false,
+   "loadMs": 133,
+   "perFrameMs": 76.85,
+   "workerMaxRssMB": 283.6,
+   "recordKB": 7.9,
+   "shots": [
+    [
+     0,
+     20,
+     "multi-person conversation"
+    ]
+   ],
+   "tracks": [
+    "person1 0-19.5 n40 v0.03",
+    "person2 0-19.5 n40 v0.054",
+    "person3 0.5-2 n3 v0.015",
+    "person4 3-6 n5 v0.009"
+   ],
+   "subjects": {
+    "presenter": "person1",
+    "primary": "person1",
+    "moving": [],
+    "basis": [
+     "presenter person1: on screen 98% of the time, face in 35/40 samples, speed 0.03 widths/s"
+    ]
+   },
+   "activities": [
+    "person1:gesturing",
+    "person2:stationary"
+   ],
+   "duplicates": [],
+   "events": [],
+   "textChanges": []
+  }
+ ]
+}

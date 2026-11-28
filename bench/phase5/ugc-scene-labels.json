@@ -1,0 +1,29 @@
+{
+ "schema": "frame.labels/1",
+ "note": "Scene-type truth for clearly classifiable shot spans of the heldout UGC clips, written from 2 fps contact sheets BEFORE any semantic prediction was viewed. Spans not listed were too ambiguous to label (e.g. animals, mixed shots). 'screen/slides' covers screen recordings, game footage, slides and writing boards.",
+ "spans": [
+  { "id": "Gaming_360P-187a", "t0": 0, "t1": 20, "label": "screen/slides" },
+  { "id": "Gaming_360P-2330", "t0": 0, "t1": 20, "label": "screen/slides" },
+  { "id": "Gaming_360P-3794", "t0": 0, "t1": 20, "label": "screen/slides" },
+  { "id": "HowTo_360P-06be", "t0": 0, "t1": 20, "label": "object close-up" },
+  { "id": "HowTo_360P-09f8", "t0": 0, "t1": 20, "label": "screen/slides" },
+  { "id": "HowTo_360P-127f", "t0": 3.5, "t1": 17, "label": "object close-up" },
+  { "id": "Lecture_360P-114f", "t0": 0, "t1": 20, "label": "screen/slides" },
+  { "id": "Lecture_360P-2276", "t0": 0, "t1": 13.5, "label": "screen/slides" },
+  { "id": "Lecture_360P-2276", "t0": 13.5, "t1": 18, "label": "crowd/field" },
+  { "id": "Lecture_360P-2276", "t0": 18, "t1": 20, "label": "screen/slides" },
+  { "id": "NewsClip_360P-1093", "t0": 0, "t1": 8.5, "label": "talking-head" },
+  { "id": "NewsClip_360P-1093", "t0": 8.5, "t1": 16.1, "label": "object close-up" },
+  { "id": "NewsClip_360P-1093", "t0": 16.1, "t1": 17.8, "label": "object close-up" },
+  { "id": "NewsClip_360P-1093", "t0": 17.8, "t1": 20, "label": "talking-head" },
+  { "id": "NewsClip_360P-1e1c", "t0": 0.4, "t1": 6, "label": "empty/landscape" },
+  { "id": "NewsClip_360P-1e1c", "t0": 6, "t1": 10, "label": "object close-up" },
+  { "id": "NewsClip_360P-1e1c", "t0": 10, "t1": 14.5, "label": "empty/landscape" },
+  { "id": "NewsClip_360P-1e1c", "t0": 14.5, "t1": 18, "label": "empty/landscape" },
+  { "id": "Sports_360P-1d5c", "t0": 0, "t1": 8.5, "label": "talking-head" },
+  { "id": "Sports_360P-1d5c", "t0": 8.5, "t1": 20, "label": "empty/landscape" },
+  { "id": "Sports_360P-2725", "t0": 0, "t1": 20, "label": "action" },
+  { "id": "Sports_360P-27b0", "t0": 0, "t1": 20, "label": "action" },
+  { "id": "Vlog_360P-2e9d", "t0": 0, "t1": 20, "label": "multi-person conversation" }
+ ]
+}

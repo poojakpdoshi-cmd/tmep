@@ -7,11 +7,16 @@
  *  - crop-cuts-presenter: the output crop cuts off part of the presenter region
  *  - repetitive-zoom: more punch/zoom moves per minute than a restrained edit uses
  *  - missing-moment: a high-confidence candidate moment of a used source is not in the edit
+ * Phase 5 (semantic layer, sampled over time rather than one static region):
+ *  - graphics-over-subject: a graphic covers a tracked person or moving subject while it is on screen
+ *  - crop-cuts-subject: the output crop loses part of the primary subject at some point of the clip
+ *  - overlay-over-subject: a b-roll/image overlay hides the primary subject for most of its duration
  */
-import { layout, RATIOS, type Timeline, type Effect } from '../../core/src/index.ts';
+import { layout, resolveRef, RATIOS, type Timeline, type Effect } from '../../core/src/index.ts';
 import type { FootageAnalysis, Box } from '../../media/src/footage.ts';
+import { boxAt, type Track } from '../../media/src/semantic.ts';
 
-export interface FootageFinding { code: 'graphics-over-presenter' | 'captions-over-presenter' | 'crop-cuts-presenter' | 'repetitive-zoom' | 'missing-moment'; severity: 'advisory'; msg: string; detail?: Record<string, unknown> }
+export interface FootageFinding { code: 'graphics-over-presenter' | 'captions-over-presenter' | 'crop-cuts-presenter' | 'repetitive-zoom' | 'missing-moment' | 'graphics-over-subject' | 'crop-cuts-subject' | 'overlay-over-subject'; severity: 'advisory'; msg: string; detail?: Record<string, unknown>; fix?: string }
 
 const overlapFrac = (a: Box, b: Box) => {
   const w = Math.max(0, Math.min(a.x + a.w / 2, b.x + b.w / 2) - Math.max(a.x - a.w / 2, b.x - b.w / 2));
@@ -56,6 +61,48 @@ export function footageFindings(tl: Timeline, analyses: Map<string, FootageAnaly
         const lb = { x: l.x, y: l.y, w: l.w, h: l.h };
         const f = Math.max(overlapFrac(lb, box), overlapFrac(box, lb));
         if (f > 0.25) out.push({ code: 'graphics-over-presenter', severity: 'advisory', msg: `scene ${sc.id}/${l.id} overlaps the presenter region in clip ${p.clip.id} (${(f * 100).toFixed(0)}% of the smaller box); pass the presenter box as avoid or compile with footage`, detail: { scene: sc.id, layer: l.id, clip: p.clip.id } });
+      }
+    }
+  }
+  // Phase 5: tracked subjects, checked every 0.5 s of output time.
+  for (const p of placed) {
+    const a = analyses.get(p.clip.src);
+    if (!a?.observed.tracks?.length) continue;
+    const speed = p.clip.speed ?? 1;
+    const srcAt = (t: number) => p.clip.in + (t - p.start) * speed;
+    const relevant = a.observed.tracks.filter((t) => t.n >= 3 && (t.label === 'person' || a.inferred.subjects?.moving.includes(t.id)));
+    const primary = a.observed.tracks.find((t) => t.id === a.inferred.subjects?.primary);
+    const outBox = (tr: Track, t: number): Box | undefined => {
+      const b = boxAt(tr, srcAt(t)); if (!b) return undefined;
+      return sourceToOutput({ x: b[0] + b[2] / 2, y: b[1] + b[3] / 2, w: b[2], h: b[3] }, { w: a.asset.w, h: a.asset.h }, { w: W, h: H }, p.clip.cx, p.clip.cy);
+    };
+    const times: number[] = [];
+    for (let t = p.start; t < p.start + p.dur; t += 0.5) times.push(t);
+    if (primary) {
+      let worst = 1, at = 0;
+      for (const t of times) {
+        const b = outBox(primary, t); if (!b) continue;
+        const vis = Math.max(0, Math.min(1, b.x + b.w / 2) - Math.max(0, b.x - b.w / 2)) * Math.max(0, Math.min(1, b.y + b.h / 2) - Math.max(0, b.y - b.h / 2)) / Math.max(1e-9, b.w * b.h);
+        if (vis < worst) { worst = vis; at = t; }
+      }
+      const rf = a.inferred.reframe?.find((r) => r.aspect === tl.settings.ratio && r.keys.length);
+      if (worst < 0.7) out.push({ code: 'crop-cuts-subject', severity: 'advisory', msg: `clip ${p.clip.id}: the ${tl.settings.ratio} crop keeps ${(worst * 100).toFixed(0)}% of ${primary.id} at ${at.toFixed(1)}s${rf ? '; subject-aware reframe keys are available' : ''}`, detail: { clip: p.clip.id, track: primary.id, t: +at.toFixed(2), visible: +worst.toFixed(2) }, ...(rf && { fix: `reframe ${p.clip.id} follow=${primary.id}` }) });
+      for (const b of tl.broll) {
+        const bt = resolveRef(placed, b.ref); if (bt === undefined) continue;
+        const hits = times.filter((t) => t >= bt && t < bt + b.d && outBox(primary, t)).length;
+        const span = times.filter((t) => t >= bt && t < bt + b.d).length;
+        if (span >= 2 && hits / span >= 0.6) out.push({ code: 'overlay-over-subject', severity: 'advisory', msg: `b-roll ${b.id} hides ${primary.id} (the clip's primary subject) for ${(hits * 0.5).toFixed(1)} s; intended for a cutaway?`, detail: { overlay: b.id, track: primary.id } });
+      }
+    }
+    for (const sc of tl.scenes ?? []) {
+      const at = typeof sc.spec.at === 'number' ? sc.spec.at : NaN;
+      for (const l of sc.spec.layers) {
+        if (l.kind === 'video' || (l.kind === 'image' && l.w > 0.9 && l.h > 0.9) || (l as { overlap?: boolean }).overlap) continue;
+        const lb = { x: l.x, y: l.y, w: l.w, h: l.h };
+        for (const tr of relevant) {
+          const hit = times.filter((t) => t >= at && t < at + sc.spec.duration).map((t) => ({ t, b: outBox(tr, t) })).filter((x) => x.b && Math.max(overlapFrac(lb, x.b), overlapFrac(x.b, lb)) > 0.25);
+          if (hit.length) out.push({ code: 'graphics-over-subject', severity: 'advisory', msg: `scene ${sc.id}/${l.id} overlaps ${tr.id}${a.inferred.subjects?.moving.includes(tr.id) ? ' (moving)' : ''} at ${hit.map((x) => x.t.toFixed(1)).slice(0, 4).join(', ')}s in clip ${p.clip.id}`, detail: { scene: sc.id, layer: l.id, track: tr.id, times: hit.map((x) => +x.t.toFixed(2)) } });
+        }
       }
     }
   }

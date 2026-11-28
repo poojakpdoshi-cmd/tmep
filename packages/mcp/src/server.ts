@@ -137,7 +137,7 @@ export class McpServer {
     if (reqId !== undefined) this.inFlight.set(reqId, flight);
     try {
       if (name === 'video_doctor') {
-        const result = await api.doctor();
+        const result = await api.doctor({ models: args.models as boolean, install: args.install as string[], confirm: args.confirm as boolean });
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       }
       const projectDir = await resolveContainedPath((args.project as string) ?? '.', this.allowedRoots, 'project');
@@ -164,6 +164,8 @@ export class McpServer {
   private async dispatch(name: string, a: Json, ctx: api.Ctx, progressToken: unknown, flight?: { ctrl: AbortController; p?: Awaited<ReturnType<typeof api.openProject>>; jobId?: string }): Promise<Json> {
     switch (name) {
       case 'video_import':
+        // library: metadata + licence → the visual asset library (not the editing timeline's media list)
+        if (a.library) return api.library(ctx, { action: 'add', paths: a.paths as string[], meta: a.library as never });
         return api.importMedia(ctx, { paths: a.paths as string[] });
       case 'video_reference':
         return api.reference(ctx, a as never);
@@ -181,6 +183,9 @@ export class McpServer {
         return jobView(j, ctx.detail);
       }
       case 'video_plan': {
+        if (a.mode === 'structured') {
+          return api.editPlan(ctx, { action: a.action as never, asset: a.asset as string, task: a.task as string, overrides: a.overrides as never, dryRun: a.dryRun as boolean, rebase: a.rebase as boolean, semantic: a.semantic as boolean });
+        }
         if (a.intent !== undefined) {
           return api.compile(ctx, { ...(a.intent as Record<string, unknown>), ...(a.dryRun !== undefined && { dryRun: Boolean(a.dryRun) }) });
         }
@@ -211,7 +216,7 @@ export class McpServer {
       case 'video_help':
         return api.help((a.topic as string) ?? 'workflow', Boolean(a.schema));
       case 'video_doctor':
-        return api.doctor();
+        return api.doctor({ models: a.models as boolean, install: a.install as string[], confirm: a.confirm as boolean });
       default:
         throw new RpcError(-32602, `Unknown tool: ${name}`);
     }

@@ -63,14 +63,17 @@ usage: frame <command> [args] [-p project_dir] [--detail minimal|standard|debug]
   undo [n] | redo [n] | checkout <rev>
   inspect [project|assets|timeline|transcript|silence|diff|log|jobs|scenes] [--asset v1] [--from s] [--to s] [--find q] [--words]
   inspect scenes [--scene id | --spec json]
-  inspect footage --asset v1 [--faces] [--ocr] [--force]   local footage analysis (cached)
-  inspect brief --asset v1 [--task informative|sports|cinematic|product|generic] [--max n]
+  inspect footage --asset v1 [--faces] [--ocr] [--temporalText] [--semantic [--gestures]] [--force]   local footage analysis (cached)
+  inspect brief --asset v1 [--task informative|sports|cinematic|product|podcast|educational|generic] [--max n]
   inspect qa [--file out.mp4]
   render [--preview] [--range a,b] [--quality draft|standard|high] [--out file.mp4] [--alpha] [--frames n] [--detach]
   status <job> [--cancel] [--wait s] | jobs
   render --scene id [--range localStart,localEnd]
   help [workflow|ops|anchors|presets|templates|sfx|icons|captions|scene|storyboard]
-  doctor                             check ffmpeg, filters, speech engines
+  doctor [--models]                  check ffmpeg, filters, speech engines (and semantic models)
+  editplan [build|show|refresh|override|compile] --asset v1 [--task t] [--accept ids] [--drop ids] [--dryRun] [--rebase] [--semantic]
+  library [list|add <files>|search <words>|dups|recommend --asset v1|licence <id>] [--kind k --tags a,b --licence ID --attribution s --genuine]
+  models | models install [names] [--yes]   semantic model status / download plan (downloads only with --yes)
   mcp                                start the MCP server on stdio`;
 
 function print(o: unknown, pretty: boolean): void {
@@ -111,6 +114,22 @@ export async function main(argv: string[]): Promise<number> {
       case 'import':
         print(await api.importMedia(ctx, { paths: args._ }), pretty);
         return 0;
+      case 'editplan': {
+        // tmep editplan build|show|refresh|compile --asset v1 [--task t] [--accept id,id] [--drop id,id] [--dryRun] [--rebase] [--semantic]
+        const ids = (v: unknown) => (typeof v === 'string' ? v.split(',').filter(Boolean) : []);
+        const overrides = Object.fromEntries([...ids(args.accept).map((i) => [i, 'accept']), ...ids(args.drop).map((i) => [i, 'drop'])]);
+        const action = (args._[0] as string) ?? 'build';
+        print(await api.editPlan(ctx, { action: (Object.keys(overrides).length && action === 'override' ? 'override' : action) as never, asset: args.asset as string, task: args.task as string, overrides: Object.keys(overrides).length ? overrides : undefined, dryRun: !!args.dryRun, rebase: !!args.rebase, semantic: !!args.semantic }), pretty);
+        return 0;
+      }
+      case 'library': {
+        // tmep library add <files> [--kind k] [--title t] [--tags a,b] [--licence CC-BY-4.0 --source s --attribution a --url u] [--genuine]
+        const [action = 'list', ...rest] = args._.map(String);
+        const meta = { kind: args.kind as never, title: args.title as string, description: args.description as string, tags: typeof args.tags === 'string' ? args.tags.split(',') : undefined, provenance: args.provenance as never, genuine: args.genuine === undefined ? undefined : !!args.genuine,
+          licence: args.licence ? { id: String(args.licence), source: args.source as string, attribution: args.attribution as string, url: args.url as string } : undefined };
+        print(await api.library(ctx, { action: action as never, paths: action === 'add' ? rest : undefined, id: action === 'licence' ? rest[0] : undefined, meta, query: action === 'search' ? rest.join(' ') : undefined, kind: action === 'search' ? (args.kind as string) : undefined, max: args.max as number, asset: args.asset as string, minScore: args.minScore as number, product: args.product as string }), pretty);
+        return 0;
+      }
       case 'reference':
         print(await api.reference(ctx, { asset: String(args._[0] ?? ''),
           threshold: args.threshold as number, sampleFps: args.sampleFps as number,
@@ -190,7 +209,7 @@ export async function main(argv: string[]): Promise<number> {
       case 'inspect':
         print(await api.inspect(ctx, { what: args._[0], asset: args.asset as string, from: args.from as number, to: args.to as number, find: args.find as string, words: !!args.words, max: args.max as number, rev: args.rev as number,
           ...(args._[0] === 'scenes' && { scene: args.scene as string, spec: args.spec === undefined ? undefined : JSON.parse(String(args.spec)) }),
-          ...((args._[0] === 'footage' || args._[0] === 'brief') && { task: args.task as string, faces: !!args.faces, ocr: !!args.ocr, force: !!args.force, maxSeconds: args.maxSeconds as number }),
+          ...((args._[0] === 'footage' || args._[0] === 'brief') && { task: args.task as string, faces: !!args.faces, ocr: !!args.ocr, temporalText: !!args.temporalText, semantic: !!args.semantic, gestures: !!args.gestures, force: !!args.force, maxSeconds: args.maxSeconds as number }),
           ...(args._[0] === 'qa' && { file: args.file as string, targetLufs: args.targetLufs as number }) }), pretty);
         return 0;
       case 'render': {
@@ -221,7 +240,14 @@ export async function main(argv: string[]): Promise<number> {
         print(await api.inspect(ctx, { what: 'jobs' }), pretty);
         return 0;
       case 'doctor':
-        print(await api.doctor(), true);
+        print(await api.doctor({ models: !!args.models }), true);
+        return 0;
+      case 'models':
+        // tmep models            -> status;  tmep models install [names] [--yes] -> plan, or download with --yes
+        if (args._[0] === 'install') {
+          const names = args._.slice(1).map(String);
+          print(await api.models({ install: names.length ? names : ['objects', 'faces', 'pose', 'embed'], confirm: !!args.yes }), true);
+        } else print(await api.models(), true);
         return 0;
       case 'mcp':
         serveStdio({ cwd: ctx.project, detail: args.detail as Detail | undefined });

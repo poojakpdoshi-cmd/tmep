@@ -14,6 +14,8 @@ export const ERROR_CODES = {
   E_FFMPEG_FAILED: 'ffmpeg exited with an error',
   E_ENGINE_MISSING: 'Requested speech engine or model is not installed',
   E_ENGINE_FAILED: 'Speech engine failed',
+  E_ANALYSIS_FAILED: 'A footage analysis worker failed',
+  E_DOWNLOAD: 'A model or asset download failed or did not match its pinned checksum',
   E_MEDIA: 'Media file is unreadable or has no usable streams',
   E_CANCELLED: 'Job was cancelled',
   E_INTERRUPTED: 'Job stopped because its process exited or stopped responding',
