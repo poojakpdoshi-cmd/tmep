@@ -1,0 +1,32 @@
+{
+ "date": "2026-11-28T06:29:28.806Z",
+ "media": "long.mp4",
+ "task": "generic",
+ "tokenizer": "heuristic estimate (bench/tokens.ts, ±20%); no provider usage measured",
+ "conventional": {
+  "toolCalls": 3,
+  "agentWrittenChars": 531,
+  "agentWrittenTokens": 247,
+  "readChars": 4485125,
+  "readTokens": 1863003,
+  "localMs": 27440,
+  "note": "raw logs still need the agent to reason out moments and regions; not included"
+ },
+ "conventionalLean": {
+  "toolCalls": 3,
+  "agentWrittenChars": 653,
+  "agentWrittenTokens": 315,
+  "readChars": 590627,
+  "readTokens": 281251,
+  "note": "filtered logs; moments, scenes, quality and regions still left to the agent"
+ },
+ "frame": {
+  "toolCalls": 1,
+  "agentWrittenChars": 83,
+  "agentWrittenTokens": 45,
+  "readChars": 572,
+  "readTokens": 318,
+  "localMs": 19567,
+  "cachedMs": 2
+ }
+}

@@ -1,9 +1,11 @@
 # Agent integrations
 
-TMEP runs as an **MCP stdio server** (`bin/tmep-mcp.js`) or as a **CLI** (`bin/tmep.js`).
+FRAME (formerly TMEP) runs as an **MCP stdio server** (`bin/frame-mcp.js`, legacy `bin/tmep-mcp.js`) or as a **CLI** (`bin/frame.js`, legacy `bin/tmep.js`). The MCP server key stays `tmep` so existing tool identifiers (`mcp__tmep__video_*`) and allowlists keep working.
 Use absolute paths below. On Windows, JSON paths need `\\` or forward slashes.
 
 Environment variables (all optional):
+
+Every `TMEP_*` variable below can also be set as `FRAME_*` (e.g. `FRAME_FFMPEG`); the `FRAME_` name wins when both are set.
 
 | Var | Purpose |
 |---|---|

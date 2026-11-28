@@ -52,7 +52,7 @@ export class McpServer {
     this.cwd = path.resolve(o.cwd ?? process.env.FRAME_PROJECT ?? process.env.TMEP_PROJECT ?? process.cwd());
     this.allowedRoots = [this.cwd, ...(o.allowedRoots ?? []).map((r) => path.resolve(r))];
     this.mediaRoots = [...(o.mediaRoots ?? []).map((r) => path.resolve(r)), ...parseAllowedRoots()];
-    this.detail = o.detail ?? ((process.env.FRAME_DETAIL ?? process.env.TMEP_DETAIL ?? 'standard') as Detail);
+    this.detail = o.detail ?? ((process.env.FRAME_DETAIL ?? (process.env.FRAME_DETAIL ?? process.env.TMEP_DETAIL) ?? 'standard') as Detail);
     this.notify = o.notify ?? (() => {});
   }
 
@@ -258,5 +258,5 @@ export function serveStdio(o: ServerOptions = {}): void {
     });
   });
   rl.on('close', () => process.exit(0));
-  process.stderr.write(`tmep MCP server ${VERSION} ready (cwd ${path.resolve(o.cwd ?? process.env.TMEP_PROJECT ?? process.cwd())})\n`);
+  process.stderr.write(`tmep MCP server ${VERSION} ready (cwd ${path.resolve(o.cwd ?? (process.env.FRAME_PROJECT ?? process.env.TMEP_PROJECT) ?? process.cwd())})\n`);
 }

@@ -10,7 +10,8 @@ import path from 'node:path';
 import { TmepError } from '../../core/src/errors.ts';
 
 export function chromeCandidates(): string[] {
-  const env = process.env.TMEP_CHROME ? [process.env.TMEP_CHROME] : [];
+  const chrome = process.env.FRAME_CHROME ?? process.env.TMEP_CHROME;
+  const env = chrome ? [chrome] : [];
   if (process.platform === 'win32') {
     const roots = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean) as string[];
     return [

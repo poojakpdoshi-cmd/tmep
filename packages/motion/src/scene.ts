@@ -7,7 +7,8 @@ import { AssDoc, escapeText, tagColor } from './ass.ts';
 import { captionLayout, paginate } from './captions.ts';
 import { resolveFont, type ResolvedFont } from './fonts.ts';
 import { poly, rect, signedArea } from './icons.ts';
-import { pathBounds, wrapMeasuredText, type DrawKey, type VectorLayer, type VectorRun } from './vector.ts';
+import { pathBounds, wrapMeasuredText, progressAt, type DrawKey, type VectorLayer, type VectorRun } from './vector.ts';
+import { motionPolyline, pointAt, prepareMorph } from './paths.ts';
 
 export interface SceneGraphic { id: string; at: number; d: number; ass: string; fx: Effect[]; z: number; camera?: Effect[] }
 export interface CompiledScenes { layers: SceneGraphic[]; media: BRoll[]; fonts: ResolvedFont[]; vectors: VectorRun[] }
@@ -28,6 +29,7 @@ type Parent = { x: number; y: number; s: number; r: number; opacity: number };
 const origin: Parent = { x: 0, y: 0, s: 1, r: 0, opacity: 1 };
 const require = createRequire(import.meta.url);
 const bad = (message: string): never => { throw new TmepError('E_INPUT', message); };
+const chartFont = (weight?: 'regular' | 'bold' | 'heavy') => { const f = resolveFont(weight ?? 'bold'); return { fontName: f.name, ...(f.file && { fontFile: f.file }) }; };
 
 function byId<T extends { id: string }>(values: T[], name: string): Map<string, T> {
   const map = new Map(values.map((value) => [value.id, value]));
@@ -145,7 +147,7 @@ function textFits(
   size: number,
   w: number,
   h: number,
-  opts: { wrap?: boolean; lineHeight?: number; pad?: number; hasBg?: boolean; maxLines?: number } = {},
+  opts: { wrap?: boolean; lineHeight?: number; pad?: number; hasBg?: boolean; maxLines?: number; bold?: boolean } = {},
 ): boolean {
   let canvas: typeof import('@napi-rs/canvas');
   try {
@@ -158,7 +160,8 @@ function textFits(
     metricFonts.add(font.file);
   }
   const ctx = canvas.createCanvas(1, 1).getContext('2d');
-  ctx.font = `${size}px "${font.name}"`;
+  // Measure with the weight the Canvas renderer draws with (bold styles are drawn at 700).
+  ctx.font = `${opts.bold ? '700 ' : ''}${size}px "${font.name}"`;
   const availW = Math.max(8, w - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
   const availH = Math.max(8, h - (opts.hasBg ? (opts.pad ?? 16) * 2 : 0));
   if (opts.wrap) {
@@ -251,7 +254,24 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           if (from >= to || to > frames) bad(`${name}: invalid layer interval after stagger`);
           const keys = keysFor(layer.keys, (to - from) / fps, name,
             (t, msg) => report('discontinuity', [layer.id], layerStart + t, msg));
-          const fx = layerKeys(keys, layer.x - .5 + p.x, layer.y - .5 + p.y, layer.opacity * p.opacity);
+          if (layer.kind === 'video' && (layer.motionPath || layer.reveal || layer.depth)) bad(`${name}: motionPath, reveal and depth are Canvas features; not available on video layers`);
+          // A motion path positions the layer centre; keys and groups still add offsets to it.
+          const fx = layer.motionPath
+            ? layerKeys(keys, p.x, p.y, layer.opacity * p.opacity)
+            : layerKeys(keys, layer.x - .5 + p.x, layer.y - .5 + p.y, layer.opacity * p.opacity);
+          let motion: VectorLayer['motion'];
+          if (layer.motionPath) {
+            const mp = layer.motionPath;
+            for (let i = 1; i < mp.keys.length; i++) if (mp.keys[i]!.t <= mp.keys[i - 1]!.t) bad(`${name}: motionPath keys must have increasing t`);
+            try {
+              motion = { poly: motionPolyline(mp.d), view: [mp.view?.w ?? 1, mp.view?.h ?? 1], keys: mp.keys, orient: mp.orient };
+            } catch (err) { bad(`${name}: motionPath ${(err as Error).message}`); }
+          }
+          const motionFields = {
+            ...(motion && { motion }),
+            ...(layer.reveal && { reveal: layer.reveal }),
+            ...(layer.depth ? { depth: layer.depth } : {}),
+          };
           if (p.s !== 1) {
             if (!fx.some((k) => k.s !== undefined)) {
               if (fx[0]?.t === 0) fx[0].s = p.s;
@@ -275,6 +295,10 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
           // The camera clock is scene-local, including time before this layer starts.
           const cameraFx: Effect[] | undefined = camera.length ? [{ type: 'kf', keys: camera.map((key) => ({ ...key, t: key.t - from / fps })) }] : undefined;
           const usesCanvas = layer.render === 'canvas'
+            || Boolean(layer.motionPath || layer.reveal || layer.depth)
+            // Motion blur is a Canvas feature: moving shapes and text use the Canvas path when it is on.
+            || Boolean(spec.mblur && layer.keys?.length && layer.kind !== 'image' && layer.kind !== 'video')
+            || (layer.kind === 'text' && Boolean(layer.anim))
             || layer.kind === 'path'
             || layer.kind === 'rrect'
             || layer.kind === 'chart'
@@ -292,7 +316,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
                 id: layer.id, kind: 'image', from, to, keys: fx, draw: [], box: [width, height],
                 stroke: 0, glow: 0, color: '#FFFFFF', cap: 'round',
                 imagePath: asset!.path!, imageFit: layer.fit, radius: layer.radius,
-                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...motionFields,
               },
             });
           } else if (layer.kind === 'image' || layer.kind === 'video') {
@@ -309,10 +333,21 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
               report('clipping', [layer.id], at, `${name}: path leaves its view box`);
             }
             if (layer.draw) drawKeysFor(layer.draw, d, name, (kt, msg) => report('discontinuity', [layer.id], at + kt, msg));
+            let morph: VectorLayer['morph'];
+            if (layer.morph) {
+              for (let i = 0; i < layer.morph.length; i++) {
+                if (layer.morph[i]!.t <= (i ? layer.morph[i - 1]!.t : 0)) bad(`${name}: morph keys need increasing t > 0`);
+                if (layer.morph[i]!.t > d + 1e-6) bad(`${name}: morph key at ${layer.morph[i]!.t}s is after the layer ends`);
+              }
+              try {
+                const shapes = prepareMorph([layer.d, ...layer.morph.map((m) => m.d)]);
+                morph = [{ t: 0, shape: shapes[0]! }, ...layer.morph.map((m, i) => ({ t: m.t, ...(m.e && { e: m.e }), shape: shapes[i + 1]! }))];
+              } catch (err) { bad(`${name}: morph ${(err as Error).message}`); }
+            }
             paths.set(layerIndex, { id, z, layer: { id: layer.id, kind: 'path', from, to, keys: fx, draw: layer.draw ?? [], d: layer.d, view,
               box: [width, height], stroke: layer.stroke, glow: layer.glow, color: style?.color ?? '#FFFFFF',
               ...(layer.fill && { fill: layer.fill }), cap: layer.cap,
-              ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }) } });
+              ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...(morph && { morph }), ...motionFields } });
           } else if (layer.kind === 'chart') {
             if (layer.draw) drawKeysFor(layer.draw, d, name, (kt, msg) => report('discontinuity', [layer.id], at + kt, msg));
             paths.set(layerIndex, {
@@ -320,15 +355,15 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
               layer: {
                 id: layer.id, kind: 'chart', from, to, keys: fx, draw: layer.draw ?? [],
                 box: [width, height], stroke: 0, glow: 0, color: style?.color ?? '#FFFFFF', cap: 'round',
-                chartSpec: { chartType: layer.chartType, data: layer.data, max: layer.max, unit: layer.unit, accent: layer.accent, trackColor: layer.trackColor },
-                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                chartSpec: { chartType: layer.chartType, data: layer.data, max: layer.max, unit: layer.unit, accent: layer.accent, trackColor: layer.trackColor, ...chartFont(style?.font) },
+                ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...motionFields,
               },
             });
           } else if (usesCanvas) {
             if (layer.kind === 'text') {
               const font = resolveFont(style?.font ?? 'regular');
               const fontSize = Math.round(style?.size ?? 48);
-              if (!textFits(layer.text, font, fontSize, width, height, { wrap: layer.wrap, lineHeight: layer.lineHeight, pad: layer.pad, hasBg: Boolean(layer.bg), maxLines: layer.maxLines })) {
+              if (!textFits(layer.text, font, fontSize, width, height, { wrap: layer.wrap, lineHeight: layer.lineHeight, pad: layer.pad, hasBg: Boolean(layer.bg), maxLines: layer.maxLines, bold: style?.font !== 'regular' })) {
                 report('clipping', [layer.id], at, `${name}: text clips its box`);
               }
               paths.set(layerIndex, {
@@ -337,7 +372,8 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
                   id: layer.id, kind: 'text', from, to, keys: fx, draw: [], box: [width, height],
                   stroke: 0, glow: 0, color: style?.color ?? '#FFFFFF', cap: 'round',
                   ...(layer.gradient && { gradient: layer.gradient }),
-                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...motionFields,
+                  ...(layer.anim && { textAnim: layer.anim }),
                   textSpec: {
                     text: layer.text, fontName: font.name, fontFile: font.file, fontSize,
                     bold: style?.font !== 'regular', align: layer.align, valign: layer.valign,
@@ -360,7 +396,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
                   ...(layer.kind === 'rrect' && { radius: layer.radius }),
                   ...(layer.kind === 'polygon' && { points: layer.points.map(({ x, y }): [number, number] => [x, y]) }),
                   ...(layer.gradient && { gradient: layer.gradient }),
-                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }),
+                  ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...motionFields,
                 },
               });
             }
@@ -385,7 +421,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
             doc.add({ start: 0, end: d, style: styleName, text });
             out.layers.push({ id, at, d, ass: doc.toString(), fx: effects, z, ...(cameraFx && { camera: cameraFx }) });
           }
-          return [{ layer, from, to, fx, box: corners(width, height) }];
+          return [{ layer, from, to, fx, box: corners(width, height), ...(motion && { motion }) }];
         } catch (e) {
           if (!onIssue || !(e instanceof TmepError)) throw e;
           report('invalid', [layer.id], layerStart, e.message);
@@ -398,7 +434,8 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
         if (!run) return;
         const lo = Math.min(...run.members.map((m) => m.from)), hi = Math.max(...run.members.map((m) => m.to));
         out.vectors.push({ id: run.id, at: (first + lo) / fps, d: (hi - lo) / fps, frames: hi - lo, z: run.z, w, h, fps,
-          camera, sceneFrame: lo, layers: run.members.map((m) => ({ ...m, from: m.from - lo, to: m.to - lo })) });
+          camera, sceneFrame: lo, layers: run.members.map((m) => ({ ...m, from: m.from - lo, to: m.to - lo })),
+          ...(spec.mblur && { mblur: spec.mblur }), ...(spec.focus && { focus: spec.focus }) });
         run = undefined;
       };
       for (let i = 0; i < spec.layers.length; i++) {
@@ -499,7 +536,7 @@ export function autoCorrectScenes(
 }
 
 function validateFrames(
-  layers: { layer: Layer; from: number; to: number; fx: Key[]; box: Point[] }[], camera: Key[],
+  layers: { layer: Layer; from: number; to: number; fx: Key[]; box: Point[]; motion?: VectorLayer['motion'] }[], camera: Key[],
   frames: number, fps: number, w: number, h: number, safe: { l: number; r: number; t: number; b: number },
   band: Point[], pages: { s: number; e: number }[], first: number, report: Report,
 ): void {
@@ -510,12 +547,20 @@ function validateFrames(
     const hasCaption = !!pages[page] && pages[page]!.s <= time;
     const view = transform(camera, f / fps);
     const active: { layer: Layer; box: Point[] }[] = [];
-    for (const { layer, from, to, fx, box } of layers) {
+    for (const { layer, from, to, fx, box, motion } of layers) {
       if (f < from || f >= to) continue;
       const sample = transform(fx, (f - from) / fps);
       if (sample.o <= .001) continue;
+      if (motion) {
+        // Check the layer where it actually travels along its motion path.
+        const { pt } = pointAt(motion.poly, progressAt(motion.keys, (f - from) / fps));
+        sample.x += pt[0] / motion.view[0] - .5;
+        sample.y += pt[1] / motion.view[1] - .5;
+      }
+      const k = 1 / (1 + (layer.depth ?? 0));
+      const cam = k === 1 ? view : { ...view, x: view.x * k, y: view.y * k, s: 1 + (view.s - 1) * k };
       const local = box.map((p) => transformPoint(p, sample, w, h));
-      const screen = local.map((p) => transformPoint(p, view, w, h));
+      const screen = local.map((p) => transformPoint(p, cam, w, h));
       const within = (pts: Point[], l: number, r: number, t: number, b: number) =>
         pts.every(([x, y]) => x >= l - .01 && x <= r + .01 && y >= t - .01 && y <= b + .01);
       if (!layer.bleed && (!within(local, -w / 2, w / 2, -h / 2, h / 2) || !within(screen, safe.l, safe.r, safe.t, safe.b))) {

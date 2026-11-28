@@ -70,7 +70,7 @@ export async function resolveContainedPath(raw: string, allowedRoots: string[], 
   return canonTarget;
 }
 
-export function parseAllowedRoots(raw = process.env.FRAME_MEDIA_ROOTS ?? process.env.TMEP_MEDIA_ROOTS): string[] {
+export function parseAllowedRoots(raw = process.env.FRAME_MEDIA_ROOTS ?? (process.env.FRAME_MEDIA_ROOTS ?? process.env.TMEP_MEDIA_ROOTS)): string[] {
   if (!raw) return [];
   return raw
     .split(path.delimiter)

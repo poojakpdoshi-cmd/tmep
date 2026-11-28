@@ -63,7 +63,7 @@ export function commandLineLength(cmd: string, args: string[]): number {
  * Windows limit.
  */
 function commandLineLimit(): number {
-  const env = Number(process.env.TMEP_CMDLINE_LIMIT);
+  const env = Number((process.env.FRAME_CMDLINE_LIMIT ?? process.env.TMEP_CMDLINE_LIMIT));
   return env > 0 ? env : 0;
 }
 

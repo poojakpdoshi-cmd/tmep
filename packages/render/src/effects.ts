@@ -18,6 +18,11 @@ import {
   sampleKeys, ease,
 } from '../../core/src/index.ts';
 import { canvasModule } from '../../motion/src/vector.ts';
+import { TmepError } from '../../core/src/errors.ts';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+type SkiaContext = ReturnType<ReturnType<ReturnType<typeof canvasModule>['createCanvas']>['getContext']>;
 
 const n = (x: number) => {
   const r = Math.round(x * 1e5) / 1e5;
@@ -41,6 +46,22 @@ export function easeExpr(e: Ease, p: string): string {
       return `if(lte(${p},0),0,if(gte(${p},1),1,1-exp(-6*${p})*cos(${p}*2.5*PI)))`;
     case 'hold':
       return `gte(${p},1)`;
+    case 'expo':
+      return `if(gte(${p},1),1,1-pow(2,-10*${p}))`;
+    case 'expoio':
+      return `if(lte(${p},0),0,if(gte(${p},1),1,if(lt(${p},0.5),pow(2,20*${p}-10)/2,(2-pow(2,-20*${p}+10))/2)))`;
+    case 'circ':
+      return `sqrt(1-pow(${p}-1,2))`;
+    case 'smooth':
+      return `(pow(${p},3)*(${p}*(6*${p}-15)+10))`;
+    case 'elastic':
+      return `if(lte(${p},0),0,if(gte(${p},1),1,pow(2,-10*${p})*sin((${p}*10-0.75)*2*PI/3)+1))`;
+    case 'bounce': {
+      const b = (k: number, c: number) => `(7.5625*pow(${p}-${k},2)+${c})`;
+      return `if(lt(${p},${1 / 2.75}),7.5625*pow(${p},2),if(lt(${p},${2 / 2.75}),${b(1.5 / 2.75, 0.75)},if(lt(${p},${2.5 / 2.75}),${b(2.25 / 2.75, 0.9375)},${b(2.625 / 2.75, 0.984375)})))`;
+    }
+    case 'snap':
+      return `if(gte(${p},1),1,1-(1+8*${p})*exp(-8*${p})*(1-${p})-${p}*exp(-8))`;
   }
 }
 
@@ -130,7 +151,7 @@ function maskKeyExpr(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather', T
   return expr;
 }
 
-function sampleMaskKey(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather', t: number, fallback: number): number {
+function sampleMaskKey(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather' | 'r', t: number, fallback: number): number {
   const ks = keys.filter((k) => k[prop] !== undefined);
   if (!ks.length) return fallback;
   if (t <= ks[0]!.t) return ks[0]![prop]!;
@@ -145,77 +166,177 @@ function sampleMaskKey(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather',
   return ks[ks.length - 1]![prop]!;
 }
 
-/** Rasterize a concave or bezier mask into a grayscale PNG buffer at MW x MH using @napi-rs/canvas. */
+/** True when a mask changes over time (reveal or more than one key) and so needs one raster per frame. */
+export function maskAnimated(m: FxMask): boolean {
+  return !!m.reveal || (m.keys?.length ?? 0) > 1;
+}
+
+interface MaskState { x: number; y: number; w: number; h: number; f: number; r: number; p: number }
+
+function maskState(m: FxMask, t: number): MaskState {
+  const k = m.keys?.length ? m.keys : undefined;
+  const p = m.reveal ? ease(m.reveal.e, Math.min(1, Math.max(0, (t - m.reveal.at) / Math.max(1e-6, m.reveal.d)))) : 1;
+  return {
+    x: k ? sampleMaskKey(k, 'x', t, m.x) : m.x,
+    y: k ? sampleMaskKey(k, 'y', t, m.y) : m.y,
+    w: k ? sampleMaskKey(k, 'w', t, m.w) : m.w,
+    h: k ? sampleMaskKey(k, 'h', t, m.h) : m.h,
+    f: k ? sampleMaskKey(k, 'feather', t, m.feather) : m.feather,
+    r: k ? sampleMaskKey(k, 'r', t, 0) : 0,
+    p,
+  };
+}
+
+/** Shape bounding box in mask pixels (untransformed), used for directional reveals. */
+function shapeBox(m: FxMask, MW: number, MH: number): [number, number, number, number] {
+  const pts: [number, number][] = m.shape === 'bezier' && m.bezierStart && m.beziers?.length
+    ? [m.bezierStart, ...m.beziers.flatMap((s) => [s.cp1, s.cp2, s.to])]
+    : m.pts?.length ? m.pts : [[m.x - m.w / 2, m.y - m.h / 2], [m.x + m.w / 2, m.y + m.h / 2]];
+  const xs = pts.map((q) => q[0] * MW), ys = pts.map((q) => q[1] * MH);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+/**
+ * Draw one frame of a mask (white = visible) with the same semantics as the `geq` path:
+ * keyed move/scale/rotation about the shape centre, feather, a reveal limited to the shape's
+ * bounding box (wipe from a side, or growth from the centre), then inversion.
+ */
+function drawComplexMask(ctx: SkiaContext, m: FxMask, MW: number, MH: number, s: MaskState): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.filter = 'none';
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, MW, MH);
+  const featherPx = Math.max(0, s.f * Math.min(MW, MH));
+  if (s.p > 0) {
+    const [bx0, by0, bx1, by1] = shapeBox(m, MW, MH);
+    const ox = m.x * MW, oy = m.y * MH;
+    // keyed transform: move the shape centre to (x,y), scale by w/h relative to the base size, rotate (degrees)
+    ctx.translate(s.x * MW, s.y * MH);
+    if (s.r) ctx.rotate((s.r * Math.PI) / 180);
+    ctx.scale(s.w / Math.max(1e-4, m.w), s.h / Math.max(1e-4, m.h));
+    ctx.translate(-ox, -oy);
+    if (m.reveal && s.p < 1) {
+      const from = m.reveal.from;
+      if (from === 'center') {
+        const g = Math.max(s.p, 0.001);
+        const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
+        ctx.translate(cx, cy);
+        ctx.scale(g, g);
+        ctx.translate(-cx, -cy);
+      } else {
+        const bw = bx1 - bx0, bh = by1 - by0;
+        const pad = featherPx + 2;
+        const [rx, ry, rw, rh] = {
+          left: [bx0 - pad, by0 - pad, bw * s.p + pad, bh + 2 * pad],
+          right: [bx1 - bw * s.p, by0 - pad, bw * s.p + pad, bh + 2 * pad],
+          top: [bx0 - pad, by0 - pad, bw + 2 * pad, bh * s.p + pad],
+          bottom: [bx0 - pad, by1 - bh * s.p, bw + 2 * pad, bh * s.p + pad],
+        }[from] as [number, number, number, number];
+        ctx.beginPath();
+        ctx.rect(rx, ry, rw, rh);
+        ctx.clip();
+      }
+    }
+    if (featherPx > 0.5) ctx.filter = `blur(${featherPx.toFixed(2)}px)`;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    if (m.shape === 'bezier' && m.bezierStart && m.beziers?.length) {
+      ctx.moveTo(m.bezierStart[0] * MW, m.bezierStart[1] * MH);
+      for (const seg of m.beziers) ctx.bezierCurveTo(seg.cp1[0] * MW, seg.cp1[1] * MH, seg.cp2[0] * MW, seg.cp2[1] * MH, seg.to[0] * MW, seg.to[1] * MH);
+      ctx.closePath();
+    } else if (m.pts?.length) {
+      ctx.moveTo(m.pts[0]![0] * MW, m.pts[0]![1] * MH);
+      for (let i = 1; i < m.pts.length; i++) ctx.lineTo(m.pts[i]![0] * MW, m.pts[i]![1] * MH);
+      ctx.closePath();
+    } else if (m.shape === 'ellipse') {
+      ctx.ellipse(ox, oy, (m.w * MW) / 2, (m.h * MH) / 2, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(ox - (m.w * MW) / 2, oy - (m.h * MH) / 2, m.w * MW, m.h * MH);
+    }
+    ctx.fill('evenodd');
+  }
+  ctx.restore();
+  if (m.invert) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, MW, MH);
+    ctx.restore();
+  }
+}
+
+/** Rasterize one frame (item-local time `t`) of a concave or bezier mask into a PNG at MW x MH. */
 export function rasterizeComplexMaskPng(m: FxMask, MW: number, MH: number, t = 0): Buffer {
   const { createCanvas } = canvasModule();
   const canvas = createCanvas(MW, MH);
+  drawComplexMask(canvas.getContext('2d'), m, MW, MH, maskState(m, t));
+  return canvas.encodeSync('png');
+}
+
+/** File name of frame `f` in a mask sequence directory (matches the `%05d.png` input pattern). */
+export const maskFrameFile = (f: number) => `${String(f).padStart(5, '0')}.png`;
+
+/**
+ * Rasterize `frames` frames (item-local time f/fps) of an animated mask into `dir`, reusing one
+ * canvas so memory stays bounded by a single frame. Consecutive identical states are encoded once.
+ */
+export async function rasterizeComplexMaskSequence(
+  m: FxMask, MW: number, MH: number, fps: number, frames: number, dir: string, signal?: AbortSignal,
+): Promise<{ frames: number; encoded: number }> {
+  const { createCanvas } = canvasModule();
+  const canvas = createCanvas(MW, MH);
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, MW, MH);
-  const mx = m.keys?.length ? sampleMaskKey(m.keys, 'x', t, m.x) : m.x;
-  const my = m.keys?.length ? sampleMaskKey(m.keys, 'y', t, m.y) : m.y;
-  const mw = m.keys?.length ? sampleMaskKey(m.keys, 'w', t, m.w) : m.w;
-  const mh = m.keys?.length ? sampleMaskKey(m.keys, 'h', t, m.h) : m.h;
-  const mf = m.keys?.length ? sampleMaskKey(m.keys, 'feather', t, m.feather) : m.feather;
-  const featherPx = Math.max(0, mf * Math.min(MW, MH));
-  ctx.save();
-  if (featherPx > 0.5) {
-    ctx.filter = `blur(${featherPx.toFixed(1)}px)`;
-  }
-  if (m.keys?.length && (m.shape === 'concave' || m.shape === 'bezier')) {
-    const sx = mw / Math.max(1e-4, m.w);
-    const sy = mh / Math.max(1e-4, m.h);
-    ctx.translate(mx * MW, my * MH);
-    ctx.scale(sx, sy);
-    ctx.translate(-m.x * MW, -m.y * MH);
-  }
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  if (m.shape === 'bezier' && m.bezierStart && m.beziers?.length) {
-    ctx.moveTo(m.bezierStart[0] * MW, m.bezierStart[1] * MH);
-    for (const seg of m.beziers) {
-      ctx.bezierCurveTo(
-        seg.cp1[0] * MW, seg.cp1[1] * MH,
-        seg.cp2[0] * MW, seg.cp2[1] * MH,
-        seg.to[0] * MW, seg.to[1] * MH,
-      );
+  await fsp.mkdir(dir, { recursive: true });
+  let last = '', png: Buffer | undefined, encoded = 0;
+  for (let f = 0; f < frames; f++) {
+    if (signal?.aborted) throw new TmepError('E_CANCELLED', 'render cancelled');
+    const s = maskState(m, f / fps);
+    const key = [s.x, s.y, s.w, s.h, s.f, s.r, s.p].map((v) => v.toFixed(5)).join(',');
+    if (key !== last || !png) {
+      drawComplexMask(ctx, m, MW, MH, s);
+      png = canvas.encodeSync('png');
+      encoded++;
+      last = key;
     }
-    ctx.closePath();
-  } else if (m.pts?.length) {
-    ctx.moveTo(m.pts[0]![0] * MW, m.pts[0]![1] * MH);
-    for (let i = 1; i < m.pts.length; i++) {
-      ctx.lineTo(m.pts[i]![0] * MW, m.pts[i]![1] * MH);
-    }
-    ctx.closePath();
-  } else {
-    const cx = m.x * MW;
-    const cy = m.y * MH;
-    const rw = m.w * MW;
-    const rh = m.h * MH;
-    if (m.shape === 'ellipse') ctx.ellipse(cx, cy, rw / 2, rh / 2, 0, 0, Math.PI * 2);
-    else ctx.rect(cx - rw / 2, cy - rh / 2, rw, rh);
+    await fsp.writeFile(path.join(dir, maskFrameFile(f)), png);
   }
-  ctx.fill('evenodd');
-  ctx.restore();
-  if (m.invert) {
-    const img = ctx.getImageData(0, 0, MW, MH);
-    const d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = 255 - d[i]!;
-      d[i + 1] = 255 - d[i + 1]!;
-      d[i + 2] = 255 - d[i + 2]!;
-    }
-    ctx.putImageData(img, 0, 0);
+  return { frames, encoded };
+}
+
+const escFilterPath = (p: string) => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+
+/**
+ * Gray alpha source (MW x MH, `D` seconds) for a pre-rasterized mask: a single PNG looped, or a
+ * frame sequence directory entered at item-local frame `offsetFrames` (for overlays that span
+ * several render units). Holds the last frame if the sequence is shorter than `D`.
+ */
+export function maskFileSource(file: string, fps: number, D: string, offsetFrames = 0): string {
+  if (file.endsWith('.png')) {
+    return `movie='${escFilterPath(file)}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D},format=gray`;
   }
-  if (m.reveal && t >= 0) {
-    const p = ease(m.reveal.e, Math.min(1, Math.max(0, (t - m.reveal.at) / Math.max(1e-6, m.reveal.d))));
-    if (p < 1) {
-      ctx.globalCompositeOperation = 'destination-in';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, MW * p, MH);
-    }
+  const pattern = escFilterPath(`${file.replace(/%/g, '%%')}/%05d.png`);
+  return `movie='${pattern}':f=image2,setpts=N/(${fps}*TB),trim=start_frame=${Math.max(0, Math.round(offsetFrames))},` +
+    `setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${D},trim=duration=${D},format=gray`;
+}
+
+/**
+ * Combine alpha sources into one gray stream by multiplication. Each source is an unlabelled
+ * chain; the result is an unlabelled chain that can continue with ",filter".
+ */
+function multiplyAlpha(sources: string[], id: string): string {
+  if (sources.length === 1) return sources[0]!;
+  const labels = sources.map((_, i) => `[ma${id}x${i}]`);
+  let out = sources.map((s, i) => `${s}${labels[i]}`).join(';') + ';';
+  let acc = labels[0]!;
+  for (let i = 1; i < labels.length; i++) {
+    const next = i === labels.length - 1 ? '' : `[ma${id}y${i}]`;
+    out += `${acc}${labels[i]}blend=all_mode=multiply${next}${next ? ';' : ''}`;
+    acc = next;
   }
-  return canvas.toBuffer('image/png');
+  return out;
 }
 
 /** Signed distance (px, positive inside) of a mask shape at mask resolution MW x MH, as a geq expression of X,Y. */
@@ -298,9 +419,10 @@ function compileProFx(fx: Effect[], W: number, H: number, fps: number, D: string
       if (f.mode === 'gaussian') {
         out.push(`gblur=sigma=${n(f.sigma)}`);
       } else {
-        const r = Math.max(1, Math.round(f.sigma));
-        const vertical = f.angle !== undefined && Math.abs(Math.sin((f.angle * Math.PI) / 180)) > 0.707;
-        out.push(vertical ? `boxblur=0:1:${r}:1` : `boxblur=${r}:1:0:1`);
+        // True directional (motion) blur along `angle` on all planes. The previous boxblur form
+        // was a 2-D box blur on luma only, and its "vertical" branch blurred only chroma.
+        const angle = (((f.angle ?? 0) % 360) + 360) % 360;
+        out.push(`dblur=angle=${n(angle)}:radius=${n(Math.max(1, f.sigma * 2))}`);
       }
     } else if (f.type === 'glow') {
       out.push(
@@ -351,18 +473,18 @@ export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string
   if (ms.length) {
     const MW = Math.max(2, Math.round(W / 2));
     const MH = Math.max(2, Math.round(H / 2));
-    const fileMask = ms.find((m) => maskFiles?.has(m));
-    let src: string;
-    if (fileMask && maskFiles?.get(fileMask)) {
-      const esc = maskFiles.get(fileMask)!.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-      src = `movie='${esc}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D},format=gray`;
-    } else {
-      const alpha = ms.map((m) => maskExpr(m, MW, MH)).reduce((a, b) => `${a}*${b}`);
-      const animated = ms.some((m) => m.reveal || (m.keys && m.keys.length > 1));
-      src = animated
+    // Pre-rasterized (concave/bezier) masks come from files; the rest are evaluated with geq.
+    // Every mask multiplies, so a file mask never silently drops the others.
+    const sources = ms.filter((m) => maskFiles?.has(m)).map((m) => maskFileSource(maskFiles!.get(m)!, fps, D));
+    const exprMasks = ms.filter((m) => !maskFiles?.has(m));
+    if (exprMasks.length) {
+      const alpha = exprMasks.map((m) => maskExpr(m, MW, MH)).reduce((a, b) => `${a}*${b}`);
+      const animated = exprMasks.some((m) => m.reveal || (m.keys && m.keys.length > 1));
+      sources.push(animated
         ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*${alpha}'`
-        : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*${alpha}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+        : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*${alpha}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`);
     }
+    const src = multiplyAlpha(sources, id);
     const head = frag ? `${frag},` : '';
     frag = `${head}format=yuva420p[fxc${id}];${src},scale=${W}:${H}:flags=bicubic,format=gray[fxm${id}];[fxc${id}][fxm${id}]alphamerge[fxk${id}];color=c=${col}:s=${W}x${H}:r=${fps}:d=${D}[fxb${id}];[fxb${id}][fxk${id}]overlay=shortest=1:format=auto`;
   }
@@ -395,20 +517,19 @@ export function compileOverlayFx(
   // plane, then use the same upscaling and source-alpha multiplication as masks.
   const MW = ms.length ? Math.max(2, Math.round(W / 2)) : 2;
   const MH = ms.length ? Math.max(2, Math.round(H / 2)) : 2;
-  const fileMask = ms.find((m) => maskFiles?.has(m));
-  let src: string;
-  if (fileMask && maskFiles?.get(fileMask)) {
-    const esc = maskFiles.get(fileMask)!.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-    src = `movie='${esc}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D},format=gray`;
-  } else {
-    const alpha = [...ms.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
-      .map((x) => `(${x})`).join('*');
-    const dynamic = ms.some((m) => !!m.reveal || (m.keys && m.keys.length > 1)) ||
+  const offsetFrames = Math.round(timeOffset * fps);
+  const sources = ms.filter((m) => maskFiles?.has(m)).map((m) => maskFileSource(maskFiles!.get(m)!, fps, D, offsetFrames));
+  const exprMasks = ms.filter((m) => !maskFiles?.has(m));
+  if (exprMasks.length || opacity || !sources.length) {
+    const alpha = [...exprMasks.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
+      .map((x) => `(${x})`).join('*') || '1';
+    const dynamic = exprMasks.some((m) => !!m.reveal || (m.keys && m.keys.length > 1)) ||
       transforms(fx).some((k) => k.keys.filter((x) => x.o !== undefined).length > 1);
-    src = dynamic
+    sources.push(dynamic
       ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*clip(${alpha},0,1)'`
-      : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*clip(${alpha},0,1)',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+      : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*clip(${alpha},0,1)',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`);
   }
+  const src = multiplyAlpha(sources, id);
   // Never overwrite the input alpha: compose it with the computed effect alpha.
   return `${head ? head + ',' : ''}format=yuva420p,split=2[fxcol${id}][fxold${id}];` +
     `[fxold${id}]alphaextract[fxorig${id}];` +

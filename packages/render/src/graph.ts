@@ -8,9 +8,9 @@
  * resume. Audio is built separately, in bounded stages, and muxed in at the end (audio.ts).
  */
 import path from 'node:path';
-import { type Timeline, type Placed, type Clip, type BRoll, type Effect, type FxMask, type FxBlend, resolveRef, sampleSpeedRamp } from '../../core/src/index.ts';
+import { type Timeline, type Placed, type Clip, type BRoll, type Effect, type FxMask, type FxBlend, resolveRef, speedRampSegments } from '../../core/src/index.ts';
 import { compileFx, compileOverlayFx, transformFilter } from './effects.ts';
-import { colorFilterChain } from './color.ts';
+import { colorFilterChain, inputConversion } from './color.ts';
 
 export interface MediaRef {
   path: string;
@@ -26,6 +26,8 @@ export interface EncParams {
   preset: string;
   crf: number;
   scale: number;
+  /** FFmpeg has zscale (zimg): exact colour-space conversion and HDR tone mapping. */
+  zscale?: boolean;
 }
 
 export interface Unit {
@@ -119,26 +121,16 @@ export interface UnitArgs {
   graph: string;
 }
 
-/** Build piecewise setpts expression for a variable speed ramp. */
-function speedRampPtsExpr(c: Clip): string {
-  const keys = c.speedRamp!;
-  const srcDur = Math.max(0.01, c.out - c.in);
-  const segs = 16;
-  const du = srcDur / segs;
-  let outT = 0;
-  const pts: { srcT: number; outT: number }[] = [{ srcT: 0, outT: 0 }];
-  for (let i = 0; i < segs; i++) {
-    const s = Math.max(0.1, sampleSpeedRamp(keys, (i + 0.5) * du));
-    outT += du / s;
-    pts.push({ srcT: (i + 1) * du, outT });
-  }
-  let expr = `${n3(pts[pts.length - 1]!.outT)}/TB`;
-  for (let i = pts.length - 2; i >= 0; i--) {
-    const a = pts[i]!;
-    const b = pts[i + 1]!;
-    const slope = (b.outT - a.outT) / Math.max(1e-6, b.srcT - a.srcT);
-    const segExpr = `(${n3(a.outT)}+(T-${n3(a.srcT)})*${n3(slope)})/TB`;
-    expr = i === 0 ? segExpr : `if(lt(T,${n3(b.srcT)}),${segExpr},${expr})`;
+/** Piecewise setpts expression for a variable speed ramp (the shared map from speedRampSegments). */
+export function speedRampPtsExpr(c: Clip): string {
+  const segs = speedRampSegments(c.speedRamp!, Math.max(0.01, c.out - c.in));
+  const n6 = (x: number) => String(Math.round(x * 1e6) / 1e6);
+  // After the last segment, hold the end time; every earlier segment wraps the rest in if(lt(T,end),...).
+  let expr = `${n6(segs[segs.length - 1]!.outEnd)}/TB`;
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const sg = segs[i]!;
+    const segExpr = `(${n6(sg.outStart)}+(T-${n6(sg.srcStart)})/${n6(sg.speed)})/TB`;
+    expr = `if(lt(T,${n6(sg.srcEnd)}),${segExpr},${expr})`;
   }
   return `setpts='${expr}'`;
 }
@@ -181,9 +173,9 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`, maskFiles);
     if (fx) chain.push(fx);
     const detectedCS = m.colorSpace && m.colorSpace !== 'bt709' ? m.colorSpace : undefined;
-    const clipCol = colorFilterChain(c.color ?? (detectedCS ? {} : undefined), detectedCS);
+    const clipCol = colorFilterChain(c.color ?? (detectedCS ? {} : undefined), detectedCS, enc.zscale);
     if (clipCol) chain.push(clipCol);
-    const globalCol = colorFilterChain(tl.color);
+    const globalCol = colorFilterChain(tl.color, undefined, enc.zscale);
     if (globalCol) chain.push(globalCol);
     chain.push('format=yuv420p', 'tpad=stop_mode=clone:stop_duration=1', `trim=end_frame=${p.frames}`, 'setpts=PTS-STARTPTS');
     const body = chain.join(',');
@@ -223,9 +215,12 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const sceneFit = sw && sh ? [`scale=${sw}:${sh}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
       `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black@0`, 'setsar=1'] : undefined;
     const camera = b.scene?.camera && transformFilter(b.scene.camera, W, H, fps, 'black', s - T, true);
+    // B-roll video is converted to BT.709 like main clips (it was composited unconverted before).
+    const brollConv = m.kind === 'video' && m.colorSpace && m.colorSpace !== 'bt709' ? inputConversion(m.colorSpace, !!enc.zscale) : undefined;
     const chain = [
       'setpts=PTS-STARTPTS',
       `fps=${fps}`,
+      ...(brollConv ? [brollConv.filter] : []),
       // Preserve original PNG alpha and transparent letterboxing for effected overlays.
       ...(b.scene || b.fx?.length ? ['format=yuva420p'] : []),
       ...(sceneFit ?? [fitChain(b.fit, W, H, 0.5, 0.5, b.fx?.length ? 'black@0' : tl.settings.bg, `b${bi}`)]),

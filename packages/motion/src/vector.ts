@@ -7,14 +7,15 @@
 import { createRequire } from 'node:module';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { sampleKeys, TmepError, type Ease, type Key } from '../../core/src/index.ts';
+import { sampleKeys, ease, TmepError, type Ease, type Key } from '../../core/src/index.ts';
+import { pointAt, lerpShape, shapeToPath, type MorphShape, type Polyline } from './paths.ts';
 
 type Skia = typeof import('@napi-rs/canvas');
 type Path2D = InstanceType<Skia['Path2D']>;
 type Ctx = ReturnType<InstanceType<Skia['Canvas']>['getContext']>;
 type SkiaImage = Awaited<ReturnType<Skia['loadImage']>>;
 
-export const VECTOR_VERSION = 'v2';
+export const VECTOR_VERSION = 'v3';
 
 export interface DrawKey { t: number; from?: number; to?: number; e?: Ease }
 export interface CanvasGradientSpec {
@@ -44,6 +45,9 @@ export interface CanvasChartSpec {
   unit: string;
   accent: string;
   trackColor: string;
+  /** Label font (the scene style's resolved font); generic sans-serif when absent. */
+  fontName?: string;
+  fontFile?: string;
 }
 export interface CanvasTextSpec {
   text: string;
@@ -88,6 +92,25 @@ export interface VectorLayer {
   imagePath?: string;
   imageFit?: 'contain' | 'cover';
   chartSpec?: CanvasChartSpec;
+  /** Phase 4A motion. */
+  textAnim?: TextAnimSpec;
+  /** Morph keys (first at t=0 is the base shape), prepared into point correspondence. */
+  morph?: { t: number; e?: Ease; shape: MorphShape }[];
+  /** Motion path in `view` units (default frame fractions); keys give arc-length progress. */
+  motion?: { poly: Polyline; view: [number, number]; keys: { t: number; p: number; e?: Ease }[]; orient: boolean };
+  reveal?: { from: 'left' | 'right' | 'top' | 'bottom' | 'center'; at: number; d: number; e?: Ease };
+  depth?: number;
+}
+
+export interface UnitPoseSpec { o?: number; x?: number; y?: number; s?: number; r?: number }
+export interface TextAnimSpec {
+  by: 'char' | 'word' | 'line';
+  at: number;
+  stagger: number;
+  d: number;
+  e?: Ease;
+  from: UnitPoseSpec;
+  out?: { at: number; stagger: number; d: number; e?: Ease; to: UnitPoseSpec };
 }
 
 export interface VectorRun {
@@ -102,6 +125,8 @@ export interface VectorRun {
   camera: Key[];
   sceneFrame: number;
   layers: VectorLayer[];
+  mblur?: { samples: number; shutter: number };
+  focus?: { depth: number; blur: number };
 }
 
 const require = createRequire(import.meta.url);
@@ -199,6 +224,57 @@ export function drawRange(draw: DrawKey[], t: number): [number, number] {
   return [sampleKeys(keys, 'x', t), sampleKeys(keys, 's', t)];
 }
 
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/** Eased progress from a list of {t, p, e} keys (constant before the first / after the last key). */
+export function progressAt(keys: { t: number; p: number; e?: Ease }[], t: number): number {
+  if (!keys.length) return 0;
+  if (t <= keys[0]!.t) return keys[0]!.p;
+  for (let i = 1; i < keys.length; i++) {
+    const a = keys[i - 1]!, b = keys[i]!;
+    if (t < b.t) return a.p + (b.p - a.p) * ease(b.e ?? 'io', (t - a.t) / Math.max(1e-6, b.t - a.t));
+  }
+  return keys[keys.length - 1]!.p;
+}
+
+/** Pose of text unit `i` at layer time t: enter from `from`, optional exit to `out.to` (em units scaled by fontSize). */
+export function unitPose(a: TextAnimSpec, i: number, t: number, fontSize: number): { o: number; x: number; y: number; s: number; r: number } {
+  const p = ease(a.e ?? 'expo', clamp01((t - a.at - i * a.stagger) / a.d));
+  const f = a.from;
+  let o = (f.o ?? 1) + (1 - (f.o ?? 1)) * p;
+  let x = (f.x ?? 0) * fontSize * (1 - p);
+  let y = (f.y ?? 0) * fontSize * (1 - p);
+  let sc = (f.s ?? 1) + (1 - (f.s ?? 1)) * p;
+  let r = (f.r ?? 0) * (1 - p);
+  if (a.out && t >= a.out.at) {
+    const q = ease(a.out.e ?? 'in', clamp01((t - a.out.at - i * a.out.stagger) / a.out.d));
+    const g = a.out.to;
+    o *= 1 + ((g.o ?? 1) - 1) * q;
+    x += (g.x ?? 0) * fontSize * q;
+    y += (g.y ?? 0) * fontSize * q;
+    sc *= 1 + ((g.s ?? 1) - 1) * q;
+    r += (g.r ?? 0) * q;
+  }
+  return { o, x, y, s: sc, r };
+}
+
+/** Shape of a morphing path layer at layer time t. */
+export function morphAt(morph: NonNullable<VectorLayer['morph']>, t: number): MorphShape {
+  if (t <= morph[0]!.t || morph.length === 1) return morph[0]!.shape;
+  for (let i = 1; i < morph.length; i++) {
+    const a = morph[i - 1]!, b = morph[i]!;
+    if (t < b.t) return lerpShape(a.shape, b.shape, ease(b.e ?? 'io', (t - a.t) / Math.max(1e-6, b.t - a.t)));
+  }
+  return morph[morph.length - 1]!.shape;
+}
+
+let segmenters: Record<string, Intl.Segmenter> | undefined;
+function textUnits(line: string, by: TextAnimSpec['by']): { text: string; index: number }[] {
+  if (by === 'line') return [{ text: line, index: 0 }];
+  segmenters ??= { char: new Intl.Segmenter(undefined, { granularity: 'grapheme' }), word: new Intl.Segmenter(undefined, { granularity: 'word' }) };
+  return [...segmenters[by]!.segment(line)].map((x) => ({ text: x.segment, index: x.index }));
+}
+
 const sample = (keys: Key[], t: number) => ({
   x: sampleKeys(keys, 'x', t),
   y: sampleKeys(keys, 'y', t),
@@ -232,7 +308,12 @@ function traceShape(c: Ctx, kind: 'rect' | 'rrect' | 'ellipse', bw: number, bh: 
   }
 }
 
+/** Grouped integers (18,187) for chart values; deterministic, locale-independent. */
+const fmtNum = (v: number) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
 function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progress: number): void {
+  if (spec.fontName) ensureCanvasFont(spec.fontName, spec.fontFile);
+  const family = spec.fontName ? `"${spec.fontName}"` : 'sans-serif';
   const items = spec.data;
   const maxVal = spec.max ?? Math.max(1, ...items.map((d) => d.value));
   const p = Math.min(1, Math.max(0, progress));
@@ -262,9 +343,9 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     const valSize = Math.max(16, Math.round(radius * 0.44));
-    c.font = `700 ${valSize}px sans-serif`;
-    c.fillText(`${Math.round(d.value * p)}${spec.unit}`, 0, -valSize * 0.14);
-    c.font = `500 ${Math.max(12, Math.round(valSize * 0.42))}px sans-serif`;
+    c.font = `700 ${valSize}px ${family}`;
+    c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, 0, -valSize * 0.14);
+    c.font = `500 ${Math.max(12, Math.round(valSize * 0.42))}px ${family}`;
     c.fillStyle = '#CBD5E1';
     c.fillText(d.label, 0, valSize * 0.55);
     return;
@@ -273,8 +354,9 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
   if (spec.chartType === 'hbar') {
     const rowH = ih / items.length;
     const barH = Math.max(8, Math.min(28, rowH * 0.48));
-    const labelSize = Math.max(12, Math.min(24, Math.round(rowH * 0.34)));
-    c.font = `600 ${labelSize}px sans-serif`;
+    // Labels scale with the chart box (the old 24 px cap was illegible at 1080×1920).
+    const labelSize = Math.max(12, Math.min(Math.round(bh * 0.07), Math.round(rowH * 0.34)));
+    c.font = `600 ${labelSize}px ${family}`;
     for (let i = 0; i < items.length; i++) {
       const d = items[i]!;
       const y = -ih / 2 + i * rowH + rowH * 0.52;
@@ -286,7 +368,7 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
 
       c.fillStyle = '#FFFFFF';
       c.textAlign = 'right';
-      c.fillText(`${Math.round(d.value * p)}${spec.unit}`, bw / 2 - padX, y - barH * 0.2);
+      c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, bw / 2 - padX, y - barH * 0.2);
 
       c.fillStyle = spec.trackColor;
       c.beginPath();
@@ -339,8 +421,8 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
   // Default: vertical 'bar' chart
   const slot = iw / items.length;
   const barW = Math.max(10, slot * 0.58);
-  const labelSize = Math.max(11, Math.min(22, Math.round(slot * 0.22)));
-  c.font = `600 ${labelSize}px sans-serif`;
+  const labelSize = Math.max(11, Math.min(Math.round(bh * 0.06), Math.round(slot * 0.22)));
+  c.font = `600 ${labelSize}px ${family}`;
   for (let i = 0; i < items.length; i++) {
     const d = items[i]!;
     const cx = -iw / 2 + slot * (i + 0.5);
@@ -357,7 +439,7 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
     c.fillText(d.label, cx, bottom + 8);
     c.fillStyle = '#FFFFFF';
     c.textBaseline = 'bottom';
-    c.fillText(`${Math.round(d.value * p)}${spec.unit}`, cx, bottom - barH - 6);
+    c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, cx, bottom - barH - 6);
   }
 }
 
@@ -392,14 +474,45 @@ export function drawVectorFrame(
 
     c.save();
     c.setTransform(scale, 0, 0, scale, 0, 0);
-    c.translate(run.w / 2 + cam.x * run.w, run.h / 2 + cam.y * run.h);
+    // 2.5D: a layer at depth d follows the camera's pan and zoom with factor 1/(1+d) (parallax).
+    const k = 1 / (1 + (layer.depth ?? 0));
+    c.translate(run.w / 2 + cam.x * run.w * k, run.h / 2 + cam.y * run.h * k);
     c.rotate((cam.r * Math.PI) / 180);
-    c.scale(cam.s, cam.s);
+    const cs = 1 + (cam.s - 1) * k;
+    c.scale(cs, cs);
+    let orient = 0;
+    if (layer.motion) {
+      const mp = layer.motion;
+      const pr = progressAt(mp.keys, t);
+      const { pt, tan } = pointAt(mp.poly, pr);
+      c.translate((pt[0] / mp.view[0] - 0.5) * run.w, (pt[1] / mp.view[1] - 0.5) * run.h);
+      if (mp.orient) orient = (Math.atan2(tan[1] * run.h / mp.view[1], tan[0] * run.w / mp.view[0]) * 180) / Math.PI;
+      state.push(pr);
+    }
     c.translate(a.x * run.w, a.y * run.h);
-    c.rotate((a.r * Math.PI) / 180);
+    c.rotate(((a.r + orient) * Math.PI) / 180);
     c.scale(a.s, a.s);
 
     const [bw, bh] = layer.box;
+    if (layer.reveal) {
+      const rv = layer.reveal;
+      const p = ease(rv.e ?? 'expo', clamp01((t - rv.at) / rv.d));
+      state.push(p);
+      if (p <= 0) { c.restore(); return; }
+      if (p < 1) {
+        c.beginPath();
+        if (rv.from === 'center') c.ellipse(0, 0, (bw / 2) * Math.SQRT2 * p, (bh / 2) * Math.SQRT2 * p, 0, 0, Math.PI * 2);
+        else if (rv.from === 'left') c.rect(-bw / 2 - 2, -bh / 2 - 2, bw * p + 2, bh + 4);
+        else if (rv.from === 'right') c.rect(bw / 2 - bw * p, -bh / 2 - 2, bw * p + 2, bh + 4);
+        else if (rv.from === 'top') c.rect(-bw / 2 - 2, -bh / 2 - 2, bw + 4, bh * p + 2);
+        else c.rect(-bw / 2 - 2, bh / 2 - bh * p, bw + 4, bh * p + 2);
+        c.clip();
+      }
+    }
+    if (run.focus && layer.depth !== undefined) {
+      const blur = Math.abs(layer.depth - run.focus.depth) * run.focus.blur * scale;
+      if (blur > 0.25) c.filter = `blur(${blur.toFixed(2)}px)`;
+    }
     if (layer.clip) {
       traceShape(c, layer.clip.kind, bw, bh, layer.clip.radius);
       c.clip();
@@ -417,7 +530,8 @@ export function drawVectorFrame(
       const k = Math.min(bw / view[0], bh / view[1]);
       c.scale(k, k);
       c.translate(-view[0] / 2, -view[1] / 2);
-      const shape = shapes[i];
+      const shape = layer.morph ? new Path2D(shapeToPath(morphAt(layer.morph, t))) : shapes[i];
+      if (layer.morph) state.push(t);
       if (shape) {
         if (layer.fill) {
           c.fillStyle = layer.fill;
@@ -483,7 +597,38 @@ export function drawVectorFrame(
         : ts.valign === 'bottom'
           ? bh / 2 - (ts.bg ? ts.pad : 0) - totalH + lineStep / 2
           : -totalH / 2 + lineStep / 2;
-      lines.forEach((line, li) => c.fillText(line, tx, startY + li * lineStep));
+      if (layer.textAnim) {
+        // Each unit is placed at its offset inside the measured line, so kerning and alignment
+        // match the static text exactly; only the per-unit pose animates.
+        const A = layer.textAnim;
+        c.textAlign = 'left';
+        let ui = 0;
+        state.push(t);
+        lines.forEach((line, li) => {
+          const lw = c.measureText(line).width;
+          const x0 = ts.align === 'left' ? tx : ts.align === 'right' ? tx - lw : tx - lw / 2;
+          const y = startY + li * lineStep;
+          for (const u of textUnits(line, A.by)) {
+            if (!u.text.trim()) continue;
+            const pose = unitPose(A, ui++, t, ts.fontSize);
+            if (pose.o <= 0.001) continue;
+            // After whitespace the unit starts at width(prefix). Inside a word the kerning pair with the
+            // previous character matters, so use width(prefix + unit) - width(unit).
+            const uw = c.measureText(u.text).width;
+            const prev = line[u.index - 1];
+            const ux = x0 + (u.index === 0 || prev === undefined || /\s/.test(prev)
+              ? c.measureText(line.slice(0, u.index)).width
+              : c.measureText(line.slice(0, u.index + u.text.length)).width - uw);
+            c.save();
+            c.globalAlpha *= Math.min(1, pose.o);
+            c.translate(ux + uw / 2 + pose.x, y + pose.y);
+            if (pose.r) c.rotate((pose.r * Math.PI) / 180);
+            if (pose.s !== 1) c.scale(pose.s, pose.s);
+            c.fillText(u.text, -uw / 2, 0);
+            c.restore();
+          }
+        });
+      } else lines.forEach((line, li) => c.fillText(line, tx, startY + li * lineStep));
     } else if (kind === 'image' && layer.imagePath) {
       const img = images.get(layer.imagePath);
       if (img) {
@@ -543,9 +688,30 @@ export async function rasterizeVectorRun(run: VectorRun, W: number, H: number, d
   }
   await fsp.mkdir(dir, { recursive: true });
   let last = '', png: Buffer | undefined, encoded = 0;
+  // Motion blur: average `samples` sub-frames spread over the shutter interval (additive, 1/N each).
+  const mb = run.mblur;
+  const sub = mb ? createCanvas(W, H).getContext('2d') : undefined;
+  const drawFrame = (f: number): string => {
+    if (!mb || !sub) return drawVectorFrame(ctx, run, f, W / run.w, shapes, images);
+    const states: string[] = [];
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    for (let i = 0; i < mb.samples; i++) {
+      const df = mb.shutter * ((i + 0.5) / mb.samples - 0.5);
+      states.push(drawVectorFrame(sub, run, Math.min(run.frames - 1e-3, Math.max(0, f + df)), W / run.w, shapes, images));
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 1 / mb.samples;
+      ctx.drawImage(sub.canvas, 0, 0);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    // A static frame (all sub-frames identical) is drawn sharp, without accumulation error.
+    if (states.every((x) => x === states[0])) return drawVectorFrame(ctx, run, f, W / run.w, shapes, images);
+    return states.join('|');
+  };
   for (let f = 0; f < run.frames; f++) {
     if (signal?.aborted) throw new TmepError('E_CANCELLED', 'render cancelled');
-    const state = drawVectorFrame(ctx, run, f, W / run.w, shapes, images);
+    const state = drawFrame(f);
     if (state !== last || !png) {
       png = canvas.encodeSync('png');
       encoded++;

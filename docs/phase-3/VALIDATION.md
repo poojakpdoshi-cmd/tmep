@@ -11,7 +11,7 @@
 | Check | Result | Notes |
 |---|---|---|
 | **TypeScript (`npm run typecheck`)** | **PASS (0 errors)** | Covers all 9 packages + new `color.ts`, `inspector.ts`, `phase3-ops.test.ts`, `phase3-render.test.ts` |
-| **Unit Tests (`npm test`)** | **175 / 175 PASS** (62.8s) | +7 new Phase 3 unit & FFmpeg render tests (`phase3-ops.test.ts`, `phase3-render.test.ts`) |
+| **Unit Tests (`npm test`)** | **176 / 176 PASS** (final count at `d1e6f9c`, re-verified in Phase 4 Stage 4.0; this row originally read 175 before the last Phase 3 commit) | +7 new Phase 3 unit & FFmpeg render tests (`phase3-ops.test.ts`, `phase3-render.test.ts`) |
 | **Phase 3 Demos (`node examples/phase-3-demos/run.ts`)** | **5 / 5 PASS** | 30s talking-head, 31.5s cinematic montage, 28.5s sports highlights, 30s product demo, 60s educational explainer |
 | **FRAME Inspector (`api.inspect({ what: 'qa' })`)** | **0 defects** across all 5 demos | Verified A/V duration sync, frame counts, true peak, LUFS, silence, black segments |
 

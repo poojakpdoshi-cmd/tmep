@@ -9,13 +9,21 @@ description: Author animated presets, vector paths, and keyframed motion graphic
 Use when adding titles, lower-thirds, stats, progress indicators, or animated vector paths (`gfx`, `scene`, `fx`).
 
 ## How (Supported Operations)
-- **ASS Presets (`gfx`)**: `title`, `lower_third`, `icons`, `stat`, `badge`, `bars`, `progress`, `cta`, `keyword`, `icon`, `flash`.
-- **Keyframes (`fx`)**: `kf` (`s`, `x`, `y`, `r`, `o`) with eases `linear`, `in`, `out`, `io`, `back`, `hold`, plus 8 presets (`zoomin`, `zoomout`, `push`, `pull`, `panleft`, `panright`, `panup`, `pandown`).
-- **Vector Paths (`scene`)**: `@napi-rs/canvas` `VectorRun` (`path` layers) with state-signature frame deduplication.
+- **Prefer presets** (`video_plan` / `api.compile` intent) — FRAME places, sizes and times them:
+  `kinetic_title {title, subtitle}`, `lower_third {title: name, subtitle: role, avoid:[face box]}`,
+  `callout {target:{x,y}, label}`, `ui_demo {asset, clicks:[{x,y,t,label}]}`,
+  `animated_diagram {nodes, edges?}`, `dynamic_chart {title, chart:{chartType, data, highlight}}`,
+  plus `profile` (`editorial|bold|minimal|documentary|sports|tech`), `platform`, `avoid`. Read the
+  returned `corrections`: they say what FRAME moved or shrank and why.
+- **Scenes (`scene`)** when a preset does not fit: text `anim` (char/word/line), path `morph`,
+  `motionPath`, `reveal`, `depth` + camera keys (parallax), scene `mblur`/`focus`, charts, gradients.
+- **Keyframes (`fx`)**: `kf` (`s`,`x`,`y`,`r`,`o`); eases `linear, in, out, io, back, spring, hold,
+  expo, expoio, circ, smooth, elastic, bounce, snap`; presets `zoomin…pandown`.
+- **ASS presets (`gfx`)**: legacy `title`, `lower_third`, `stat`, … — linear motion, prefer Canvas presets.
 
-## Limitations & Future Capabilities
-- **Planned (Phase 2)**: Generalized `CanvasRun` (`rrect`, `gradient`, measured `text`, `chart`) and Chrome HTML/CSS integration.
-- ASS preset movements use linear `\move` interpolation; `explainer-canvas.mjs` and `launch-reel.mjs` are standalone scripts, not yet generalized MCP templates.
+## Limitations
+- Collision checks cover rect/text pairs only; check motion paths crossing shapes by eye.
+- Motion blur multiplies Canvas raster time by its sample count.
 
 ## Common Mistakes & Prohibitions
 - **No meaningless animations** or bouncy overshoots on serious content.

@@ -9,6 +9,7 @@ description: Edit fast-paced sports highlights and action sequences in FRAME.
 Use when assembling sports clips, action montages, or high-energy highlight reels.
 
 ## How (Supported Operations)
+- **Start from the footage, not a description**: `video_inspect {what:"brief", asset, task:"sports", ocr:true}` returns candidate moments (crowd/commentary level, motion, cut density) with evidence and confidence, plus visible scoreboard text when tesseract is installed. These are signal peaks, **not** recognized goals/wickets — confirm each before cutting.
 - `video_import` raw clips, `video_reference` for target pacing, `cut`/`trim`/`move`/`speed` for tight action assembly.
 - `music` + `sfx` (`whoosh`, `riser`, `swoosh`) + `transition` (`xfade`) for energy and momentum.
 

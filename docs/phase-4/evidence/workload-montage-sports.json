@@ -1,0 +1,32 @@
+{
+ "date": "2026-11-28T06:17:49.517Z",
+ "media": "montage.mp4",
+ "task": "sports",
+ "tokenizer": "heuristic estimate (bench/tokens.ts, ±20%); no provider usage measured",
+ "conventional": {
+  "toolCalls": 3,
+  "agentWrittenChars": 558,
+  "agentWrittenTokens": 256,
+  "readChars": 127987,
+  "readTokens": 58796,
+  "localMs": 722,
+  "note": "raw logs still need the agent to reason out moments and regions; not included"
+ },
+ "conventionalLean": {
+  "toolCalls": 3,
+  "agentWrittenChars": 680,
+  "agentWrittenTokens": 324,
+  "readChars": 15860,
+  "readTokens": 7557,
+  "note": "filtered logs; moments, scenes, quality and regions still left to the agent"
+ },
+ "frame": {
+  "toolCalls": 1,
+  "agentWrittenChars": 82,
+  "agentWrittenTokens": 44,
+  "readChars": 1162,
+  "readTokens": 647,
+  "localMs": 399,
+  "cachedMs": 2
+ }
+}

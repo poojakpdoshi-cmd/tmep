@@ -13,6 +13,7 @@ import {
   type Project,
   type Word,
   type FxMask,
+  type Effect,
   TmepError,
   layout,
   timelineWords,
@@ -25,7 +26,7 @@ import {
   sha256,
   toPosix,
 } from '../../core/src/index.ts';
-import { rasterizeComplexMaskPng } from './effects.ts';
+import { rasterizeComplexMaskPng, rasterizeComplexMaskSequence, maskAnimated } from './effects.ts';
 import { BT709_OUTPUT_TAGS, detectColorSpace } from './color.ts';
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
@@ -33,14 +34,16 @@ import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
 import { rasterIdentity, rasterizeVectorRun, VECTOR_VERSION } from '../../motion/src/vector.ts';
 import { stageFonts } from '../../motion/src/fonts.ts';
 import { planUnits, unitArgs, outSize, type MediaRef, type EncParams, type Unit } from './graph.ts';
-import { renderAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
+import { renderAudio, clipAudio, AUDIO_VERSION, type AudioStats } from './audio.ts';
 import { pool, tmpFor, publish, maybeScript } from './stage.ts';
 import { sfxFile } from './sfx.ts';
 import { ownerTag } from './recovery.ts';
 
 export { publish };
 
-export const RENDERER_VERSION = 'r1';
+// r2 (Phase 4 Stage 4.0): speed-ramp video map, directional blur, zscale colour conversion,
+// animated mask sequences. Bumped so cached units rendered with the old filters are not reused.
+export const RENDERER_VERSION = 'r2';
 
 export type Quality = 'draft' | 'standard' | 'high';
 
@@ -208,7 +211,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     if (!info.filters.has(f)) throw new TmepError('E_FFMPEG_MISSING', `ffmpeg lacks filter "${f}"`, 'use a full FFmpeg build with libass (gyan.dev full / BtbN GPL)');
   }
   const quality: Quality = opts.quality ?? (opts.preview ? 'draft' : 'standard');
-  const enc: EncParams = { vcodec: await pickEncoder(opts.encoder), ...ENC[quality], scale: opts.preview ? 0.5 : 1 };
+  const enc: EncParams = { vcodec: await pickEncoder(opts.encoder), ...ENC[quality], scale: opts.preview ? 0.5 : 1, zscale: (await ffmpegInfo()).filters.has('zscale') };
   const fps = tl.settings.fps;
   const placed = layout(tl);
   const frames = totalFrames(tl);
@@ -350,7 +353,11 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     v: RENDERER_VERSION,
     a: AUDIO_VERSION,
     fps,
-    clips: placed.map((p) => ({ src: media[p.clip.src]!.hash, in: p.clip.in, sp: p.clip.speed, f: p.frames, t: p.transFrames, vol: p.clip.vol, m: p.clip.mute })),
+    // The per-clip audio hash covers everything the mixer reads for a clip (media, range, speed,
+    // ramp, reverse, J/L offsets, per-clip post, volume/mute, length and crossfade). Keying the
+    // final mix on anything less served a stale mix after audio-only edits.
+    clips: clipAudio(placed, media, fps).map((c) => c.hash),
+    master: tl.master ?? null,
     music: tl.music ? { ...tl.music, h: media[tl.music.src]?.hash } : null,
     sfx: sfxList.map((s) => [path.basename(s.file), r2(s.t, 3), s.vol]),
     lufs: tl.loudness,
@@ -432,21 +439,32 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     const maskFiles = new Map<FxMask, string>();
     const MW = Math.max(2, Math.round(W / 2));
     const MH = Math.max(2, Math.round(H / 2));
-    const allEffects = [
-      ...tl.clips.flatMap((c) => c.fx ?? []),
-      ...tl.broll.flatMap((b) => b.fx ?? []),
-      ...gfxOverlays.flatMap((g) => g.fx ?? []),
+    // Each effect stack with the duration (s) of the item it belongs to: an animated mask is
+    // rasterized once per item frame (plus one second of tail for the unit graph's padding).
+    const effectItems: [Effect[], number][] = [
+      ...placed.map((p) => [p.clip.fx ?? [], p.frames / fps] as [Effect[], number]),
+      ...tl.broll.map((b) => [b.fx ?? [], b.d] as [Effect[], number]),
+      ...gfxOverlays.map((g) => [g.fx ?? [], g.d] as [Effect[], number]),
     ];
-    for (const eff of allEffects) {
-      if (eff.type === 'mask' && (eff.shape === 'concave' || eff.shape === 'bezier')) {
-        const mKey = hashOf({ m: eff, MW, MH });
-        const mFile = project.cachePath('masks', `${mKey}.png`);
+    for (const [fxs, dur] of effectItems) {
+      for (const eff of fxs) {
+        if (eff.type !== 'mask' || (eff.shape !== 'concave' && eff.shape !== 'bezier')) continue;
+        if (ctrl.signal.aborted) break;
+        const animated = maskAnimated(eff);
+        const mFrames = animated ? Math.ceil((dur + 1) * fps) + 1 : 1;
+        const mKey = hashOf({ v: 2, m: eff, MW, MH, fps: animated ? fps : 0, frames: mFrames });
+        const mFile = project.cachePath('masks', animated ? mKey : `${mKey}.png`);
         if (!(await exists(mFile))) {
           await fsp.mkdir(path.dirname(mFile), { recursive: true });
-          const buf = rasterizeComplexMaskPng(eff, MW, MH, 0);
-          const tmpM = tmpFor(mFile, '.png');
-          await fsp.writeFile(tmpM, buf);
-          await fsp.rename(tmpM, mFile).catch(async (e) => { if (!(await exists(mFile))) throw e; });
+          const tmpM = tmpFor(mFile, animated ? '' : '.png');
+          try {
+            if (animated) await rasterizeComplexMaskSequence(eff, MW, MH, fps, mFrames, tmpM, ctrl.signal);
+            else await fsp.writeFile(tmpM, rasterizeComplexMaskPng(eff, MW, MH, 0));
+            // A concurrent render may publish the same content-addressed mask first.
+            await fsp.rename(tmpM, mFile).catch(async (e) => { if (!(await exists(mFile))) throw e; });
+          } finally {
+            await fsp.rm(tmpM, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+          }
         }
         maskFiles.set(eff, mFile);
       }

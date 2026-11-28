@@ -23,7 +23,7 @@ This file is the canonical source of truth for all AI coding and editing agents 
 
 ## Production Pipeline
 
-1. **Inspect & Diagnose**: Run `doctor` / `video_doctor` if environment state is unknown; `video_import` media; `video_transcribe` (or `transcribe-batch`).
+1. **Inspect & Diagnose**: Run `doctor` / `video_doctor` if environment state is unknown; `video_import` media; `video_transcribe` (or `transcribe-batch`); `video_inspect {what:"brief", asset, task}` instead of asking the user to describe the footage. Treat `inferred` items as suggestions with evidence, not facts.
 2. **Creative Direction**: Choose format, pacing, typography, and restraint level. Load `skills/creative-direction/SKILL.md`.
 3. **Rough Cut & Structure**: `video_plan` or `video_storyboard` / `video_script`.
 4. **Fine Edit & Motion**: `video_edit` with compact TMEP ops (`cut`, `trim`, `broll`, `gfx`, `scene`, `fx`, `transition`, `music`, `sfx`).

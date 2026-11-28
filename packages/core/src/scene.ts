@@ -1,4 +1,5 @@
 import { arr, bool, num, obj, oneOf, str, union, type Infer } from './schema.ts';
+import { EASES } from './effects.ts';
 
 const id = str({ min: 1, max: 64, pattern: /^[A-Za-z][\w-]*$/ });
 const seconds = num({ min: 0, max: 60 });
@@ -9,7 +10,8 @@ const motion = {
   x: offset.optional(), y: offset.optional(), s: num({ min: .05, max: 5 }).optional(),
   r: num({ min: -360, max: 360 }).optional(),
 };
-const easing = oneOf(['linear', 'in', 'out', 'io', 'back', 'spring', 'hold'] as const).optional();
+// One easing vocabulary for effects, scenes and the FFmpeg/Canvas renderers.
+const easing = oneOf(EASES).optional();
 const cameraKey = obj({ t: seconds, ...motion, e: easing });
 const layerKey = obj({ t: seconds, ...motion, o: num({ min: 0, max: 1 }).optional(), e: easing });
 const text = str({ min: 1, max: 800, pattern: /^[^\x00-\x09\x0b-\x1f\x7f]+$/ });
@@ -30,6 +32,37 @@ const shadow = obj({
   x: num({ min: -100, max: 100 }).default(0),
   y: num({ min: -100, max: 100 }).default(10),
 });
+// Phase 4A motion: text animation, motion paths, shape morphs, reveals, depth, motion blur.
+const unitPose = obj({
+  o: fraction.optional(),
+  x: num({ min: -20, max: 20 }).optional(), // em (font size) units
+  y: num({ min: -20, max: 20 }).optional(),
+  s: num({ min: 0, max: 5 }).optional(),
+  r: num({ min: -360, max: 360 }).optional(),
+});
+const textAnim = obj({
+  by: oneOf(['char', 'word', 'line'] as const).default('word'),
+  at: seconds.default(0),
+  stagger: num({ min: 0, max: 2 }).default(0.05),
+  d: num({ min: 0.01, max: 10 }).default(0.5),
+  e: easing,
+  from: unitPose,
+  out: obj({ at: seconds, stagger: num({ min: 0, max: 2 }).default(0.03), d: num({ min: 0.01, max: 10 }).default(0.35), e: easing, to: unitPose }).optional(),
+});
+const motionPath = obj({
+  d: pathData,
+  view: obj({ w: num({ min: .001, max: 10000 }), h: num({ min: .001, max: 10000 }) }).optional(),
+  keys: arr(obj({ t: seconds, p: fraction, e: easing }), { min: 1, max: 12 }),
+  orient: bool().default(false),
+});
+const reveal = obj({
+  from: oneOf(['left', 'right', 'top', 'bottom', 'center'] as const).default('left'),
+  at: seconds.default(0),
+  d: num({ min: 0.01, max: 30 }).default(0.6),
+  e: easing,
+});
+const morphKey = obj({ t: seconds, d: pathData, e: easing });
+
 const clipShape = obj({
   kind: oneOf(['rect', 'rrect', 'ellipse'] as const),
   radius: num({ min: 0, max: 500 }).default(16),
@@ -45,6 +78,12 @@ const layer = {
   render: oneOf(['auto', 'ass', 'canvas'] as const).optional(),
   shadow: shadow.optional(),
   clip: clipShape.optional(),
+  /** Follow a path (frame coordinates by default); keys give arc-length progress over time. */
+  motionPath: motionPath.optional(),
+  /** Mask wipe/iris that reveals the layer. */
+  reveal: reveal.optional(),
+  /** 2.5D depth: 0 = picture plane; larger values move and zoom less with the camera (parallax). */
+  depth: num({ min: 0, max: 20 }).default(0),
 };
 
 const shapeProps = {
@@ -67,6 +106,10 @@ const content = {
     keys: arr(layerKey, { min: 1, max: 12 }).optional(),
   }), { max: 24 }).optional(),
   camera: arr(cameraKey, { min: 1, max: 12 }).optional(),
+  /** Camera-shutter motion blur for Canvas layers: sub-frame samples averaged per frame. */
+  mblur: obj({ samples: num({ int: true, min: 2, max: 8 }).default(4), shutter: num({ min: 0.05, max: 1 }).default(0.5) }).optional(),
+  /** Depth of field for layers with `depth`: blur grows with distance from the focus depth. */
+  focus: obj({ depth: num({ min: 0, max: 20 }).default(0), blur: num({ min: 0, max: 40 }).default(6) }).optional(),
   layers: arr(union([
     obj({
       ...layer, kind: oneOf(['text'] as const), text,
@@ -80,6 +123,8 @@ const content = {
       pad: num({ min: 0, max: 120 }).default(16),
       radius: num({ min: 0, max: 200 }).default(14),
       gradient: gradient.optional(),
+      /** Per character / word / line animation (kinetic typography). */
+      anim: textAnim.optional(),
     }),
     obj({ ...layer, kind: oneOf(['rect', 'ellipse'] as const), ...shapeProps }),
     obj({ ...layer, kind: oneOf(['rrect'] as const), radius: num({ min: 0, max: 500 }).default(24), ...shapeProps }),
@@ -103,7 +148,9 @@ const content = {
       view: obj({ w: num({ min: .001, max: 10000 }), h: num({ min: .001, max: 10000 }) }).optional(),
       stroke: num({ min: 0, max: 64 }).default(6), fill: color.optional(), glow: num({ min: 0, max: 64 }).default(0),
       cap: oneOf(['round', 'butt', 'square'] as const).default('round'),
-      draw: arr(drawKey, { min: 1, max: 12 }).optional() }),
+      draw: arr(drawKey, { min: 1, max: 12 }).optional(),
+      /** Shape morph targets: the path becomes each `d` at time `t` (structures may differ). */
+      morph: arr(morphKey, { min: 1, max: 8 }).optional() }),
   ]), { min: 1, max: 32 }),
 };
 

@@ -44,19 +44,49 @@ export async function detectColorSpace(filePath: string): Promise<ColorSpaceInfo
   };
 }
 
+/** Input colour spaces that are converted to BT.709 (anything else is treated as BT.709). */
+const SDR_601 = new Set(['bt601', 'smpte170m', 'bt470bg']);
+const SDR_2020 = new Set(['bt2020', 'bt2020nc', 'bt2020c']);
+
+/**
+ * Filter converting a detected/declared input colour space to BT.709 SDR, or undefined for BT.709.
+ *
+ * With zscale (zimg) the matrix, primaries and transfer are all converted exactly; HDR (PQ/HLG) is
+ * linearized with BT.2408 reference white at 203 nits and tone-mapped with a mobius curve whose
+ * knee (0.8) leaves the SDR range untouched and rolls off highlights. Without zscale the
+ * `colorspace` filter is used with full primaries conversion (fast=0); HDR then cannot be
+ * tone-mapped and `hdrToneMapped` is false so callers can warn instead of claiming conversion.
+ */
+export function inputConversion(cs: string | undefined, zscale: boolean): { filter: string; hdrToneMapped?: boolean } | undefined {
+  if (!cs) return undefined;
+  const c = cs.toLowerCase();
+  if (SDR_601.has(c)) {
+    const z = c === 'bt470bg' ? 'min=470bg:pin=470bg:tin=601' : 'min=170m:pin=170m:tin=601';
+    return { filter: zscale ? `zscale=${z}:m=709:p=709:t=709` : `colorspace=all=bt709:iall=${c === 'bt470bg' ? 'bt470bg' : 'smpte170m'}:fast=0` };
+  }
+  if (SDR_2020.has(c)) {
+    return { filter: zscale ? 'zscale=min=2020_ncl:pin=2020:tin=709:m=709:p=709:t=709' : 'colorspace=all=bt709:iall=bt2020:fast=0' };
+  }
+  if (c === 'pq' || c === 'hlg') {
+    if (!zscale) return { filter: 'colorspace=all=bt709:iall=bt2020:fast=0', hdrToneMapped: false };
+    const tin = c === 'pq' ? 'smpte2084' : 'arib-std-b67';
+    return {
+      filter: `zscale=min=2020_ncl:pin=2020:tin=${tin}:t=linear:npl=203,format=gbrpf32le,zscale=p=709,` +
+        'tonemap=tonemap=mobius:param=0.8:desat=0,zscale=t=709:m=709:r=tv,format=yuv420p',
+      hdrToneMapped: true,
+    };
+  }
+  return undefined;
+}
+
 /** Build FFmpeg video filter chain for a ColorGrade. Returns undefined if no filters are needed. */
-export function colorFilterChain(grade: ColorGrade | undefined, detectedCS?: string): string | undefined {
+export function colorFilterChain(grade: ColorGrade | undefined, detectedCS?: string, zscale = false): string | undefined {
   if (!grade) return undefined;
   const f: string[] = [];
 
   const cs = grade.inputColorSpace && grade.inputColorSpace !== 'auto' ? grade.inputColorSpace : detectedCS;
-  if (cs === 'bt601' || cs === 'smpte170m' || cs === 'bt470bg') {
-    f.push('colorspace=all=bt709:iall=bt601-6-625:fast=1');
-  } else if (cs === 'bt2020' || cs === 'bt2020nc') {
-    f.push('colorspace=all=bt709:iall=bt2020:fast=1');
-  } else if (cs === 'hlg' || cs === 'pq') {
-    f.push('colorspace=all=bt709:iall=bt2020:trc=bt709:fast=1');
-  }
+  const conv = inputConversion(cs, zscale);
+  if (conv) f.push(conv.filter);
 
   // Exposure, contrast, saturation
   const eqParts: string[] = [];

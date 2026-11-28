@@ -289,17 +289,33 @@ export function sampleSpeedRamp(keys: SpeedKey[], srcOffset: number): number {
   return keys[keys.length - 1]!.speed;
 }
 
+/** Number of constant-speed segments a speed ramp is rendered with (video, audio and duration alike). */
+export const SPEED_RAMP_SEGMENTS = 16;
+
+export interface SpeedRampSegment { srcStart: number; srcEnd: number; speed: number; outStart: number; outEnd: number }
+
+/**
+ * The single source-to-output time map of a speed ramp: `segs` equal source slices, each played at
+ * the ramp's speed at its midpoint. Video (setpts), audio (atempo) and the clip's frame count all
+ * use this map, so picture and sound stay in sync through the ramp.
+ */
+export function speedRampSegments(keys: SpeedKey[], srcDur: number, segs = SPEED_RAMP_SEGMENTS): SpeedRampSegment[] {
+  const du = Math.max(0, srcDur) / segs;
+  const out: SpeedRampSegment[] = [];
+  let t = 0;
+  for (let i = 0; i < segs; i++) {
+    const speed = Math.max(0.1, sampleSpeedRamp(keys, (i + 0.5) * du));
+    out.push({ srcStart: i * du, srcEnd: (i + 1) * du, speed, outStart: t, outEnd: t + du / speed });
+    t += du / speed;
+  }
+  return out;
+}
+
 export function speedRampDuration(c: Clip): number {
   const srcDur = Math.max(0, c.out - c.in);
   if (!c.speedRamp?.length) return srcDur / c.speed;
-  const steps = 256;
-  const du = srcDur / steps;
-  let out = 0;
-  for (let i = 0; i < steps; i++) {
-    const u = (i + 0.5) * du;
-    out += du / Math.max(0.1, sampleSpeedRamp(c.speedRamp, u));
-  }
-  return out;
+  const segs = speedRampSegments(c.speedRamp, srcDur);
+  return segs[segs.length - 1]!.outEnd;
 }
 
 export function clipFrames(c: Clip, fps: number): number {
