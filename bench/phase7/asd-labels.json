@@ -1,0 +1,37 @@
+{
+  "schema": "frame.asd-labels/1",
+  "source": "Tears of Steel (Blender Foundation, mango.blender.org), CC BY 3.0; 360p DASH rendition v-0360p-0750k-libx264.mp4 (640x266) with a-eng-0128k-aac.mp4",
+  "method": "Labelled by the agent from contact sheets (1 frame per 0.5 s) and the official English subtitle timing (s-eng.ttml), before any active-speaker run. Sides refer to the face position in the full frame. Times are source seconds. Agent-made labels: not independent human ground truth.",
+  "windows": [
+    { "id": "A", "t0": 22.0, "t1": 40.0 },
+    { "id": "B", "t0": 316.0, "t1": 364.0 },
+    { "id": "C", "t0": 381.0, "t1": 394.0 }
+  ],
+  "twoShots": [
+    { "t0": 25.0, "t1": 39.9, "left": "Thom", "right": "Celia",
+      "speaking": [ { "t0": 25.0, "t1": 30.5, "side": "left" }, { "t0": 30.8, "t1": 34.0, "side": "right" }, { "t0": 34.5, "t1": 36.0, "side": "left" }, { "t0": 37.0, "t1": 39.9, "side": "left" } ],
+      "silent": [ { "t0": 30.5, "t1": 30.8 }, { "t0": 36.0, "t1": 37.0 } ] },
+    { "t0": 348.0, "t1": 349.9, "left": "Thom", "right": "Celia", "speaking": [ { "t0": 348.0, "t1": 349.9, "side": "right" } ], "silent": [] },
+    { "t0": 356.0, "t1": 361.0, "left": "Thom", "right": "Celia (back of head)", "note": "over-the-shoulder; only the left face is visible",
+      "speaking": [ { "t0": 356.0, "t1": 359.0, "side": "left" }, { "t0": 359.5, "t1": 361.0, "side": "left" } ], "silent": [ { "t0": 359.0, "t1": 359.5 } ] }
+  ],
+  "offscreen": [ { "t0": 22.0, "t1": 24.9, "note": "city establishing shot; line spoken off screen 23-24.5" } ],
+  "singles": [
+    { "t0": 316.0, "t1": 317.9, "speaking": true, "who": "Thom" },
+    { "t0": 318.0, "t1": 319.9, "speaking": true, "who": "Thom" },
+    { "t0": 320.0, "t1": 320.9, "speaking": false, "who": "Celia reacting" },
+    { "t0": 321.0, "t1": 321.9, "speaking": false, "who": "Celia reacting" },
+    { "t0": 324.0, "t1": 327.9, "speaking": true, "who": "Thom" },
+    { "t0": 346.0, "t1": 347.9, "speaking": true, "who": "Celia" },
+    { "t0": 362.0, "t1": 363.0, "speaking": false, "who": "Celia reacting (Thom speaks off screen)" },
+    { "t0": 381.0, "t1": 382.0, "speaking": true, "who": "man (Nooooo)" },
+    { "t0": 383.0, "t1": 384.9, "speaking": true, "who": "Celia" },
+    { "t0": 385.0, "t1": 385.9, "speaking": false, "who": "Thom reacting" },
+    { "t0": 386.0, "t1": 386.9, "speaking": true, "who": "Thom" },
+    { "t0": 387.0, "t1": 388.9, "speaking": true, "who": "Celia" },
+    { "t0": 389.0, "t1": 389.9, "speaking": true, "who": "Thom" },
+    { "t0": 390.0, "t1": 392.0, "speaking": true, "who": "Celia" },
+    { "t0": 393.0, "t1": 393.9, "speaking": false, "who": "Thom reacting" }
+  ],
+  "excluded": [ { "t0": 322.0, "t1": 323.0, "note": "speaker seen from behind (no face)" }, { "t0": 353.0, "t1": 355.0, "note": "no speech" } ]
+}
