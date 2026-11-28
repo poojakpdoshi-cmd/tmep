@@ -30,7 +30,7 @@ committed **before** any classifier is run on them. Train split: the next 2 clip
 ## Stages
 | Stage | Status |
 |---|---|
-| 6.0 closure + intelligence (scene classifier, dynamic reframe, camera motion, presenter, screen recognition, semantic retrieval, licence audit, speech eval) | in progress |
+| 6.0 closure + intelligence (scene classifier, dynamic reframe, camera motion, presenter, screen recognition, semantic retrieval, licence audit, speech eval) | done (scene target 0.85 missed: 0.738) |
 | ↳ speech eval (Tears of Steel vs subtitles) | done: WER 0.53 in dialogue regions for both NeMo-CTC-small and Whisper-tiny; CTC timing agreement 0.97 (`evidence/asr-eval.json`); `sherpa-onnx` engine added |
 | ↳ scene classifier | done: **0.738** on the untouched test set (149 frames; target 0.85 missed); CV on train 0.64 (`evidence/scene-eval.json`). First test run read 0.081 because of a NaN bug (zero sd in stored model); fixed without changing the model, then re-run once |
 | ↳ worker frame timing | fixed: fps filter kept the last frame of each slot (2 fps frames were up to 0.25 s late); now exact `select` sampling |
@@ -44,4 +44,6 @@ committed **before** any classifier is run on them. Train split: the next 2 clip
 | 6.3 MCP/CLI production interface | done: `video_plan {mode:"produce"}` (10-tool contract kept), `tmep produce` |
 | 6.4 reference-aware editing | done: `frame.style/1` (pacing, motion/camera, colour, audio rhythm, typography, composition), clamped adaptation |
 | 6.5 preview + bounded correction | done: preview render, prioritized QA, ≤ 2 correction cycles, refusals and unresolved items reported |
-| 6.6 real production evaluation | pending |
+| 6.6 real production evaluation | done: frozen rubric; FRAME 3 calls vs 8; original scores 23/25 vs 25/28 (captions on faces), after disclosed fix 25/28 = previous workflow (`PRODUCTION_EVAL.md`) |
+
+Draft PR: #33 (base `feat/phase-5-semantic-assets`). Gate details: VALIDATION.md.
