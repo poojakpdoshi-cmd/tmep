@@ -1,0 +1,11 @@
+{
+ "library": 149,
+ "queries": 292,
+ "precisionAt": {
+  "1": 0.521,
+  "5": 0.502,
+  "10": 0.458
+ },
+ "mAP": 0.398,
+ "randomBaselinePrecision": 0.184
+}

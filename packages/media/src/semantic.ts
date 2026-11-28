@@ -35,6 +35,7 @@ export interface SemFrame {
   /** Phase 6 scene features: MobileNetV3-large embedding and top ImageNet classes [index, p]. */
   embL?: number[];
   cls?: [number, number][];
+  clsTop?: [string, number][];
   ms?: number;
 }
 
@@ -412,6 +413,16 @@ export function eventCandidates(a: FootageAnalysis, tracks: Track[], changes: Se
 // ---------- entry ----------
 
 export interface SemanticOptions { fps?: number; gestures?: boolean; maxSeconds?: number; signal?: AbortSignal; words?: { w: string; s: number; e: number }[]; textStep?: number }
+
+/** One frame's scene features of a file (image or a video at `at`), or undefined when the models are absent. */
+export async function embedFile(ffmpeg: string, file: string, at = 0, size?: { w: number; h: number }): Promise<{ emb: number[]; labels: [string, number][] } | undefined> {
+  const av = await semanticAvailability(['sceneEmbed', 'sceneClasses']);
+  if (!av.ok) return undefined;
+  const w = Math.min(640, size?.w ?? 640) & ~1, h = size ? Math.max(2, Math.round((w * size.h) / size.w / 2) * 2) : 360;
+  const { frames } = await runWorker(av.python!, av.env, ffmpeg, file, { fps: 1, w, h, maxSeconds: 1, tasks: ['scene'], start: at });
+  const f = frames[0];
+  return f?.embL ? { emb: f.embL.map((v) => Math.round(v * 1000) / 1000), labels: f.clsTop ?? [] } : undefined;
+}
 
 export function semanticFps(seconds: number): number { return seconds <= 600 ? 2 : seconds <= 1800 ? 1 : 0.5; }
 

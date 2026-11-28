@@ -20,7 +20,7 @@ import { run } from './exec.ts';
 import { analyzeSemantics, eventCandidates, textOverTime, type SemanticRecord, type Track } from './semantic.ts';
 
 export const FOOTAGE_SCHEMA = 'frame.footage/1';
-export const FOOTAGE_VERSION = '5a.1';
+export const FOOTAGE_VERSION = '6a.1';
 
 export interface Box { x: number; y: number; w: number; h: number }
 export interface Shot { id: string; t0: number; t1: number; cutScore: number; /** How the shot begins (absent on the first shot). */ boundary?: 'cut' | 'gradual'; keyframe: number; luma: number; motion: number; detail: number; signature: number[] }

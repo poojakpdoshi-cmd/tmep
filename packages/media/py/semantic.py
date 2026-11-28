@@ -77,7 +77,9 @@ while True:
     if embl:
         out["embL"] = [round(float(v), 4) for v in embl.embed(img).embeddings[0].embedding]
         # ImageNet classes with p >= 1e-4 as [index, probability] (the rest are ~0)
-        out["cls"] = [[c.index, round(float(c.score), 5)] for c in cls2.classify(img).classifications[0].categories if c.score >= 1e-4]
+        cats = cls2.classify(img).classifications[0].categories
+        out["cls"] = [[c.index, round(float(c.score), 5)] for c in cats if c.score >= 1e-4]
+        out["clsTop"] = [[c.category_name, round(float(c.score), 3)] for c in cats[:5]]
     out["ms"] = int((time.time() - t0) * 1000)
     print(json.dumps(out), flush=True)
     n += 1

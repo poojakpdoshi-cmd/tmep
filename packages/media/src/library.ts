@@ -20,7 +20,14 @@ export interface Licence {
   /** SPDX-style id (CC-BY-4.0, CC0-1.0, Apache-2.0…), 'owned' for the user's own material, or 'unknown'. */
   id: string;
   source?: string; attribution?: string; url?: string;
-  /** True only when the user (or a verified source record) states the licence. */
+  /**
+   * Phase 6: `declared` = stated by the user (not checked); `verified` = independently confirmed by
+   * evidence (embedded file metadata or an attribution record naming this file and licence);
+   * `unknown` = no licence. Only declared or verified assets are recommended.
+   */
+  status: 'declared' | 'verified' | 'unknown';
+  verification?: { method: 'embedded-metadata' | 'attribution-record'; evidence: string; at: string };
+  /** @deprecated Phase 5 meaning (a licence was stated); kept equal to `status !== 'unknown'` for old readers. */
   verified: boolean;
 }
 export interface LibraryEntry {
@@ -30,6 +37,10 @@ export interface LibraryEntry {
   dhash?: string;
   /** Text visible in the asset (SVG <title>/<text>, or OCR when requested). */
   text?: string;
+  /** Phase 6: MobileNetV3-large embedding (L2-normalized, 3 decimals) for similarity search. */
+  emb?: number[];
+  /** Phase 6: ImageNet labels from EfficientNet-Lite2 (p ≥ 0.15), model-derived, searchable. */
+  modelTags?: string[];
   licence: Licence;
   provenance: 'user' | 'stock' | 'generated' | 'screen-capture';
   /** A real recording of the product or interface it shows (required for product demonstrations). */
@@ -65,6 +76,53 @@ function svgInfo(src: string): { w?: number; h?: number; text: string } {
   return { w, h, text };
 }
 
+export function makeLicence(l: Partial<Licence> = {}): Licence {
+  const id = l.id && l.id.trim() ? l.id.trim() : 'unknown';
+  const status = id === 'unknown' ? 'unknown' : l.verification ? 'verified' : 'declared';
+  return { id, ...(l.source && { source: l.source }), ...(l.attribution && { attribution: l.attribution }), ...(l.url && { url: l.url }), status, ...(l.verification && status === 'verified' && { verification: l.verification }), verified: status !== 'unknown' };
+}
+
+/** Accepted spellings of a licence id in metadata or attribution text (e.g. CC-BY-4.0 ↔ "CC BY 4.0" ↔ licenses/by/4.0). */
+export function licenceMentioned(id: string, text: string): boolean {
+  const t = text.toLowerCase(), m = /^cc-?(by(?:-sa|-nd|-nc|-nc-sa|-nc-nd)?|0)-?(\d\.\d)$/i.exec(id.replace(/\s+/g, '-'));
+  if (m) {
+    const kind = m[1]!.toLowerCase(), ver = m[2]!;
+    if (kind === '0') return /\bcc0\b|publicdomain\/zero/.test(t);
+    return t.includes(`licenses/${kind}/${ver}`) || new RegExp(`\\bcc[ -]${kind.replace(/-/g, '[ -]')}[ -]${ver.replace('.', '\\.')}\\b`).test(t);
+  }
+  return t.includes(id.toLowerCase());
+}
+
+/**
+ * Independent verification: (1) the file's own metadata (license/copyright/comment tags) names the
+ * declared licence, or (2) an attribution record (a text file the user provides, e.g. a dataset's
+ * ATTRIBUTION list) has a line naming this file and the declared licence. Nothing else counts.
+ */
+export async function verifyLicence(e: LibraryEntry, attribution?: { file: string; text: string }): Promise<Licence> {
+  if (e.licence.id === 'unknown') return e.licence;
+  const at = new Date().toISOString();
+  if (attribution) {
+    const stem = path.basename(e.file, path.extname(e.file)).toLowerCase();
+    const keys = [stem, stem.split(/_crf|_\d{3,4}p/i)[0]!].filter((k) => k.length >= 4);
+    const line = attribution.text.split(/\r?\n/).find((l) => keys.some((k) => l.toLowerCase().includes(k)) && licenceMentioned(e.licence.id, l));
+    if (line) return makeLicence({ ...e.licence, verification: { method: 'attribution-record', evidence: `${path.basename(attribution.file)}: ${line.trim().slice(0, 200)}`, at } });
+  }
+  if (e.kind !== 'svg') {
+    try {
+      const { ffprobe } = await ffmpegInfo();
+      const r = await runBinary(ffprobe, ['-v', 'error', '-show_entries', 'format_tags:stream_tags', '-of', 'json', e.file]);
+      const tags = JSON.stringify(JSON.parse(r.toString('utf8')));
+      const hit = /"(license|licence|copyright|comment|rights)":"([^"]{1,300})"/gi.exec(tags);
+      if (hit && licenceMentioned(e.licence.id, hit[2]!)) return makeLicence({ ...e.licence, verification: { method: 'embedded-metadata', evidence: `${hit[1]}: ${hit[2]!.slice(0, 200)}`, at } });
+    } catch { /* unreadable metadata: stays declared */ }
+  } else {
+    const src = await fsp.readFile(e.file, 'utf8').catch(() => '');
+    const meta = /<metadata[\s\S]*?<\/metadata>/i.exec(src)?.[0] ?? '';
+    if (meta && licenceMentioned(e.licence.id, meta)) return makeLicence({ ...e.licence, verification: { method: 'embedded-metadata', evidence: `svg <metadata>: ${meta.replace(/\s+/g, ' ').slice(0, 200)}`, at } });
+  }
+  return makeLicence({ ...e.licence, verification: undefined });
+}
+
 /** Describe one file for the library (no network, no models). */
 export async function describeAsset(file: string, meta: EntryMeta, id: string): Promise<LibraryEntry> {
   const buf = await fsp.readFile(file);
@@ -73,7 +131,7 @@ export async function describeAsset(file: string, meta: EntryMeta, id: string): 
   const base: Omit<LibraryEntry, 'kind'> = {
     id, file, bytes: buf.length, sha256, tags: [...new Set((meta.tags ?? []).map((t) => t.toLowerCase()))],
     ...(meta.title && { title: meta.title }), ...(meta.description && { description: meta.description }),
-    licence: { id: meta.licence?.id ?? 'unknown', ...(meta.licence?.source && { source: meta.licence.source }), ...(meta.licence?.attribution && { attribution: meta.licence.attribution }), ...(meta.licence?.url && { url: meta.licence.url }), verified: !!meta.licence?.id && meta.licence.id !== 'unknown' && meta.licence.verified !== false },
+    licence: makeLicence(meta.licence),
     provenance: meta.provenance ?? 'user', ...(meta.genuine !== undefined && { genuine: meta.genuine }), added: new Date().toISOString(),
   };
   if (ext === '.svg') {
@@ -102,7 +160,7 @@ export function duplicates(entries: LibraryEntry[], maxDistance = 6): { a: strin
 
 const docTokens = (e: LibraryEntry) => [
   ...e.tags.flatMap(tokens), ...e.tags.flatMap(tokens), // tags count double
-  ...tokens(e.title ?? ''), ...tokens(e.title ?? ''), ...tokens(e.description ?? ''), ...tokens(e.text ?? ''),
+  ...tokens(e.title ?? ''), ...tokens(e.title ?? ''), ...tokens(e.description ?? ''), ...tokens(e.text ?? ''), ...(e.modelTags ?? []).flatMap(tokens),
   ...tokens(path.basename(e.file, path.extname(e.file)).replace(/[-_]+/g, ' ')),
 ];
 
@@ -131,7 +189,17 @@ export function search(entries: LibraryEntry[], query: string, opts: { kind?: As
   }).filter((r) => r.score > 0 && (!opts.usableOnly || r.usable)).sort((x, y) => y.score - x.score).slice(0, opts.max ?? 10);
 }
 
-export const usable = (e: LibraryEntry) => e.licence.verified && e.licence.id !== 'unknown';
+export const usable = (e: LibraryEntry) => (e.licence.status ?? (e.licence.verified ? 'declared' : 'unknown')) !== 'unknown';
+
+// ---------- semantic similarity (Phase 6) ----------
+
+/** Nearest library entries to an embedding (cosine), optionally filtered by kind and usability. */
+export function similar(entries: LibraryEntry[], emb: number[], opts: { k?: number; kind?: AssetKind; exclude?: string; usableOnly?: boolean } = {}): { id: string; score: number; licence: string; status: string }[] {
+  const n = Math.sqrt(emb.reduce((s, v) => s + v * v, 0)) || 1;
+  return entries.filter((e) => e.emb?.length === emb.length && e.id !== opts.exclude && (!opts.kind || e.kind === opts.kind) && (!opts.usableOnly || usable(e)))
+    .map((e) => { let d = 0, m = 0; e.emb!.forEach((v, i) => { d += v * emb[i]!; m += v * v; }); return { id: e.id, score: Math.round((d / (n * (Math.sqrt(m) || 1))) * 1000) / 1000, licence: e.licence.id, status: e.licence.status }; })
+    .sort((a, b) => b.score - a.score).slice(0, opts.k ?? 10);
+}
 
 // ---------- recommendations / requests ----------
 
@@ -158,7 +226,7 @@ export function recommend(entries: LibraryEntry[], segments: { t0: number; t1: n
     for (const h of hits) {
       if (h.score < min) break;
       const e = entries.find((x) => x.id === h.id)!;
-      if (!h.usable) { skipped.push({ at, asset: h.id, reason: `licence ${e.licence.id}${e.licence.verified ? '' : ' (unverified)'}: record the licence before use` }); continue; }
+      if (!h.usable) { skipped.push({ at, asset: h.id, reason: `no licence recorded (${e.licence.id}): record one before use` }); continue; }
       if (isDemo && (e.kind === 'screen-recording' || e.kind === 'video') && e.genuine !== true) { skipped.push({ at, asset: h.id, reason: 'not marked as a genuine recording of the product; a demonstration needs one' }); continue; }
       if (used.has(h.id) && hits.some((o) => o.id !== h.id && o.score >= min && o.usable)) continue; // prefer variety
       chosen = h; break;

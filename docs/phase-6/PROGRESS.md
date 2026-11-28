@@ -34,6 +34,11 @@ committed **before** any classifier is run on them. Train split: the next 2 clip
 | ↳ speech eval (Tears of Steel vs subtitles) | done: WER 0.53 in dialogue regions for both NeMo-CTC-small and Whisper-tiny; CTC timing agreement 0.97 (`evidence/asr-eval.json`); `sherpa-onnx` engine added |
 | ↳ scene classifier | done: **0.738** on the untouched test set (149 frames; target 0.85 missed); CV on train 0.64 (`evidence/scene-eval.json`). First test run read 0.081 because of a NaN bug (zero sd in stored model); fixed without changing the model, then re-run once |
 | ↳ worker frame timing | fixed: fps filter kept the last frame of each slot (2 fps frames were up to 0.25 s late); now exact `select` sampling |
+| ↳ dynamic reframe | done: `reframe follow=[{t,cx,cy}]` renders a per-frame crop; plans emit speed-limited follow keys; centre↔offset convention bug fixed (Phase 5 static reframe was ~0.05 off); decoded-render test |
+| ↳ camera motion / presenter | done: base-pass camera motion (`observed.camera`), track speed and pose activity relative to camera; pose-facing evidence for presenters; real clip: Sports_1d5c interviewee now `stationary` |
+| ↳ screen recognition | via the scene classifier: screen recall 0.90 on the test set |
+| ↳ semantic retrieval | done: library embeddings + ImageNet model tags, `similar`; P@5 0.50 vs 0.18 random on real frames (`evidence/retrieval-eval.json`) |
+| ↳ licence audit | done: `declared` vs `verified` (attribution record / embedded metadata), `verify`, `audit`; changing a claim drops its verification |
 | 6.1 production orchestrator | pending |
 | 6.2 director | pending |
 | 6.3 MCP/CLI production interface | pending |
