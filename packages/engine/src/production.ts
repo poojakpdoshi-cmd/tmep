@@ -151,7 +151,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
   let upstream = '', lastRev = 0, intelHash = '';
   let analysis: Awaited<ReturnType<typeof api.footageAnalysis>>['analysis'] | undefined;
   let words: { w: string; s: number; e: number }[] = [];
-  let approx = false;
+  let approx = false, unverified: string | undefined;
   const recomputed: Stage[] = [];
   for (const [k, st] of STAGES.entries()) {
     if (k > stop) break;
@@ -165,7 +165,9 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
     if (needData && !analysis && k >= 1) {
       analysis = (await api.footageAnalysis(p, { asset: pr.asset, faces: true, semantic: inp.semantic })).analysis;
       const tr = (await api.transcriptsFor(p, [pr.asset]))[pr.asset] ?? [];
-      words = tr; approx = (await p.asset(pr.asset)).tr ? await transcriptApprox(p, pr.asset) : false;
+      words = tr;
+      const q = (await p.asset(pr.asset)).tr ? await transcriptQuality(p, pr.asset) : { approx: false };
+      approx = q.approx; unverified = q.unverified;
     }
     if (cur.hash === h && (cur.status === 'done' || cur.status === 'skipped')) { if (st === 'intelligence') intelHash = h; if (st !== 'brief' && st !== 'strategy') upstream = h; if (cur.rev !== undefined) lastRev = cur.rev; continue; }
     // Editing stage re-run: start from the revision the previous editing stage left (history kept).
@@ -211,7 +213,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
           const ra = (await api.footageAnalysis(p, { asset: pr.reference, temporalText: true, semantic: inp.semantic })).analysis;
           pr.style = styleFromAnalysis(ra, await colourStats((await p.asset(pr.reference)).path));
         }
-        pr.strategy = direct({ genre: pr.genre, goal: pr.goal, constraints: pr.constraints }, a, words, { transcriptApprox: approx, reference: pr.style });
+        pr.strategy = direct({ genre: pr.genre, goal: pr.goal, constraints: pr.constraints }, a, words, { transcriptApprox: approx, transcriptUnverified: unverified, reference: pr.style });
         return { decisions: pr.strategy.decisions.length, open: pr.strategy.open };
       }
       case 'roughcut': {
@@ -299,10 +301,12 @@ export function prioritize(f: Finding[]): Finding[] {
   return [...f].sort((a, b) => (SEV[a.severity] ?? 1) - (SEV[b.severity] ?? 1) || kind(a.code) - kind(b.code)).slice(0, 30);
 }
 
-async function transcriptApprox(p: Awaited<ReturnType<typeof api.openProject>>, asset: string): Promise<boolean> {
+/** Small local ASR models whose measured accuracy (docs/phase-6/INTELLIGENCE.md) is too low for unreviewed captions. */
+const UNVERIFIED_ENGINES = new Set(['sherpa-onnx']);
+async function transcriptQuality(p: Awaited<ReturnType<typeof api.openProject>>, asset: string): Promise<{ approx: boolean; unverified?: string }> {
   const a = await p.asset(asset);
-  const tr = await readJsonOr<{ approx?: boolean } | undefined>(p.cachePath('tr', `${a.tr}.json`), undefined);
-  return !!tr?.approx;
+  const tr = await readJsonOr<{ approx?: boolean; engine?: string; model?: string } | undefined>(p.cachePath('tr', `${a.tr}.json`), undefined);
+  return { approx: !!tr?.approx, ...(tr?.engine && UNVERIFIED_ENGINES.has(tr.engine) && { unverified: `${tr.engine}${tr.model ? ` ${tr.model}` : ''}` }) };
 }
 
 function report(pr: Production): Record<string, unknown> {

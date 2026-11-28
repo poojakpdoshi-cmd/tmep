@@ -39,9 +39,9 @@ committed **before** any classifier is run on them. Train split: the next 2 clip
 | ↳ screen recognition | via the scene classifier: screen recall 0.90 on the test set |
 | ↳ semantic retrieval | done: library embeddings + ImageNet model tags, `similar`; P@5 0.50 vs 0.18 random on real frames (`evidence/retrieval-eval.json`) |
 | ↳ licence audit | done: `declared` vs `verified` (attribution record / embedded metadata), `verify`, `audit`; changing a claim drops its verification |
-| 6.1 production orchestrator | pending |
-| 6.2 director | pending |
-| 6.3 MCP/CLI production interface | pending |
-| 6.4 reference-aware editing | pending |
-| 6.5 preview + bounded correction | pending |
+| 6.1 production orchestrator | done (`10936fe`): `frame.production/1`, 13 stages, per-stage hashes/revisions, overrides, cancel/resume/recovery |
+| 6.2 director | done: `frame.strategy/1`, 6 genres, budgets, constraints win, caption-accuracy gate |
+| 6.3 MCP/CLI production interface | done: `video_plan {mode:"produce"}` (10-tool contract kept), `tmep produce` |
+| 6.4 reference-aware editing | done: `frame.style/1` (pacing, motion/camera, colour, audio rhythm, typography, composition), clamped adaptation |
+| 6.5 preview + bounded correction | done: preview render, prioritized QA, ≤ 2 correction cycles, refusals and unresolved items reported |
 | 6.6 real production evaluation | pending |

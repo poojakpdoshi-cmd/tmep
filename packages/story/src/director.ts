@@ -62,7 +62,7 @@ const POLICY: Record<Genre, { pause: number; zoomPerMin: number; zoomOn: Strateg
   sports: { pause: 2.0, zoomPerMin: 4, zoomOn: 'event-candidates', graphics: [], captions: false, transitions: [], budget: 6, jump: 'leave', assets: false, cpm: [8, 40] },
 };
 
-export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s: number; e: number }[], opts: { transcriptApprox?: boolean; reference?: StyleProfile } = {}): Strategy {
+export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s: number; e: number }[], opts: { transcriptApprox?: boolean; transcriptUnverified?: string; reference?: StyleProfile } = {}): Strategy {
   const g = intent.genre, P = POLICY[g], c = intent.constraints ?? {};
   const decisions: Strategy['decisions'] = [];
   const open: string[] = [];
@@ -76,6 +76,7 @@ export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s
   let burn = c.captions ?? P.captions;
   let capReason = c.captions !== undefined ? 'explicit user instruction' : `${g} policy`;
   if (!words.length) { burn = false; capReason = 'no transcript'; }
+  else if (opts.transcriptUnverified && c.captions === undefined) { burn = false; capReason = `transcript from ${opts.transcriptUnverified}, whose measured accuracy is too low to burn unreviewed captions`; open.push(`captions: review the ${opts.transcriptUnverified} transcript (or import subtitles), then set captions:true`); }
   else if (opts.transcriptApprox && c.captions === undefined) { burn = false; capReason = 'transcript timing is approximate (segment-level): captions would drift — import subtitles or confirm captions explicitly'; open.push('captions: transcript timing is approximate; confirm or provide subtitles'); }
   say(`captions ${burn ? `burned, ${position}` : 'off'}`, capReason, c.captions !== undefined ? 'user' : 'policy');
 
