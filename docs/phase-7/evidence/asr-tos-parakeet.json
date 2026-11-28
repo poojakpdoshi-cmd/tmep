@@ -1,0 +1,17 @@
+[
+ {
+  "werDialogueRegions": 0.334,
+  "file": "parakeet-tos.json",
+  "engine": "transducer",
+  "timing": "token",
+  "refWords": 311,
+  "hypWords": 368,
+  "wer": 0.579,
+  "correctWords": 211,
+  "timingAgreement": 0.991,
+  "audioSeconds": 734.15,
+  "ms": 36709,
+  "rtf": 0.05,
+  "maxRssMB": 1276.2
+ }
+]

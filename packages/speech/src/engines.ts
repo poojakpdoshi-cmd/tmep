@@ -179,7 +179,12 @@ export async function fasterWhisperBatch(wavs: string[], workDir: string, o: Eng
 
 const SHERPA_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'sherpa_asr.py');
 const sherpaEnv = () => { const extra = process.env.FRAME_PYTHONPATH ?? process.env.TMEP_PYTHONPATH; return extra ? { ...process.env, PYTHONPATH: [extra, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } : process.env; };
-export const sherpaModel = (o: EngineOptions = {}) => o.model && /[\\/]/.test(o.model) ? o.model : (process.env.FRAME_SHERPA_MODEL ?? process.env.TMEP_SHERPA_MODEL);
+/** Model directory: explicit path, else FRAME_SHERPA_MODEL_<LANG> (e.g. _HI for a multilingual Whisper), else FRAME_SHERPA_MODEL. */
+export const sherpaModel = (o: EngineOptions = {}) => {
+  if (o.model && /[\\/]/.test(o.model)) return o.model;
+  const lang = o.lang && o.lang !== 'auto' ? (o.lang === 'hinglish' ? 'hi' : o.lang).toUpperCase() : undefined;
+  return (lang && (process.env[`FRAME_SHERPA_MODEL_${lang}`] ?? process.env[`TMEP_SHERPA_MODEL_${lang}`])) || (process.env.FRAME_SHERPA_MODEL ?? process.env.TMEP_SHERPA_MODEL);
+};
 export async function hasSherpa(o: EngineOptions = {}): Promise<boolean> {
   const dir = sherpaModel(o); const py = await findPython();
   if (!dir || !py || !(await exists(dir))) return false;
@@ -188,10 +193,11 @@ export async function hasSherpa(o: EngineOptions = {}): Promise<boolean> {
 export async function transcribeSherpa(wav: string, o: EngineOptions = {}): Promise<Transcript> {
   const py = await findPython(); const dir = sherpaModel(o);
   if (!py || !dir || !(await hasSherpa(o))) throw new TmepError('E_ENGINE_MISSING', 'sherpa-onnx engine not configured', 'pip install sherpa-onnx and set FRAME_SHERPA_MODEL to a model directory (e.g. sherpa-onnx-nemo-ctc-en-conformer-small from the sherpa-onnx GitHub releases)');
-  const res = await run(py, [SHERPA_SCRIPT, wav, dir], { signal: o.signal, maxBuffer: 64 * 1024 * 1024, env: sherpaEnv() });
+  const lang = !o.lang || o.lang === 'auto' ? 'auto' : o.lang === 'hinglish' ? 'hi' : o.lang;
+  const res = await run(py, [SHERPA_SCRIPT, wav, dir, lang], { signal: o.signal, maxBuffer: 64 * 1024 * 1024, env: sherpaEnv() });
   if (res.code !== 0) throw new TmepError('E_ENGINE_FAILED', 'sherpa-onnx failed', undefined, res.stderr.slice(-2000));
   const j = JSON.parse(res.stdout) as { words: { w: string; s: number; e: number }[]; engine: string; timing: string };
-  return makeTranscript('sherpa-onnx', o.lang && o.lang !== 'auto' ? o.lang : 'en', j.words, { model: `${path.basename(dir)} (${j.engine})`, ...(j.timing === 'segment' && { approx: true }) });
+  return makeTranscript('sherpa-onnx', o.lang && o.lang !== 'auto' ? o.lang : (j as { language?: string }).language ?? 'und', j.words, { model: `${path.basename(dir)} (${j.engine})`, ...(j.timing === 'segment' && { approx: true }) });
 }
 
 export async function engineStatus(): Promise<Record<string, unknown>> {

@@ -1,0 +1,27 @@
+{
+ "dataset": "hi_in/test.tsv",
+ "model": "sherpa-onnx-whisper-base",
+ "lang": "hi",
+ "utterances": 100,
+ "words": 2490,
+ "wer": 1.035,
+ "cer": 1.045,
+ "audioSeconds": 1176,
+ "rtf": 0.119,
+ "wallSeconds": 141,
+ "maxRssMB": 570.6,
+ "samples": [
+  {
+   "ref": "स्कीइंग मार्ग को एक हाईकिंग लंबी पैदल यात्रा मार्ग जैसा ही सोचें",
+   "hyp": "dh thank okay"
+  },
+  {
+   "ref": "मनोविज्ञान सहित विज्ञान के सभी मामलों पर अरस्तू के विचारों को स्वीकार किया जाता है",
+   "hyp": "manu vidyan saith vidyan ke sabi maamlo par arstust ke vicharov ko swikar kiya jadahe"
+  },
+  {
+   "ref": "मध्य युग के अंत में पश्चिमी यूरोप ने अपनी शैली विकसित करना शुरू कर दिया धर्मयुद्ध के परिणामस्वरूप उस समय के सबसे बड़े विकास में से एक लोगों ने कपड़ों को बांधने के लिए बटन का उपयोग करना शुरू किया",
+   "hyp": "madayukke ant me pastim yurob ne apni šailee vixit kanna sharu kardhi a dharmayutke pandnaam sarubh 그 same ke sapshe bade vikas me se ek lobo ne kapur ka baan gandhane kalyg button"
+  }
+ ]
+}

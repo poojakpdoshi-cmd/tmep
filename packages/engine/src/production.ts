@@ -326,10 +326,12 @@ export function prioritize(f: Finding[]): Finding[] {
 
 /** Small local ASR models whose measured accuracy (docs/phase-6/INTELLIGENCE.md) is too low for unreviewed captions. */
 const UNVERIFIED_ENGINES = new Set(['sherpa-onnx']);
+/** Models measured caption-grade in Phase 7 (Parakeet-TDT 0.6B: FLEURS-en WER 9.6 %; film dialogue 33 % vs condensed subtitles). */
+const CAPTION_GRADE_MODELS = /parakeet/i;
 async function transcriptQuality(p: Awaited<ReturnType<typeof api.openProject>>, asset: string): Promise<{ approx: boolean; unverified?: string }> {
   const a = await p.asset(asset);
   const tr = await readJsonOr<{ approx?: boolean; engine?: string; model?: string } | undefined>(p.cachePath('tr', `${a.tr}.json`), undefined);
-  return { approx: !!tr?.approx, ...(tr?.engine && UNVERIFIED_ENGINES.has(tr.engine) && { unverified: `${tr.engine}${tr.model ? ` ${tr.model}` : ''}` }) };
+  return { approx: !!tr?.approx, ...(tr?.engine && UNVERIFIED_ENGINES.has(tr.engine) && !CAPTION_GRADE_MODELS.test(tr.model ?? '') && { unverified: `${tr.engine}${tr.model ? ` ${tr.model}` : ''}` }) };
 }
 
 function report(pr: Production): Record<string, unknown> {
