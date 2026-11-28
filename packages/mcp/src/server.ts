@@ -11,6 +11,7 @@
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { TmepError, asTmepError, formatIssues, VERSION, resolveContainedPath, parseAllowedRoots, type Detail } from '../../core/src/index.ts';
+import { produce } from '../../engine/src/production.ts';
 import * as api from '../../engine/src/api.ts';
 import { startJob, waitJob, cancelJob, jobView } from '../../render/src/jobs.ts';
 import { TOOLS, toolList } from './tools.ts';
@@ -211,6 +212,8 @@ export class McpServer {
         if (j.result?.sheet) view.sheet = j.result.sheet;
         return view;
       }
+      case 'video_produce':
+        return produce(ctx, a as never, flight?.ctrl.signal);
       case 'video_status':
         return api.status(ctx, { job: a.job as string, cancel: a.cancel as boolean, wait: a.wait as number });
       case 'video_help':

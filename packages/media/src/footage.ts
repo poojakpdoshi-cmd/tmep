@@ -47,7 +47,8 @@ export interface FootageAnalysis {
     transitions?: { t0: number; t1: number; t: number; kind: 'gradual'; score: number }[];
     speech?: { t0: number; t1: number; text: string }[];
     faces?: { t: number; boxes: (Box & { conf: number })[] }[];
-    text?: { t: number; text: string; conf: number }[];
+    /** y/h: mean vertical centre and median word height of the kept words (frame fractions), Phase 6. */
+    text?: { t: number; text: string; conf: number; y?: number; h?: number }[];
     quality: QualityFlag[];
     /** 3×3 grid activity (motion + detail), normalized 0–1, row-major from top-left. */
     gridActivity: number[];
@@ -449,7 +450,7 @@ async function detectFaces(bin: string, file: string, times: number[], tmp: stri
   };
 }
 
-async function readText(bin: string, file: string, times: number[], tmp: string): Promise<{ cap: Capability; text?: FootageAnalysis['observed']['text'] }> {
+async function readText(bin: string, file: string, times: number[], tmp: string, a_w = 16, a_h = 9): Promise<{ cap: Capability; text?: FootageAnalysis['observed']['text'] }> {
   const tess = process.env.FRAME_TESSERACT ?? process.env.TMEP_TESSERACT ?? 'tesseract';
   let ok = false;
   try { ok = (await run(tess, ['--version'], { timeoutMs: 15000 })).code === 0; } catch { /* not on PATH */ }
@@ -467,7 +468,12 @@ async function readText(bin: string, file: string, times: number[], tmp: string)
       const w = c[11]!.trim(), conf = Number(c[10]);
       return w.length >= 2 ? conf >= 70 : /^[\p{L}\p{N}]$/u.test(w) && conf >= 80;
     });
-    if (words.length) text.push({ t: r3(times[i]!), text: words.map((c) => c[11]!.trim()).join(' ').slice(0, 200), conf: r3(words.reduce((a, c) => a + Number(c[10]), 0) / words.length / 100) });
+    if (words.length) {
+      // tesseract runs on 640-px-wide keyframes; geometry is kept as frame fractions (typography profile).
+      const H = 640 * (a_h / a_w);
+      const ys = words.map((c) => (Number(c[7]) + Number(c[9]) / 2) / H), hs = words.map((c) => Number(c[9]) / H).sort((p, q) => p - q);
+      text.push({ t: r3(times[i]!), text: words.map((c) => c[11]!.trim()).join(' ').slice(0, 200), conf: r3(words.reduce((a, c) => a + Number(c[10]), 0) / words.length / 100), y: r3(ys.reduce((p, q) => p + q, 0) / ys.length), h: r3(hs[Math.floor(hs.length / 2)]!) });
+    }
   }
   return { cap: { status: 'ok', tool: 'tesseract' }, text };
 }
@@ -577,7 +583,7 @@ async function addAdapters(bin: string, file: string, a: FootageAnalysis, opts: 
       const t = Date.now();
       const every = opts.textEvery ?? 1;
       const times = opts.temporalText ? Array.from({ length: Math.min(180, Math.floor(a.asset.analyzedSeconds / every)) }, (_, i) => r3(i * every + every / 2)) : keyTimes;
-      const r = await readText(bin, file, times, tmp);
+      const r = await readText(bin, file, times, tmp, a.asset.w, a.asset.h);
       caps.text = r.cap; if (r.text) observed.text = r.text;
       if (r.cap.status === 'ok') {
         for (let i = provenance.length - 1; i >= 0; i--) if (provenance[i]!.analyzer === 'frame.ocr') provenance.splice(i, 1);

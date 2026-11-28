@@ -600,6 +600,7 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
 // ---------------------------------------------------------------- visual asset library (Phase 5)
 const libFile = (p: Project) => path.join(p.root, '.tmep', 'library.json');
 const readLib = async (p: Project) => readJsonOr<Library>(libFile(p), { schema: LIBRARY_SCHEMA, entries: [] });
+export const readLibrary = readLib;
 
 export interface LibraryInput { action?: 'list' | 'add' | 'search' | 'dups' | 'recommend' | 'licence' | 'similar' | 'verify' | 'audit'; paths?: string[]; meta?: EntryMeta; query?: string; kind?: string; max?: number; asset?: string; id?: string; minScore?: number; product?: string; like?: string; at?: number; evidence?: string }
 

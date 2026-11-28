@@ -55,6 +55,11 @@ export const TOOLS: ToolDef[] = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: 'video_produce',
+    description: 'Persistent production pipeline (ingest → intelligence → brief → strategy → rough cut → assets → motion → fine → finish → preview → inspect → correct → final). action start|resume|revise|status|report; genre informative|cinematic|sports|podcast|product|educational; constraints {target, ratio, captions, zooms, graphics, transitions, music, keep, avoid, allowLook, maxEffectsPerMinute}; reference=asset; overrides {stage:{skip|ops|drop}}; until=stage (final renders full quality). Only changed stages recompute.',
+    schema: obj({ action: str().optional(), id: str().optional(), asset: str().optional(), genre: str().optional(), goal: str().optional(), constraints: record(any()).optional(), reference: str().optional(), overrides: record(any()).optional(), until: str().optional(), semantic: bool().optional(), ...project, ...detail }),
+  },
+  {
     name: 'video_render',
     description: 'Render MP4 with cached segments. preview: half-res; range [s,e]; scene: half-res; alpha: graphics-only; frames: contact sheet.',
     schema: obj({ preview: bool().optional(), range: arr(anchor).optional(), scene: str().optional(), quality: str().optional(), out: str().optional(), alpha: bool().optional(), frames: num().optional(), rev: num().optional(), parallel: num().optional(), encoder: str().optional(), wait: num().optional(), ...project, ...detail }),

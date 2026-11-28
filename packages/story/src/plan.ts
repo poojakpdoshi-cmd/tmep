@@ -36,7 +36,7 @@ export interface EditPlan {
   baseRev: number;
   items: PlanItem[]; requests: AssetRequest[]; notes: string[];
 }
-export interface PlanInputs { asset: string; dur: number; analysis: FootageAnalysis; words: Word[]; library: LibraryEntry[]; ratio: string; task: string; baseRev: number }
+export interface PlanInputs { asset: string; dur: number; analysis: FootageAnalysis; words: Word[]; library: LibraryEntry[]; ratio: string; task: string; baseRev: number; /** Phase 6: pause threshold and padding from the Director. */ pause?: number; pad?: number }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const h = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -104,10 +104,10 @@ export function smoothFollow(keys: { t: number; cx: number; cy: number }[], maxS
 export function buildPlan(i: PlanInputs): EditPlan {
   const a = i.analysis, inf = a.inferred, items: PlanItem[] = [];
   const add = (it: Omit<PlanItem, 'id' | 'status'>) => items.push({ ...it, id: `${it.kind}-${it.at ? it.at[0].toFixed(2) : items.filter((x) => x.kind === it.kind).length}`, status: 'proposed' });
-  const ret = retainedRanges(i);
+  const ret = retainedRanges(i, i.pad ?? 0.15, i.pause ?? 0.8);
   add({ kind: 'retain', at: [0, r2(i.dur)], ops: [{ op: 'keep', src: i.asset, ranges: ret.ranges }], reason: `keep ${ret.ranges.length} ranges (${r2(ret.ranges.reduce((s, [x, y]) => s + y - x, 0))} of ${r2(i.dur)} s)`, evidence: [ret.basis], confidence: i.words.length ? 0.9 : 0.6, deps: i.words.length ? ['transcript'] : ['footage'] });
 
-  const talky = ['informative', 'podcast', 'educational', 'generic'].includes(i.task);
+  const talky = ['informative', 'podcast', 'educational', 'generic', 'product'].includes(i.task);
   if (talky) {
     const ms = inf.moments.filter((m) => m.confidence >= 0.6 && mapToTimeline(ret.ranges, m.t) !== undefined).sort((x, y) => y.score - x.score).slice(0, Math.max(1, Math.floor(i.dur / 30)));
     for (const m of ms) add({ kind: 'moment', at: [m.t0, m.t1], ops: [{ op: 'punch', at: `tl:${m.t}`, to: 1.12, d: 0.6 }], reason: 'emphasize a strong moment with a restrained punch-in', evidence: m.evidence, confidence: m.confidence, deps: ['footage', 'transcript'] });
@@ -200,10 +200,11 @@ export function applyOverrides(plan: EditPlan, overrides: Record<string, Overrid
 }
 
 /** Deterministic op list: keep first, then everything else in kind order with mapped times. */
-export function compilePlan(plan: EditPlan, resolveLibrary: (id: string) => string): { ops: Record<string, unknown>[]; skipped: { id: string; why: string }[] } {
+export function compilePlan(plan: EditPlan, resolveLibrary: (id: string) => string, opts: { ranges?: [number, number][] } = {}): { ops: Record<string, unknown>[]; skipped: { id: string; why: string }[] } {
   const live = plan.items.filter((it) => it.status !== 'dropped');
   const retain = live.find((it) => it.kind === 'retain');
-  const ranges = (retain?.ops[0]?.ranges as [number, number][] | undefined) ?? [[0, Infinity]];
+  // Explicit ranges (an already-applied rough cut) map times without emitting the keep op again.
+  const ranges = opts.ranges ?? (retain?.ops[0]?.ranges as [number, number][] | undefined) ?? [[0, Infinity]];
   const ops: Record<string, unknown>[] = [], skipped: { id: string; why: string }[] = [];
   for (const it of [...live].sort((x, y) => PLAN_KINDS.indexOf(x.kind) - PLAN_KINDS.indexOf(y.kind) || (x.at?.[0] ?? 0) - (y.at?.[0] ?? 0))) {
     for (const op of it.ops) {

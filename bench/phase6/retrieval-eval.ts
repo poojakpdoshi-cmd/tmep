@@ -19,7 +19,7 @@ let ap = 0;
 for (const r of q) {
   const res = similar(entries, r.frame.embL!, { k: entries.length });
   const rel = res.map((x) => label.get(x.id) === r.label);
-  for (const k of K) prec[k] += rel.slice(0, k).filter(Boolean).length / k;
+  for (const k of K) prec[k] = (prec[k] ?? 0) + rel.slice(0, k).filter(Boolean).length / k;
   let hits = 0, s = 0; rel.forEach((h, i) => { if (h) { hits++; s += hits / (i + 1); } });
   ap += hits ? s / hits : 0;
 }
