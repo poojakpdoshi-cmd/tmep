@@ -62,13 +62,25 @@ What the frames show:
 boxes) instead of avoiding body boxes. FRAME was re-run on both segments with otherwise identical inputs;
 results in `evidence/production-eval-frame2.json` and the `-frame2-sheet.jpg` contact sheets. See below.
 
-RERUN_RESULTS
+| | A FRAME (rerun) | B FRAME (rerun) |
+|---|---|---|
+| Caption band | lower | lower |
+| Captions over faces (sampled frames) | 0 / 6 | 0 / 8 |
+| Output duration / loudness | 28.3 s / −13.8 LUFS | 38.6 s / −14.0 LUFS |
+| Inspector | 0 defects, 5 advisories | 0 defects, 4 advisories |
+| Wall time / peak RSS | 73.5 s / 219 MB | 81.1 s / 232 MB |
+| Rubric total / 30 (editorial, visual, captions, pacing, audio, effects) | **25** (4, 3, 5, 3, 5, 5) | **28** (4, 4, 5, 5, 5, 5) |
+
+After the fix FRAME **matches** the previous workflow's scores (25 and 28) with 3 instead of 8 calls; it does
+not exceed it on these scenes. Remaining advisories are `missing-moment` (loud action beats outside the
+dialogue that a dialogue reel intentionally drops) and `colour-clipping` (full-range source levels).
 
 ## Conclusions
 - FRAME reduced the agent's work to one production call (3 calls instead of 8, ~46 % less agent-written
   payload) with comparable runtime and memory, and it reports its decisions, refusals and unresolved items.
 - It did **not** produce better edits than the Phase 5 workflow on these scenes at evaluation time; its
-  caption placement was worse. Technical QA was clean (after fixing a false av-sync defect) — which, as the
+  caption placement was worse. After a disclosed fix it matches (25 and 28 / 30), still without exceeding it;
+  shared weaknesses are static two-shot crops (no active-speaker follow) and the 30 s minimum on segment A. Technical QA was clean (after fixing a false av-sync defect) — which, as the
   rubric warns, said nothing about the caption problem a viewer sees immediately.
 - Provider-reported model tokens: unavailable (no authorized model integration). No result here was
   produced by a model call.
