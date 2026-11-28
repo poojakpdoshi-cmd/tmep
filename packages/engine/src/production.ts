@@ -12,6 +12,7 @@
  * reported, not guessed.
  */
 import path from 'node:path';
+import { promises as fsp } from 'node:fs';
 import { TmepError, hashOf, readJsonOr, writeJson } from '../../core/src/index.ts';
 import { parseOpString } from '../../core/src/ops.ts';
 import * as api from './api.ts';
@@ -53,6 +54,8 @@ export interface Production {
   report?: Record<string, unknown>;
 }
 
+/** Productions running in this process (the file lock covers other processes). */
+const RUNNING = new Set<string>();
 const file = (root: string, id: string) => path.join(root, '.tmep', 'productions', `${id}.json`);
 const now = () => new Date().toISOString();
 
@@ -143,15 +146,34 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
       pr.history.push({ at: now(), event: `revise ${JSON.stringify({ constraints: inp.constraints, overrides: inp.overrides })}`.slice(0, 300) });
     }
   }
+  let analysis: Awaited<ReturnType<typeof api.footageAnalysis>>['analysis'] | undefined;
+  let words: { w: string; s: number; e: number }[] = [];
+  let approx = false, unverified: string | undefined;
+  // One runner per production: a lock file with the owner pid; a dead owner's lock is reclaimed.
+  const lock = file(p.root, pr.id).replace(/\.json$/, '.lock');
+  if (RUNNING.has(lock)) throw new TmepError('E_CONFLICT', `production ${pr.id} is already running`, 'wait for it, or cancel it');
+  RUNNING.add(lock); // claimed synchronously with the check: no in-process race
+  try {
+  await fsp.mkdir(path.dirname(lock), { recursive: true });
+  for (let attempt = 0; ; attempt++) {
+    try { await fsp.writeFile(lock, String(process.pid), { flag: 'wx' }); break; } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || attempt) throw new TmepError('E_CONFLICT', `production ${pr.id} is already running`, 'wait for it, or cancel it');
+      const owner = Number(await fsp.readFile(lock, 'utf8').catch(() => '0'));
+      let alive = false; try { if (owner) { process.kill(owner, 0); alive = true; } } catch { /* dead */ }
+      if (alive && owner !== process.pid) throw new TmepError('E_CONFLICT', `production ${pr.id} is running in pid ${owner}`, 'wait for it, or cancel it');
+      await fsp.rm(lock, { force: true });
+    }
+  }
+  try { return await run(); } finally { await fsp.rm(lock, { force: true }); }
+  } finally { RUNNING.delete(lock); }
+
+  async function run(): Promise<Record<string, unknown>> {
   const until = inp.until ?? 'correct';
   const stop = STAGES.indexOf(until);
   const save = async () => { pr.updated = now(); await writeJson(file(p.root, pr.id), pr, false); };
   await save();
 
   let upstream = '', lastRev = 0, intelHash = '';
-  let analysis: Awaited<ReturnType<typeof api.footageAnalysis>>['analysis'] | undefined;
-  let words: { w: string; s: number; e: number }[] = [];
-  let approx = false, unverified: string | undefined;
   const recomputed: Stage[] = [];
   for (const [k, st] of STAGES.entries()) {
     if (k > stop) break;
@@ -194,6 +216,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
   pr.report = report(pr);
   await save();
   return { ...view(pr, ctx.detail), recomputed };
+  }
 
   async function runStage(st: Stage): Promise<Record<string, unknown>> {
     const a = analysis!;

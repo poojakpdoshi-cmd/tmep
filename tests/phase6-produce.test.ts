@@ -45,6 +45,10 @@ test('production: run, revise incrementally, cancel and resume', { timeout: 400_
     assert.equal(tl.captions.style, 'none', 'explicit captions:false is applied');
     assert.ok(r2.strategy.decisions.some((d: any) => d.source === 'user' && /captions/.test(d.what)));
 
+    // One runner per production: a concurrent call is refused, not interleaved.
+    const [x, y] = await Promise.allSettled([produce(ctx, { action: 'resume', id: 'demo' }), produce(ctx, { action: 'resume', id: 'demo' })]);
+    assert.ok([x, y].some((r) => r.status === 'rejected' && /already running/.test(String((r as PromiseRejectedResult).reason))), 'second concurrent run refused');
+
     // Nothing changed → nothing recomputes.
     const r3 = await produce(ctx, { action: 'resume', id: 'demo' }) as any;
     assert.deepEqual(r3.recomputed, []);
