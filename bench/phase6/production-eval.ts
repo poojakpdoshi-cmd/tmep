@@ -18,6 +18,7 @@ import { estimateTokens } from '../tokens.ts';
 
 const arg = (k: string, d?: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const video = path.resolve(arg('--video')!), audio = path.resolve(arg('--audio')!), subs = arg('--subs')!, out = path.resolve(arg('--out')!);
+const onlyFrame = process.argv.includes('--only-frame'); // re-run the Phase 6 workflow after a disclosed fix
 const segments = (arg('--segments', '15-75,185-250')!).split(',').map((s) => s.split('-').map(Number) as [number, number]);
 fs.mkdirSync(out, { recursive: true });
 const ff = (a: string[]) => { const r = spawnSync('ffmpeg', ['-v', 'error', '-y', ...a], { maxBuffer: 1 << 28 }); if (r.status !== 0) throw new Error(String(r.stderr)); return r; };
@@ -53,10 +54,11 @@ for (const [s0, s1] of segments) {
   const req = { genre: 'cinematic' as const, constraints: { target: 40, ratio: '9:16' as const, captions: true } };
 
   // ---- Previous workflow (Phase 5 interface) ----
-  const dA = path.join(out, `${tag}-prev`); fs.rmSync(dA, { recursive: true, force: true }); fs.mkdirSync(dA);
+  const dA = path.join(out, `${tag}-prev`);
+  if (!onlyFrame) { fs.rmSync(dA, { recursive: true, force: true }); fs.mkdirSync(dA); }
   const cA: api.Ctx = { project: dA, detail: 'standard', mediaRoots: [out, dA], outRoots: [dA] };
   const callsA: unknown[] = [];
-  const A = await timed(async () => {
+  const A = onlyFrame ? { r: path.join(dA, 'renders', 'final.mp4'), ms: 0, peakMB: 0 } : await timed(async () => {
     const call = async <T>(name: string, args: Record<string, unknown>, fn: () => Promise<T>) => { callsA.push({ name, args }); return fn(); };
     await call('video_import', { paths: [seg] }, () => api.importMedia(cA, { paths: [seg] }));
     await call('video_transcribe', { asset: 'v1', file: srt }, () => api.transcribe(cA, { asset: 'v1', file: srt }));
@@ -71,10 +73,10 @@ for (const [s0, s1] of segments) {
   });
   const tlA = await (await api.openProject(dA, false)).timeline();
   const qaA = await api.inspect(cA, { what: 'qa', file: A.r }) as { defects: number; advisories: number; findings: { code: string }[] };
-  sheet(A.r, path.join(out, `${tag}-prev-sheet.jpg`));
+  if (!onlyFrame) sheet(A.r, path.join(out, `${tag}-prev-sheet.jpg`));
 
   // ---- FRAME Phase 6 ----
-  const dB = path.join(out, `${tag}-frame`); fs.rmSync(dB, { recursive: true, force: true }); fs.mkdirSync(dB);
+  const dB = path.join(out, `${tag}-frame${onlyFrame ? '2' : ''}`); fs.rmSync(dB, { recursive: true, force: true }); fs.mkdirSync(dB);
   const cB: api.Ctx = { project: dB, detail: 'standard', mediaRoots: [out, dB], outRoots: [dB] };
   const callsB: unknown[] = [];
   const B = await timed(async () => {
@@ -87,11 +89,11 @@ for (const [s0, s1] of segments) {
   const outB = path.join(dB, 'renders', 'reel.mp4');
   const tlB = await (await api.openProject(dB, false)).timeline();
   const qaB = await api.inspect(cB, { what: 'qa', file: outB }) as { defects: number; advisories: number; findings: { code: string }[] };
-  sheet(outB, path.join(out, `${tag}-frame-sheet.jpg`));
+  sheet(outB, path.join(out, `${tag}-frame${onlyFrame ? '2' : ''}-sheet.jpg`));
 
   // ---- FRAME Phase 6 on a local-ASR transcript (caption-accuracy gate) ----
   let asr: Record<string, unknown> | undefined;
-  if (process.env.FRAME_SHERPA_MODEL) {
+  if (process.env.FRAME_SHERPA_MODEL && !onlyFrame) {
     const dC = path.join(out, `${tag}-asr`); fs.rmSync(dC, { recursive: true, force: true }); fs.mkdirSync(dC);
     const cC: api.Ctx = { project: dC, detail: 'debug', mediaRoots: [out, dC], outRoots: [dC] };
     await api.importMedia(cC, { paths: [seg] });
@@ -109,5 +111,5 @@ for (const [s0, s1] of segments) {
   summary.push(row);
   console.error(tag, 'done');
 }
-fs.writeFileSync(path.join(out, 'production-eval.json'), JSON.stringify(summary, null, 1));
+fs.writeFileSync(path.join(out, onlyFrame ? 'production-eval-frame2.json' : 'production-eval.json'), JSON.stringify(summary, null, 1));
 console.log(JSON.stringify(summary, null, 1));

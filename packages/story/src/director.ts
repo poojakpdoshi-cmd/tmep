@@ -62,6 +62,16 @@ const POLICY: Record<Genre, { pause: number; zoomPerMin: number; zoomOn: Strateg
   sports: { pause: 2.0, zoomPerMin: 4, zoomOn: 'event-candidates', graphics: [], captions: false, transitions: [], budget: 6, jump: 'leave', assets: false, cpm: [8, 40] },
 };
 
+/** Band (upper ≈ 0.12–0.32, lower ≈ 0.68–0.88 of the frame height) with fewer head collisions; lower on a tie. */
+export function captionBand(a: FootageAnalysis): 'upper' | 'lower' {
+  const heads: number[] = [];
+  for (const tr of a.observed.tracks ?? []) if (tr.label === 'person') for (const b of tr.boxes) heads.push(b[2] + b[4] * 0.12);
+  for (const f of a.observed.faces ?? []) for (const b of f.boxes) heads.push(b.y);
+  if (!heads.length && a.inferred.presenter) heads.push(a.inferred.presenter.y - a.inferred.presenter.h * 0.3);
+  const upper = heads.filter((y) => y >= 0.08 && y <= 0.36).length, lower = heads.filter((y) => y >= 0.64 && y <= 0.92).length;
+  return upper < lower ? 'upper' : 'lower';
+}
+
 export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s: number; e: number }[], opts: { transcriptApprox?: boolean; transcriptUnverified?: string; reference?: StyleProfile } = {}): Strategy {
   const g = intent.genre, P = POLICY[g], c = intent.constraints ?? {};
   const decisions: Strategy['decisions'] = [];
@@ -69,10 +79,9 @@ export function direct(intent: Intent, a: FootageAnalysis, words: { w: string; s
   const say = (what: string, why: string, source: Strategy['decisions'][number]['source']) => decisions.push({ what, why, source });
   const user = <T>(v: T | undefined, d: T, what: string): T => { if (v !== undefined) { say(`${what}: ${String(v)}`, 'explicit user instruction', 'user'); return v; } return d; };
 
-  // Captions: only from trustworthy timing; never under the subject.
-  const subj = a.observed.tracks?.find((t) => t.id === a.inferred.subjects?.primary);
-  const low = subj ? subj.boxes.filter((b) => b[2] + b[4] > 0.78).length / Math.max(1, subj.boxes.length) : a.inferred.presenter ? +(a.inferred.presenter.y + a.inferred.presenter.h / 2 > 0.78) : 0;
-  const position: 'upper' | 'lower' = low > 0.5 ? 'upper' : 'lower';
+  // Captions: only from trustworthy timing, and in the band that covers the fewest heads (faces, pose
+  // heads, tops of person boxes) — bodies may sit under captions, faces may not.
+  const position = captionBand(a);
   let burn = c.captions ?? P.captions;
   let capReason = c.captions !== undefined ? 'explicit user instruction' : `${g} policy`;
   if (!words.length) { burn = false; capReason = 'no transcript'; }

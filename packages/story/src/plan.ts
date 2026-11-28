@@ -12,6 +12,7 @@ import type { Word } from '../../core/src/index.ts';
 import type { FootageAnalysis } from '../../media/src/footage.ts';
 import { recommend, type AssetRequest, type LibraryEntry } from '../../media/src/library.ts';
 import { centreToOffset } from '../../media/src/semantic.ts';
+import { captionBand } from './director.ts';
 import { detectList, detectStat, splitSentences } from './rules.ts';
 
 export const PLAN_SCHEMA = 'frame.plan/1';
@@ -120,11 +121,11 @@ export function buildPlan(i: PlanInputs): EditPlan {
     }
   }
 
-  // Captions: away from where the subject lives.
+  // Captions: in the band that covers the fewest heads (Phase 6; Phase 5 avoided body boxes and could
+  // put captions on faces in full-body shots).
   const subj = a.observed.tracks?.find((t) => t.id === inf.subjects?.primary);
-  const lowBottom = subj ? subj.boxes.filter((b) => b[2] + b[4] > 0.78).length / Math.max(1, subj.boxes.length) : inf.presenter ? (inf.presenter.y + inf.presenter.h / 2 > 0.78 ? 1 : 0) : 0;
-  const pos = lowBottom > 0.5 && !(subj && subj.boxes.every((b) => b[2] < 0.3)) ? 'upper' : 'lower';
-  if (i.words.length) add({ kind: 'captions', ops: [{ op: 'captions', pos }], reason: `${pos} captions keep clear of the subject`, evidence: [subj ? `${subj.id} reaches the lower band in ${Math.round(lowBottom * 100)}% of samples` : inf.presenter ? `presenter region bottom ${r2(inf.presenter.y + inf.presenter.h / 2)}` : 'no subject detected'], confidence: subj || inf.presenter ? 0.7 : 0.5, deps: ['footage', 'transcript', 'format'] });
+  const pos = captionBand(a);
+  if (i.words.length) add({ kind: 'captions', ops: [{ op: 'captions', pos }], reason: `${pos} captions keep clear of the subject`, evidence: [subj || a.observed.faces?.length || inf.presenter ? 'head positions from person tracks, faces and the presenter region' : 'no people detected'], confidence: subj || inf.presenter ? 0.7 : 0.5, deps: ['footage', 'transcript', 'format'] });
 
   // Graphics from what is said (stats and lists only), placed by footage-aware compile later.
   if (talky && i.words.length) {
