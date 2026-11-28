@@ -13,7 +13,11 @@
  * The fragment is inserted into a clip's linear filter chain; it may contain labelled sub-graphs
  * but always ends with an unlabelled output so the chain can continue with ",filter...".
  */
-import { type Clip, type Effect, type FxMask, type Key, type KeyProp, type Ease, sampleKeys } from '../../core/src/index.ts';
+import {
+  type Clip, type Effect, type FxMask, type Key, type KeyProp, type Ease, type MaskKey,
+  sampleKeys, ease,
+} from '../../core/src/index.ts';
+import { canvasModule } from '../../motion/src/vector.ts';
 
 const n = (x: number) => {
   const r = Math.round(x * 1e5) / 1e5;
@@ -111,12 +115,92 @@ export function opacitySchedule(fx: Effect[], frames: number, fps: number): { t:
   return out;
 }
 
+function maskKeyExpr(keys: MaskKey[], prop: 'x' | 'y' | 'w' | 'h' | 'feather', T: string, fallback: number): string {
+  const ks = keys.filter((k) => k[prop] !== undefined);
+  if (!ks.length) return n(fallback);
+  let expr = n(ks[ks.length - 1]![prop]!);
+  for (let i = ks.length - 1; i >= 1; i--) {
+    const a = ks[i - 1]!;
+    const b = ks[i]!;
+    const va = a[prop]!;
+    const vb = b[prop]!;
+    const seg = va === vb ? n(va) : `(${n(va)}+${n(vb - va)}*${easeExpr(b.e ?? 'io', `clip((${T}-(${n(a.t)}))/${n(b.t - a.t)},0,1)`)})`;
+    expr = `if(lt(${T},${n(b.t)}),${seg},${expr})`;
+  }
+  return expr;
+}
+
+/** Rasterize a concave or bezier mask into a grayscale PNG buffer at MW x MH using @napi-rs/canvas. */
+export function rasterizeComplexMaskPng(m: FxMask, MW: number, MH: number, t = 0): Buffer {
+  const { createCanvas } = canvasModule();
+  const canvas = createCanvas(MW, MH);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, MW, MH);
+  const featherPx = Math.max(0, m.feather * Math.min(MW, MH));
+  ctx.save();
+  if (featherPx > 0.5) {
+    ctx.filter = `blur(${featherPx.toFixed(1)}px)`;
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  if (m.shape === 'bezier' && m.bezierStart && m.beziers?.length) {
+    ctx.moveTo(m.bezierStart[0] * MW, m.bezierStart[1] * MH);
+    for (const seg of m.beziers) {
+      ctx.bezierCurveTo(
+        seg.cp1[0] * MW, seg.cp1[1] * MH,
+        seg.cp2[0] * MW, seg.cp2[1] * MH,
+        seg.to[0] * MW, seg.to[1] * MH,
+      );
+    }
+    ctx.closePath();
+  } else if (m.pts?.length) {
+    ctx.moveTo(m.pts[0]![0] * MW, m.pts[0]![1] * MH);
+    for (let i = 1; i < m.pts.length; i++) {
+      ctx.lineTo(m.pts[i]![0] * MW, m.pts[i]![1] * MH);
+    }
+    ctx.closePath();
+  } else {
+    const cx = m.x * MW;
+    const cy = m.y * MH;
+    const rw = m.w * MW;
+    const rh = m.h * MH;
+    if (m.shape === 'ellipse') ctx.ellipse(cx, cy, rw / 2, rh / 2, 0, 0, Math.PI * 2);
+    else ctx.rect(cx - rw / 2, cy - rh / 2, rw, rh);
+  }
+  ctx.fill('evenodd');
+  ctx.restore();
+  if (m.invert) {
+    const img = ctx.getImageData(0, 0, MW, MH);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = 255 - d[i]!;
+      d[i + 1] = 255 - d[i + 1]!;
+      d[i + 2] = 255 - d[i + 2]!;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  if (m.reveal && t >= 0) {
+    const p = ease(m.reveal.e, Math.min(1, Math.max(0, (t - m.reveal.at) / Math.max(1e-6, m.reveal.d))));
+    if (p < 1) {
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, MW * p, MH);
+    }
+  }
+  return canvas.toBuffer('image/png');
+}
+
 /** Signed distance (px, positive inside) of a mask shape at mask resolution MW x MH, as a geq expression of X,Y. */
 export function maskExpr(m: FxMask, MW: number, MH: number, timeOffset = 0): string {
   const Tp = timeOffset ? `(T+${n(timeOffset)})` : 'T';
   let prog: string | undefined;
   if (m.reveal) prog = easeExpr(m.reveal.e, `clip((${Tp}-(${n(m.reveal.at)}))/${n(m.reveal.d)},0,1)`);
   const grow = m.reveal && m.reveal.from === 'center' ? `max(${prog},0.001)` : undefined;
+  const mxExpr = m.keys?.length ? `(${maskKeyExpr(m.keys, 'x', Tp, m.x)}*${MW})` : n(m.x * MW);
+  const myExpr = m.keys?.length ? `(${maskKeyExpr(m.keys, 'y', Tp, m.y)}*${MH})` : n(m.y * MH);
+  const mwExpr = m.keys?.length ? `(${maskKeyExpr(m.keys, 'w', Tp, m.w)}*${MW})` : n(m.w * MW);
+  const mhExpr = m.keys?.length ? `(${maskKeyExpr(m.keys, 'h', Tp, m.h)}*${MH})` : n(m.h * MH);
   // shape centre and bbox in mask pixels
   let cxp: number, cyp: number, bx0: number, bx1: number, by0: number, by1: number;
   if (m.shape === 'poly') {
@@ -136,17 +220,17 @@ export function maskExpr(m: FxMask, MW: number, MH: number, timeOffset = 0): str
     by1 = cyp + (m.h * MH) / 2;
   }
   // sample point, pulled toward the centre when the shape grows from 0
-  const qx = grow ? `(${n(cxp)}+(X-${n(cxp)})/${grow})` : 'X';
-  const qy = grow ? `(${n(cyp)}+(Y-${n(cyp)})/${grow})` : 'Y';
+  const qx = grow ? `(${mxExpr}+(X-${mxExpr})/${grow})` : 'X';
+  const qy = grow ? `(${myExpr}+(Y-${myExpr})/${grow})` : 'Y';
   let d0: string;
   if (m.shape === 'rect') {
-    d0 = `min(${n((m.w * MW) / 2)}-abs(${qx}-${n(cxp)}),${n((m.h * MH) / 2)}-abs(${qy}-${n(cyp)}))`;
+    d0 = `min(${mwExpr}/2-abs(${qx}-${mxExpr}),${mhExpr}/2-abs(${qy}-${myExpr}))`;
   } else if (m.shape === 'ellipse') {
-    const rx = (m.w * MW) / 2;
-    const ry = (m.h * MH) / 2;
-    d0 = `(1-sqrt(pow((${qx}-${n(cxp)})/${n(rx)},2)+pow((${qy}-${n(cyp)})/${n(ry)},2)))*${n(Math.min(rx, ry))}`;
+    const rx = `(${mwExpr}/2)`;
+    const ry = `(${mhExpr}/2)`;
+    d0 = `(1-sqrt(pow((${qx}-${mxExpr})/${rx},2)+pow((${qy}-${myExpr})/${ry},2)))*min(${rx},${ry})`;
   } else {
-    const pts = m.pts!.map(([x, y]) => [x * MW, y * MH] as [number, number]);
+    const pts = (m.pts ?? [[0.2, 0.2], [0.8, 0.2], [0.5, 0.8]]).map(([x, y]) => [x * MW, y * MH] as [number, number]);
     let area = 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i]!;
@@ -177,11 +261,48 @@ export function maskExpr(m: FxMask, MW: number, MH: number, timeOffset = 0): str
   return m.invert ? `(1-${a})` : a;
 }
 
+/** Compile Stage 3.2 linear/compositing filters (blur, glow, shadow, chromakey, mblur, persp). */
+function compileProFx(fx: Effect[], W: number, H: number, fps: number, D: string, id: string, isOverlay: boolean): string[] {
+  const out: string[] = [];
+  let k = 0;
+  for (const f of fx) {
+    const tag = `${id}p${k++}`;
+    if (f.type === 'blur') {
+      if (f.mode === 'gaussian') {
+        out.push(`gblur=sigma=${n(f.sigma)}`);
+      } else {
+        const r = Math.max(1, Math.round(f.sigma));
+        const vertical = f.angle !== undefined && Math.abs(Math.sin((f.angle * Math.PI) / 180)) > 0.707;
+        out.push(vertical ? `boxblur=0:1:${r}:1` : `boxblur=${r}:1:0:1`);
+      }
+    } else if (f.type === 'glow') {
+      out.push(
+        `split=2[ga${tag}][gb${tag}];[gb${tag}]gblur=sigma=${n(f.radius)}${f.brightness ? `,eq=brightness=${n(f.brightness)}` : ''}[gc${tag}];[ga${tag}][gc${tag}]blend=all_mode=screen:all_opacity=${n(f.intensity)}`,
+      );
+    } else if (f.type === 'chromakey') {
+      out.push(`format=yuva420p,chromakey=color=${f.color.replace('#', '0x')}:similarity=${n(f.similarity)}:blend=${n(f.blend)}${f.despill ? ',despill=green' : ''}`);
+    } else if (f.type === 'mblur') {
+      const weights = Array.from({ length: f.frames }, (_, i) => n(Math.pow(f.decay ?? 0.6, f.frames - 1 - i))).join(' ');
+      out.push(`tmix=frames=${f.frames}:weights='${weights}'`);
+    } else if (f.type === 'persp') {
+      out.push(
+        `perspective=x0='${n(f.x0 * W)}':y0='${n(f.y0 * H)}':x1='${n(f.x1 * W)}':y1='${n(f.y1 * H)}':x2='${n(f.x2 * W)}':y2='${n(f.y2 * H)}':x3='${n(f.x3 * W)}':y3='${n(f.y3 * H)}':interpolation=cubic`,
+      );
+    } else if (f.type === 'shadow' && isOverlay) {
+      const col = (f.color ?? '#000000').replace('#', '0x');
+      out.push(
+        `format=yuva420p,split=2[sf${tag}][ss${tag}];[ss${tag}]alphaextract,gblur=sigma=${n(f.blur)}[sa${tag}];color=c=${col}:s=${W}x${H}:r=${fps}:d=${D},format=yuva420p[sc${tag}];[sc${tag}][sa${tag}]alphamerge[sh${tag}];color=c=black@0:s=${W}x${H}:r=${fps}:d=${D},format=yuva420p[sb${tag}];[sb${tag}][sh${tag}]overlay=${Math.round(f.dx)}:${Math.round(f.dy)}:shortest=1,format=yuva420p,colorchannelmixer=aa=${n(f.opacity)}[so${tag}];[so${tag}][sf${tag}]overlay=0:0:shortest=1`,
+      );
+    }
+  }
+  return out;
+}
+
 /**
  * Filter fragment for all effects on a clip, or undefined when it has none.
  * `id` must be unique within the unit graph; `frames` is the clip's frame count.
  */
-export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string, frames: number, id: string): string | undefined {
+export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string, frames: number, id: string, maskFiles?: Map<FxMask, string>): string | undefined {
   const fx = c.fx;
   if (!fx?.length) return undefined;
   const col = bg.replace('#', '0x');
@@ -189,6 +310,7 @@ export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string
   const parts: string[] = [];
   const tf = transformFilter(fx, W, H, fps, bg);
   if (tf) parts.push(tf);
+  parts.push(...compileProFx(fx, W, H, fps, D, id, false));
   let frag = parts.join(',');
   const sched = opacitySchedule(fx, frames, fps);
   if (sched) {
@@ -202,11 +324,18 @@ export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string
   if (ms.length) {
     const MW = Math.max(2, Math.round(W / 2));
     const MH = Math.max(2, Math.round(H / 2));
-    const alpha = ms.map((m) => maskExpr(m, MW, MH)).reduce((a, b) => `${a}*${b}`);
-    const animated = ms.some((m) => m.reveal);
-    const src = animated
-      ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*${alpha}'`
-      : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*${alpha}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+    const fileMask = ms.find((m) => maskFiles?.has(m));
+    let src: string;
+    if (fileMask && maskFiles?.get(fileMask)) {
+      const esc = maskFiles.get(fileMask)!.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      src = `movie='${esc}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D},format=gray`;
+    } else {
+      const alpha = ms.map((m) => maskExpr(m, MW, MH)).reduce((a, b) => `${a}*${b}`);
+      const animated = ms.some((m) => m.reveal || (m.keys && m.keys.length > 1));
+      src = animated
+        ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*${alpha}'`
+        : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*${alpha}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+    }
     const head = frag ? `${frag},` : '';
     frag = `${head}format=yuva420p[fxc${id}];${src},scale=${W}:${H}:flags=bicubic,format=gray[fxm${id}];[fxc${id}][fxm${id}]alphamerge[fxk${id}];color=c=${col}:s=${W}x${H}:r=${fps}:d=${D}[fxb${id}];[fxb${id}][fxk${id}]overlay=shortest=1:format=auto`;
   }
@@ -221,31 +350,40 @@ export function compileFx(c: Clip, W: number, H: number, fps: number, bg: string
  */
 export function compileOverlayFx(
   fx: Effect[] | undefined, W: number, H: number, fps: number,
-  frames: number, id: string, timeOffset = 0,
+  frames: number, id: string, timeOffset = 0, maskFiles?: Map<FxMask, string>,
 ): string | undefined {
   if (!fx?.length) return undefined;
+  const D = n((frames + fps) / fps);
   const tf = transformFilter(fx, W, H, fps, 'black', timeOffset, true);
+  const pro = compileProFx(fx, W, H, fps, D, id, true);
+  const head = [tf, ...pro].filter(Boolean).join(',');
   const opacity = combine(
     transforms(fx).map((k) => keyExpr(k.keys, 'o', timeOffset ? `(T+${n(timeOffset)})` : 'T')),
     '*',
   );
   const ms = masks(fx);
-  if (!opacity && !ms.length) return tf;
+  if (!opacity && !ms.length) return head || undefined;
 
   // Opacity without a mask is uniform. Evaluate its time expression on a tiny
   // plane, then use the same upscaling and source-alpha multiplication as masks.
   const MW = ms.length ? Math.max(2, Math.round(W / 2)) : 2;
   const MH = ms.length ? Math.max(2, Math.round(H / 2)) : 2;
-  const D = n((frames + fps) / fps);
-  const alpha = [...ms.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
-    .map((x) => `(${x})`).join('*');
-  const dynamic = ms.some((m) => !!m.reveal) ||
-    transforms(fx).some((k) => k.keys.filter((x) => x.o !== undefined).length > 1);
-  const src = dynamic
-    ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*clip(${alpha},0,1)'`
-    : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*clip(${alpha},0,1)',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+  const fileMask = ms.find((m) => maskFiles?.has(m));
+  let src: string;
+  if (fileMask && maskFiles?.get(fileMask)) {
+    const esc = maskFiles.get(fileMask)!.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+    src = `movie='${esc}',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D},format=gray`;
+  } else {
+    const alpha = [...ms.map((m) => maskExpr(m, MW, MH, timeOffset)), ...(opacity ? [opacity] : [])]
+      .map((x) => `(${x})`).join('*');
+    const dynamic = ms.some((m) => !!m.reveal || (m.keys && m.keys.length > 1)) ||
+      transforms(fx).some((k) => k.keys.filter((x) => x.o !== undefined).length > 1);
+    src = dynamic
+      ? `color=c=black:s=${MW}x${MH}:r=${fps}:d=${D},format=gray,geq=lum='255*clip(${alpha},0,1)'`
+      : `color=c=black:s=${MW}x${MH}:r=${fps}:d=${n(1 / fps)},format=gray,geq=lum='255*clip(${alpha},0,1)',loop=loop=-1:size=1,setpts=N/(${fps}*TB),trim=duration=${D}`;
+  }
   // Never overwrite the input alpha: compose it with the computed effect alpha.
-  return `${tf ? tf + ',' : ''}format=yuva420p,split=2[fxcol${id}][fxold${id}];` +
+  return `${head ? head + ',' : ''}format=yuva420p,split=2[fxcol${id}][fxold${id}];` +
     `[fxold${id}]alphaextract[fxorig${id}];` +
     `${src},scale=${W}:${H}:flags=bicubic,format=gray[fxnew${id}];` +
     `[fxorig${id}][fxnew${id}]blend=all_mode=multiply[fxmul${id}];` +

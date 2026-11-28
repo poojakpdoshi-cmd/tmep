@@ -12,6 +12,7 @@ import {
   type Timeline,
   type Project,
   type Word,
+  type FxMask,
   TmepError,
   layout,
   timelineWords,
@@ -24,6 +25,8 @@ import {
   sha256,
   toPosix,
 } from '../../core/src/index.ts';
+import { rasterizeComplexMaskPng } from './effects.ts';
+import { BT709_OUTPUT_TAGS } from './color.ts';
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
 import { compileAss } from '../../motion/src/compile.ts';
 import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
@@ -420,6 +423,29 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
       }
     }
 
+    const maskFiles = new Map<FxMask, string>();
+    const MW = Math.max(2, Math.round(W / 2));
+    const MH = Math.max(2, Math.round(H / 2));
+    const allEffects = [
+      ...tl.clips.flatMap((c) => c.fx ?? []),
+      ...tl.broll.flatMap((b) => b.fx ?? []),
+      ...gfxOverlays.flatMap((g) => g.fx ?? []),
+    ];
+    for (const eff of allEffects) {
+      if (eff.type === 'mask' && (eff.shape === 'concave' || eff.shape === 'bezier')) {
+        const mKey = hashOf({ m: eff, MW, MH });
+        const mFile = project.cachePath('masks', `${mKey}.png`);
+        if (!(await exists(mFile))) {
+          await fsp.mkdir(path.dirname(mFile), { recursive: true });
+          const buf = rasterizeComplexMaskPng(eff, MW, MH, 0);
+          const tmpM = tmpFor(mFile, '.png');
+          await fsp.writeFile(tmpM, buf);
+          await fsp.rename(tmpM, mFile).catch(async (e) => { if (!(await exists(mFile))) throw e; });
+        }
+        maskFiles.set(eff, mFile);
+      }
+    }
+
     await pool(
       todo,
       par,
@@ -427,7 +453,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
         const u = units[i]!;
         const tmp = tmpFor(unitFiles[i]!, '.mp4');
         temps.add(tmp);
-        const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, gfxOverlays);
+        const { args } = unitArgs(tl, u, media, enc, placed, tmp, compiled.events ? 'gfx.ass' : undefined, hasFonts ? 'fonts' : undefined, gfxOverlays, maskFiles);
         await ffmpeg({
           args: await maybeScript(args, work),
           cwd: work,
@@ -458,7 +484,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
     await fsp.writeFile(list, unitFiles.map((f) => `file '${toPosix(f).replace(/'/g, "'\\''")}'`).join('\n') + '\n');
     const tmpOut = tmpFor(outPath, '.mp4');
     temps.add(tmpOut);
-    await ffmpeg({ args: ['-f', 'concat', '-safe', '0', '-i', list, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-movflags', '+faststart', tmpOut], signal: ctrl.signal });
+    await ffmpeg({ args: ['-f', 'concat', '-safe', '0', '-i', list, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', ...BT709_OUTPUT_TAGS, '-movflags', '+faststart', tmpOut], signal: ctrl.signal });
     await fsp.rename(tmpOut, outPath);
     temps.delete(tmpOut);
   } finally {

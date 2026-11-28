@@ -27,20 +27,55 @@ const THEMES: Record<ThemeName, { card: string; cardEnd: string; text: string; m
 
 const color = str({ pattern: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/ });
 
+export const WORKFLOW_KINDS = [
+  'explainer_card',
+  'product_demo',
+  'sports_stat',
+  'diagram',
+  'talking_head_callout',
+  'talking_head_reel',
+  'cinematic_sequence',
+  'sports_highlights',
+  'educational_explainer',
+  'audio_enhancement',
+  'color_matching',
+  'animated_data_viz',
+] as const;
+
 export const compileIntentSchema = obj({
   id: str({ min: 1, max: 48, pattern: /^[A-Za-z][\w-]*$/ }).default('comp1'),
-  kind: oneOf(['explainer_card', 'product_demo', 'sports_stat', 'diagram', 'talking_head_callout'] as const),
+  kind: oneOf(WORKFLOW_KINDS),
   at: union([num({ min: 0 }), str({ min: 1, max: 160 })]).default(0),
-  duration: num({ min: 0.5, max: 60 }).default(4),
+  duration: num({ min: 0.5, max: 120 }).default(4),
   ratio: oneOf(['9:16', '16:9', '1:1', '4:5'] as const).optional(),
   platform: oneOf(['reels', 'shorts', 'tiktok', 'youtube', 'square', 'default'] as const).default('default'),
   theme: oneOf(['dark', 'slate', 'emerald', 'light'] as const).default('dark'),
   motion: oneOf(['restrained', 'editorial', 'dynamic'] as const).default('editorial'),
   z: num({ int: true, min: -100, max: 100 }).default(8),
-  title: str({ min: 1, max: 140 }),
+  title: str({ min: 1, max: 140 }).default('FRAME Edit'),
   subtitle: str({ min: 1, max: 320 }).optional(),
   badge: str({ min: 1, max: 32 }).optional(),
   asset: str({ min: 1, max: 64, pattern: /^[A-Za-z][\w-]*$/ }).optional(),
+  clip: str({ min: 1, max: 64 }).optional(),
+  events: arr(obj({ t: num({ min: 0 }), label: str({ min: 1, max: 64 }), score: str({ max: 24 }).optional() }), { min: 1, max: 24 }).optional(),
+  grade: obj({
+    exposure: num({ min: -3, max: 3 }).optional(),
+    contrast: num({ min: 0.2, max: 3 }).optional(),
+    temp: num({ min: 2000, max: 15000 }).optional(),
+    tint: num({ min: -1, max: 1 }).optional(),
+    saturation: num({ min: 0, max: 3 }).optional(),
+    vibrance: num({ min: -1, max: 1 }).optional(),
+    vignette: num({ min: 0, max: 1 }).optional(),
+    lut: str().optional(),
+  }).optional(),
+  audioPost: obj({
+    eq: oneOf(['dialogue', 'warm', 'crisp'] as const).optional(),
+    denoise: num({ min: 0, max: 1 }).optional(),
+    deess: num({ min: 0, max: 1 }).optional(),
+    comp: oneOf(['light', 'medium', 'heavy'] as const).optional(),
+    hp: num({ min: 20, max: 500 }).optional(),
+    twoPass: bool().optional(),
+  }).optional(),
   chart: obj({
     chartType: oneOf(['bar', 'hbar', 'line', 'ring'] as const),
     data: arr(obj({ label: str({ min: 1, max: 40 }), value: num({ min: 0, max: 1e9 }), color: color.optional() }), { min: 1, max: 16 }),
@@ -65,8 +100,8 @@ export interface CompileCorrection {
 }
 
 export interface CompileResult {
-  ops: { op: 'scene'; spec: VisualScene }[];
-  spec: VisualScene;
+  ops: Record<string, unknown>[];
+  spec?: VisualScene;
   corrections: CompileCorrection[];
 }
 
@@ -108,14 +143,36 @@ export function compileIntent(raw: unknown, defaults: { ratio?: Ratio; captionPo
   const palette = THEMES[inp.theme];
   const corrections: CompileCorrection[] = [];
 
+  if (inp.kind === 'audio_enhancement') {
+    const ap = inp.audioPost ?? { eq: 'dialogue', denoise: 0.35, deess: 0.3, comp: 'medium', hp: 80, twoPass: true };
+    const masterTarget = inp.platform === 'default' ? 'youtube' : inp.platform;
+    return {
+      ops: [
+        { op: 'audio', ...(inp.clip ? { clip: inp.clip } : {}), eq: ap.eq ?? 'dialogue', denoise: ap.denoise ?? 0.35, deess: ap.deess ?? 0.3, comp: ap.comp ?? 'medium', hp: ap.hp ?? 80 },
+        { op: 'audio', target: masterTarget, twoPass: ap.twoPass ?? true, limiter: -1.0 },
+      ],
+      corrections,
+    };
+  }
+  if (inp.kind === 'color_matching') {
+    const g = inp.grade ?? { exposure: 0.05, contrast: 1.06, saturation: 1.08, vibrance: 0.1, vignette: 0.15 };
+    return {
+      ops: [{ op: 'color', ...(inp.clip ? { clip: inp.clip } : {}), ...g }],
+      corrections,
+    };
+  }
+
   if (inp.kind === 'product_demo' && !inp.asset) {
     throw new TmepError('E_INPUT', 'product_demo requires an imported image asset id');
   }
-  if (inp.kind === 'sports_stat' && !inp.chart) {
-    throw new TmepError('E_INPUT', 'sports_stat requires a chart specification');
+  if ((inp.kind === 'sports_stat' || inp.kind === 'animated_data_viz') && !inp.chart) {
+    throw new TmepError('E_INPUT', `${inp.kind} requires a chart specification`);
   }
   if (inp.kind === 'diagram' && (!inp.steps || inp.steps.length < 2)) {
     throw new TmepError('E_INPUT', 'diagram requires 2-4 steps');
+  }
+  if (inp.kind === 'sports_highlights' && (!inp.events || !inp.events.length)) {
+    throw new TmepError('E_INPUT', 'sports_highlights requires supplied event timestamps (events[])');
   }
 
   // Available safe content box in normalized coordinates
@@ -344,8 +401,29 @@ export function compileIntent(raw: unknown, defaults: { ratio?: Ratio; captionPo
     throw new TmepError('E_INTERNAL', `compiled scene invalid: ${formatIssues(checked.issues)}`);
   }
   const spec = checked.value;
+  const ops: Record<string, unknown>[] = [{ op: 'scene', spec }];
+  if (inp.kind === 'talking_head_reel') {
+    const masterTarget = inp.platform === 'default' ? 'reels' : inp.platform;
+    ops.push(
+      { op: 'audio', ...(inp.clip ? { clip: inp.clip } : {}), eq: 'dialogue', comp: 'medium', hp: 80 },
+      { op: 'audio', target: masterTarget, twoPass: true, limiter: -1.0 },
+    );
+  } else if (inp.kind === 'cinematic_sequence') {
+    const g = inp.grade ?? { contrast: 1.08, saturation: 1.06, vibrance: 0.12, vignette: 0.25 };
+    ops.push(
+      { op: 'color', ...(inp.clip ? { clip: inp.clip } : {}), ...g },
+      { op: 'transition', type: 'cinematic-dissolve', d: 0.5, all: true },
+    );
+  } else if (inp.kind === 'sports_highlights' && inp.events?.length) {
+    for (const ev of inp.events) {
+      ops.push({ op: 'punch', at: ev.t, to: 1.18, d: 1.1 });
+      ops.push({ op: 'sfx', kind: 'whoosh', at: ev.t, vol: -10 });
+    }
+  } else if (inp.kind === 'educational_explainer') {
+    ops.push({ op: 'audio', ...(inp.clip ? { clip: inp.clip } : {}), eq: 'dialogue', comp: 'light', hp: 80 });
+  }
   return {
-    ops: [{ op: 'scene', spec }],
+    ops,
     spec,
     corrections,
   };

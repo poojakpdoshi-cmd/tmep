@@ -22,7 +22,7 @@ function stateAtSource(c: Clip, X: number): Record<string, number> | undefined {
   const out: Record<string, number> = {};
   (c.fx ?? []).forEach((f, i) => {
     if (f.type === 'kf') for (const p of KEY_PROPS) out[`${i}.${p}`] = sampleKeys(f.keys, p as KeyProp, t);
-    else if (f.reveal) out[`${i}.reveal`] = ease(f.reveal.e, Math.min(1, Math.max(0, (t - f.reveal.at) / f.reveal.d)));
+    else if (f.type === 'mask' && f.reveal) out[`${i}.reveal`] = ease(f.reveal.e, Math.min(1, Math.max(0, (t - f.reveal.at) / f.reveal.d)));
   });
   return out;
 }

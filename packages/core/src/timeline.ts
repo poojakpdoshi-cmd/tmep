@@ -9,7 +9,7 @@
  *  - Timeline math is frame-quantized (all starts/durations are integer frame counts).
  */
 import { TmepError } from './errors.ts';
-import { type Effect, shiftFx } from './effects.ts';
+import { type Effect, type Ease, type ColorGrade, ease, shiftFx } from './effects.ts';
 import type { SceneEntry } from './scene.ts';
 
 export type Ratio = '9:16' | '16:9' | '1:1' | '4:5';
@@ -44,6 +44,33 @@ export interface Transition {
   d: number;
 }
 
+export interface SpeedKey {
+  /** Source-offset seconds from clip.in (0..out-in). */
+  t: number;
+  speed: number;
+  e?: Ease;
+}
+
+export interface AudioClipPost {
+  eq?: 'dialogue' | 'warm' | 'crisp';
+  denoise?: number;
+  deess?: number;
+  comp?: 'light' | 'medium' | 'heavy';
+  hp?: number;
+  lp?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+}
+
+export interface AudioMaster {
+  target?: 'reels' | 'shorts' | 'tiktok' | 'youtube' | 'podcast' | 'broadcast' | 'cinema';
+  lufs?: number;
+  tp?: number;
+  lra?: number;
+  twoPass?: boolean;
+  limiter?: number;
+}
+
 export interface Clip {
   id: string;
   src: string;
@@ -65,6 +92,22 @@ export interface Clip {
   mute: boolean;
   /** Keyframed transforms and masks (clip-local time). Optional: absent on older timelines. */
   fx?: Effect[];
+  /** J-cut: seconds audio leads video into the previous clip (>=0). */
+  jcut?: number;
+  /** L-cut: seconds audio trails video into the next clip (>=0). */
+  lcut?: number;
+  /** Reverse video & audio playback. */
+  reverse?: boolean;
+  /** Freeze-frame duration in seconds (holds frame at `in`, silent audio). */
+  freeze?: number;
+  /** Variable speed ramp keyframes (t = source offset from `in`). */
+  speedRamp?: SpeedKey[];
+  /** Video stabilization parameters. */
+  stabilize?: { shakiness?: number; accuracy?: number; smoothing?: number };
+  /** Per-clip colour grade. */
+  color?: ColorGrade;
+  /** Per-clip audio post-processing. */
+  audio?: AudioClipPost;
 }
 
 /** A point in time: either absolute timeline time (`at`) or a source anchor (`src` + `t`, optionally scoped to `clip` id). */
@@ -145,6 +188,10 @@ export interface Timeline {
   captions: Captions;
   /** Integrated loudness target in LUFS; 0 disables normalization. */
   loudness: number;
+  /** Global colour grade applied to the timeline. */
+  color?: ColorGrade;
+  /** Audio mastering configuration (two-pass loudnorm, platform target, limiter). */
+  master?: AudioMaster;
   meta: Record<string, unknown>;
 }
 
@@ -228,8 +275,36 @@ export function newClip(tl: Timeline, src: string, inT: number, outT: number, ex
   };
 }
 
+export function sampleSpeedRamp(keys: SpeedKey[], srcOffset: number): number {
+  if (!keys.length) return 1;
+  if (srcOffset <= keys[0]!.t) return keys[0]!.speed;
+  for (let i = 1; i < keys.length; i++) {
+    const a = keys[i - 1]!;
+    const b = keys[i]!;
+    if (srcOffset < b.t) {
+      const p = (srcOffset - a.t) / Math.max(1e-6, b.t - a.t);
+      return a.speed + (b.speed - a.speed) * ease(b.e ?? 'io', p);
+    }
+  }
+  return keys[keys.length - 1]!.speed;
+}
+
+export function speedRampDuration(c: Clip): number {
+  const srcDur = Math.max(0, c.out - c.in);
+  if (!c.speedRamp?.length) return srcDur / c.speed;
+  const steps = 256;
+  const du = srcDur / steps;
+  let out = 0;
+  for (let i = 0; i < steps; i++) {
+    const u = (i + 0.5) * du;
+    out += du / Math.max(0.1, sampleSpeedRamp(c.speedRamp, u));
+  }
+  return out;
+}
+
 export function clipFrames(c: Clip, fps: number): number {
-  return Math.max(1, Math.round(((c.out - c.in) / c.speed) * fps));
+  if (c.freeze !== undefined && c.freeze > 0) return Math.max(1, Math.round(c.freeze * fps));
+  return Math.max(1, Math.round(speedRampDuration(c) * fps));
 }
 
 /** Frame-exact placement of every clip, accounting for transition overlaps. */

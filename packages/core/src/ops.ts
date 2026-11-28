@@ -31,7 +31,11 @@ import {
 } from './timeline.ts';
 import { r2 } from './util.ts';
 import { visualSceneSchema, type VisualScene } from './scene.ts';
-import { FX_KINDS, FX_PRESETS, EASES, parseKeys, presetKeys, validateMask, shiftFx, scaleFx, type Effect, type FxMask, type Ease, type RevealFrom } from './effects.ts';
+import {
+  FX_KINDS, FX_PRESETS, EASES, BLEND_MODES, EFFECT_CHAINS, TRANSITION_PRESETS,
+  parseKeys, presetKeys, validateMask, validateEffect, shiftFx, scaleFx,
+  type Effect, type FxMask, type Ease, type RevealFrom, type BlendMode, type ColorGrade,
+} from './effects.ts';
 
 export interface OpContext {
   transcripts: Record<string, Word[] | undefined>;
@@ -43,7 +47,7 @@ export interface OpContext {
 const anchor = union([num(), str({ min: 1 })]);
 const ratio = oneOf(['9:16', '16:9', '1:1', '4:5'] as const);
 const fit = oneOf(['cover', 'contain', 'blur'] as const);
-export const TRANSITIONS = ['fade', 'dissolve', 'fadeblack', 'fadewhite', 'wipeleft', 'wiperight', 'slideleft', 'slideright', 'slideup', 'smoothleft', 'smoothup', 'circleopen', 'zoomin', 'radial', 'none'] as const;
+export const TRANSITIONS = ['fade', 'dissolve', 'fadeblack', 'fadewhite', 'wipeleft', 'wiperight', 'slideleft', 'slideright', 'slideup', 'smoothleft', 'smoothright', 'smoothup', 'circleopen', 'zoomin', 'radial', 'luma', 'none', ...Object.keys(TRANSITION_PRESETS)] as const;
 
 export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   cut: obj({ op: str(), from: anchor, to: anchor.optional() }),
@@ -89,16 +93,90 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
     amt: num({ min: -0.9, max: 3 }).optional(),
     e: oneOf(EASES).optional(),
     keys: any().optional(),
-    shape: oneOf(['rect', 'ellipse', 'poly'] as const).default('rect'),
+    shape: oneOf(['rect', 'ellipse', 'poly', 'concave', 'bezier'] as const).default('rect'),
     x: num({ min: -1, max: 2 }).default(0.5),
     y: num({ min: -1, max: 2 }).default(0.5),
     w: num({ min: 0, max: 4 }).default(0.8),
     h: num({ min: 0, max: 4 }).default(0.8),
     pts: any().optional(),
+    bezierStart: any().optional(),
+    beziers: any().optional(),
     feather: num({ min: 0, max: 0.5 }).default(0),
     invert: bool().default(false),
     reveal: num({ min: 0.05, max: 600 }).optional(),
     from: oneOf(['center', 'left', 'right', 'top', 'bottom'] as const).default('center'),
+    mode: str().optional(),
+    sigma: num({ min: 0.1, max: 100 }).optional(),
+    angle: num({ min: -360, max: 360 }).optional(),
+    radius: num({ min: 0.1, max: 100 }).optional(),
+    intensity: num({ min: 0, max: 1 }).optional(),
+    brightness: num({ min: -1, max: 1 }).optional(),
+    dx: num({ min: -200, max: 200 }).optional(),
+    dy: num({ min: -200, max: 200 }).optional(),
+    blur: num({ min: 0, max: 100 }).optional(),
+    opacity: num({ min: 0, max: 1 }).optional(),
+    color: str().optional(),
+    similarity: num({ min: 0.01, max: 1 }).optional(),
+    blend: num({ min: 0, max: 1 }).optional(),
+    despill: bool().optional(),
+    frames: num({ int: true, min: 2, max: 16 }).optional(),
+    decay: num({ min: 0, max: 1 }).optional(),
+    x0: num({ min: -0.5, max: 1.5 }).optional(),
+    y0: num({ min: -0.5, max: 1.5 }).optional(),
+    x1: num({ min: -0.5, max: 1.5 }).optional(),
+    y1: num({ min: -0.5, max: 1.5 }).optional(),
+    x2: num({ min: -0.5, max: 1.5 }).optional(),
+    y2: num({ min: -0.5, max: 1.5 }).optional(),
+    x3: num({ min: -0.5, max: 1.5 }).optional(),
+    y3: num({ min: -0.5, max: 1.5 }).optional(),
+    chain: str().optional(),
+  }),
+  jcut: obj({ op: str(), clip: str(), d: num({ min: 0, max: 10 }) }),
+  lcut: obj({ op: str(), clip: str(), d: num({ min: 0, max: 10 }) }),
+  ramp: obj({ op: str(), clip: str().optional(), keys: any() }),
+  freeze: obj({ op: str(), at: anchor, d: num({ min: 0.1, max: 30 }).default(1.5) }),
+  reverse: obj({ op: str(), clip: str().optional(), on: bool().default(true) }),
+  punch: obj({ op: str(), at: anchor, to: num({ min: 1.01, max: 3 }).default(1.2), d: num({ min: 0.2, max: 15 }).default(1.2) }),
+  matchcut: obj({ op: str(), fromClip: str(), toClip: str(), scale: num({ min: 1, max: 2 }).default(1.08), d: num({ min: 0, max: 1 }).default(0.2) }),
+  reframe: obj({ op: str(), clip: str().optional(), cx: num({ min: 0, max: 1 }).optional(), cy: num({ min: 0, max: 1 }).optional(), keys: any().optional() }),
+  stabilize: obj({ op: str(), clip: str().optional(), smoothing: num({ int: true, min: 1, max: 60 }).default(10), shakiness: num({ int: true, min: 1, max: 10 }).default(5), accuracy: num({ int: true, min: 1, max: 15 }).default(10), off: bool().default(false) }),
+  splitscreen: obj({ op: str(), srcs: arr(str(), { min: 2, max: 4 }), at: anchor.default(0), d: num({ min: 0.2, max: 600 }).default(4), layout: oneOf(['2h', '2v', '2x2', '3v'] as const).default('2h'), gap: num({ min: 0, max: 0.1 }).default(0.01), z: num({ int: true, min: -100, max: 100 }).default(2) }),
+  pip: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(4), in: num({ min: 0 }).default(0), pos: oneOf(['br', 'bl', 'tr', 'tl'] as const).default('br'), scale: num({ min: 0.1, max: 0.8 }).default(0.3), feather: num({ min: 0, max: 0.1 }).default(0.01), z: num({ int: true, min: -100, max: 100 }).default(4) }),
+  parallax: obj({ op: str(), srcs: arr(str(), { min: 2, max: 4 }), at: anchor.default(0), d: num({ min: 0.2, max: 600 }).default(4), drift: num({ min: 0.01, max: 0.3 }).default(0.08), z: num({ int: true, min: -100, max: 100 }).default(2) }),
+  color: obj({
+    op: str(),
+    clip: str().optional(),
+    exposure: num({ min: -3, max: 3 }).optional(),
+    contrast: num({ min: 0.2, max: 3 }).optional(),
+    temp: num({ min: 2000, max: 15000 }).optional(),
+    tint: num({ min: -1, max: 1 }).optional(),
+    saturation: num({ min: 0, max: 3 }).optional(),
+    vibrance: num({ min: -1, max: 1 }).optional(),
+    highlights: num({ min: -1, max: 1 }).optional(),
+    shadows: num({ min: -1, max: 1 }).optional(),
+    curves: record(str()).optional(),
+    lut: str().optional(),
+    vignette: num({ min: 0, max: 1 }).optional(),
+    inputColorSpace: oneOf(['auto', 'bt709', 'bt601', 'bt2020', 'hlg', 'pq'] as const).optional(),
+    clear: bool().default(false),
+  }),
+  audio: obj({
+    op: str(),
+    clip: str().optional(),
+    eq: oneOf(['dialogue', 'warm', 'crisp'] as const).optional(),
+    denoise: num({ min: 0, max: 1 }).optional(),
+    deess: num({ min: 0, max: 1 }).optional(),
+    comp: oneOf(['light', 'medium', 'heavy'] as const).optional(),
+    hp: num({ min: 20, max: 500 }).optional(),
+    lp: num({ min: 1000, max: 20000 }).optional(),
+    fadeIn: num({ min: 0, max: 10 }).optional(),
+    fadeOut: num({ min: 0, max: 10 }).optional(),
+    target: oneOf(['reels', 'shorts', 'tiktok', 'youtube', 'podcast', 'broadcast', 'cinema'] as const).optional(),
+    lufs: num({ min: -40, max: 0 }).optional(),
+    tp: num({ min: -9, max: 0 }).optional(),
+    lra: num({ min: 1, max: 20 }).optional(),
+    twoPass: bool().optional(),
+    limiter: num({ min: -9, max: 0 }).optional(),
   }),
 };
 
@@ -123,6 +201,18 @@ const POSITIONAL: Record<string, string[]> = {
   trim: ['clip', 'in', 'out'],
   loudness: ['lufs'],
   fx: ['kind', 'clip'],
+  jcut: ['clip', 'd'],
+  lcut: ['clip', 'd'],
+  ramp: ['clip', 'keys'],
+  freeze: ['at', 'd'],
+  reverse: ['clip', 'on'],
+  punch: ['at', 'to', 'd'],
+  matchcut: ['fromClip', 'toClip'],
+  reframe: ['clip'],
+  stabilize: ['clip'],
+  pip: ['src', 'at', 'd'],
+  color: ['clip'],
+  audio: ['clip'],
 };
 
 function tokenize(s: string): string[] {
@@ -408,8 +498,37 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
         } else if (kind === 'mask') {
           const m: FxMask = { type: 'mask', shape: op.shape as FxMask['shape'], x: op.x as number, y: op.y as number, w: op.w as number, h: op.h as number, feather: op.feather as number, invert: op.invert as boolean };
           if (op.pts !== undefined) m.pts = op.pts as [number, number][];
+          if (op.bezierStart !== undefined) m.bezierStart = op.bezierStart as [number, number];
+          if (op.beziers !== undefined) m.beziers = op.beziers as FxMask['beziers'];
+          if (op.keys !== undefined) m.keys = op.keys as FxMask['keys'];
           if (op.reveal !== undefined) m.reveal = { at: op.at as number, d: op.reveal as number, e: (op.e as Ease | undefined) ?? 'out', from: op.from as RevealFrom };
           eff = validateMask(m);
+        } else if (kind === 'blur') {
+          eff = validateEffect({ type: 'blur', mode: (op.mode as 'gaussian' | 'directional') ?? 'gaussian', sigma: (op.sigma as number) ?? 6, ...(op.angle !== undefined ? { angle: op.angle as number } : {}) });
+        } else if (kind === 'glow') {
+          eff = validateEffect({ type: 'glow', radius: (op.radius as number) ?? 12, intensity: (op.intensity as number) ?? 0.4, ...(op.brightness !== undefined ? { brightness: op.brightness as number } : {}) });
+        } else if (kind === 'shadow') {
+          eff = validateEffect({ type: 'shadow', dx: (op.dx as number) ?? 0, dy: (op.dy as number) ?? 8, blur: (op.blur as number) ?? 16, opacity: (op.opacity as number) ?? 0.45, ...(op.color !== undefined ? { color: op.color as string } : {}) });
+        } else if (kind === 'blend') {
+          eff = validateEffect({ type: 'blend', mode: ((op.mode as BlendMode) ?? 'screen'), ...(op.opacity !== undefined ? { opacity: op.opacity as number } : {}) });
+        } else if (kind === 'chromakey') {
+          eff = validateEffect({ type: 'chromakey', color: (op.color as string) ?? '#00ff00', similarity: (op.similarity as number) ?? 0.14, blend: (op.blend as number) ?? 0.08, ...(op.despill !== undefined ? { despill: op.despill as boolean } : {}) });
+        } else if (kind === 'mblur') {
+          eff = validateEffect({ type: 'mblur', frames: (op.frames as number) ?? 3, ...(op.decay !== undefined ? { decay: op.decay as number } : {}) });
+        } else if (kind === 'persp') {
+          eff = validateEffect({
+            type: 'persp',
+            x0: (op.x0 as number) ?? 0, y0: (op.y0 as number) ?? 0,
+            x1: (op.x1 as number) ?? 1, y1: (op.y1 as number) ?? 0,
+            x2: (op.x2 as number) ?? 0, y2: (op.y2 as number) ?? 1,
+            x3: (op.x3 as number) ?? 1, y3: (op.y3 as number) ?? 1,
+          });
+        } else if (kind === 'chain') {
+          const chainName = (op.chain as string) ?? (op.mode as string);
+          const builder = chainName ? EFFECT_CHAINS[chainName] : undefined;
+          if (!builder) throw new TmepError('E_INPUT', `unknown effect chain "${chainName ?? ''}"`, `chains: ${Object.keys(EFFECT_CHAINS).join(',')}`);
+          for (const ce of builder()) (c.fx ??= []).push(ce);
+          continue;
         } else {
           const clipDur = 'speed' in c ? (c.out - c.in) / c.speed : c.d;
           const at = op.at as number;
@@ -431,8 +550,11 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `zoom ${c.id}@${r2(at)}`;
     }
     case 'transition': {
-      const type = op.type as string;
-      const tr = type === 'none' || (op.d as number) === 0 ? undefined : { type, d: op.d as number };
+      const rawType = op.type as string;
+      const preset = TRANSITION_PRESETS[rawType];
+      const type = preset ? preset.type : rawType;
+      const dVal = preset && op.d === 0.35 ? preset.d : (op.d as number);
+      const tr = type === 'none' || dVal === 0 ? undefined : { type, d: dVal };
       let targets = tl.clips.slice(1);
       if (!op.all) {
         if (op.clip) targets = [findClip(tl, op.clip as string)];
@@ -546,6 +668,243 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     case 'loudness': {
       tl.loudness = op.lufs as number;
       return `loudness ${tl.loudness}`;
+    }
+    case 'jcut': {
+      const c = findClip(tl, op.clip as string);
+      c.jcut = op.d as number;
+      return `jcut ${c.id} ${c.jcut}s`;
+    }
+    case 'lcut': {
+      const c = findClip(tl, op.clip as string);
+      c.lcut = op.d as number;
+      return `lcut ${c.id} ${c.lcut}s`;
+    }
+    case 'ramp': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      if (!targets.length) throw new TmepError('E_RANGE', 'no clips for ramp');
+      let keys: { t: number; speed: number; e?: Ease }[];
+      if (Array.isArray(op.keys)) {
+        keys = op.keys as { t: number; speed: number; e?: Ease }[];
+      } else if (typeof op.keys === 'string') {
+        keys = op.keys.split(';').filter((x) => x.trim()).map((seg) => {
+          const m = /^\s*(-?[\d.]+)\s*:(.*)$/.exec(seg);
+          if (!m) throw new TmepError('E_INPUT', `bad ramp key "${seg}"`, 'keys="0:speed=1;1.5:speed=2,e=io"');
+          const k: { t: number; speed: number; e?: Ease } = { t: Number(m[1]), speed: 1 };
+          for (const kv of m[2]!.split(',').filter((x) => x.trim())) {
+            const [name, val] = kv.split('=').map((x) => x.trim());
+            if (name === 'speed' || name === 's') k.speed = Number(val);
+            else if (name === 'e') k.e = val as Ease;
+          }
+          return k;
+        });
+      } else {
+        throw new TmepError('E_INPUT', 'ramp needs keys', 'keys="0:speed=1;1:speed=2.5;2:speed=1"');
+      }
+      if (keys.length < 2) throw new TmepError('E_INPUT', 'ramp needs at least 2 keys');
+      for (const k of keys) {
+        if (!Number.isFinite(k.t) || k.t < 0 || !Number.isFinite(k.speed) || k.speed < 0.25 || k.speed > 4) {
+          throw new TmepError('E_INPUT', `invalid ramp key ${JSON.stringify(k)} (speed in [0.25, 4])`);
+        }
+      }
+      keys.sort((a, b) => a.t - b.t);
+      for (const c of targets) c.speedRamp = structuredClone(keys);
+      return `ramp ${targets.length === 1 ? targets[0]!.id : `${targets.length} clips`} (${keys.length}k)`;
+    }
+    case 'freeze': {
+      const at = t(op.at).t;
+      const hit = tlToSrc(placed(), at);
+      if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
+      const c = hit.p.clip;
+      const idx = tl.clips.indexOf(c);
+      const splitSrc = Math.max(c.in + 1 / tl.settings.fps, Math.min(c.out - 1 / tl.settings.fps, hit.srcT));
+      const frameDur = 1 / tl.settings.fps;
+      const fClip = newClip(tl, c.src, splitSrc, Math.min(c.out, splitSrc + frameDur), {
+        fit: c.fit, cx: c.cx, cy: c.cy, base: c.base, freeze: op.d as number, mute: true,
+      });
+      if (splitSrc > c.in + 1e-4 && splitSrc < c.out - 1e-4) {
+        const right = newClip(tl, c.src, splitSrc, c.out, {
+          speed: c.speed, fit: c.fit, cx: c.cx, cy: c.cy, base: c.base, push: c.push, vol: c.vol, mute: c.mute,
+          ...(c.fx ? { fx: shiftFx(c.fx, (splitSrc - c.in) / c.speed) } : {}),
+        });
+        c.out = splitSrc;
+        tl.clips.splice(idx + 1, 0, fClip, right);
+      } else {
+        tl.clips.splice(idx + 1, 0, fClip);
+      }
+      created.push(fClip.id);
+      return `freeze ${fClip.id}@${r2(at)} ${op.d}s`;
+    }
+    case 'reverse': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      if (!targets.length) throw new TmepError('E_RANGE', 'no clips to reverse');
+      for (const c of targets) c.reverse = op.on as boolean;
+      return `reverse ${op.on ? 'on' : 'off'} ${targets.length} clips`;
+    }
+    case 'punch': {
+      const at = t(op.at).t;
+      const hit = tlToSrc(placed(), at);
+      if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
+      const c = hit.p.clip;
+      const localT = Math.max(0, (hit.srcT - c.in) / c.speed);
+      const d = op.d as number;
+      const to = op.to as number;
+      const rampIn = Math.min(0.25, d * 0.25);
+      const rampOut = Math.min(0.3, d * 0.25);
+      const keys = [
+        { t: localT, s: 1 },
+        { t: localT + rampIn, s: to, e: 'out' as Ease },
+        { t: Math.max(localT + rampIn + 0.05, localT + d - rampOut), s: to, e: 'linear' as Ease },
+        { t: localT + d, s: 1, e: 'io' as Ease },
+      ];
+      (c.fx ??= []).push({ type: 'kf', keys });
+      return `punch ${c.id}@${r2(at)} to=${to}`;
+    }
+    case 'matchcut': {
+      const a = findClip(tl, op.fromClip as string);
+      const b = findClip(tl, op.toClip as string);
+      const durA = (a.out - a.in) / a.speed;
+      const s = op.scale as number;
+      const d = op.d as number;
+      (a.fx ??= []).push({ type: 'kf', keys: [{ t: Math.max(0, durA - Math.max(0.2, d)), s: 1 }, { t: durA, s, e: 'in' }] });
+      (b.fx ??= []).push({ type: 'kf', keys: [{ t: 0, s }, { t: Math.min(0.4, (b.out - b.in) / b.speed), s: 1, e: 'out' }] });
+      if (d > 0 && tl.clips.indexOf(b) === tl.clips.indexOf(a) + 1) {
+        addTransition(tl, tl.clips.indexOf(b), 'dissolve', d, ctx.transcripts, (id) => ctx.assets[id]?.dur ?? Infinity);
+      }
+      return `matchcut ${a.id}->${b.id}`;
+    }
+    case 'reframe': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      if (!targets.length) throw new TmepError('E_RANGE', 'no clips to reframe');
+      for (const c of targets) {
+        if (op.cx !== undefined) c.cx = op.cx as number;
+        if (op.cy !== undefined) c.cy = op.cy as number;
+        if (op.keys !== undefined) {
+          (c.fx ??= []).push({ type: 'kf', keys: parseKeys(op.keys) });
+        }
+      }
+      return `reframe ${targets.length} clips`;
+    }
+    case 'stabilize': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;
+      if (!targets.length) throw new TmepError('E_RANGE', 'no clips to stabilize');
+      for (const c of targets) {
+        if (op.off) delete c.stabilize;
+        else c.stabilize = { smoothing: op.smoothing as number, shakiness: op.shakiness as number, accuracy: op.accuracy as number };
+      }
+      return `stabilize ${op.off ? 'off' : 'on'} ${targets.length} clips`;
+    }
+    case 'splitscreen': {
+      const srcs = op.srcs as string[];
+      const at = t(op.at).t;
+      const d = op.d as number;
+      const lay = op.layout as '2h' | '2v' | '2x2' | '3v';
+      const gap = op.gap as number;
+      const z = op.z as number;
+      const slots: { x: number; y: number; w: number; h: number }[] =
+        lay === '2h'
+          ? [{ x: 0.25 - gap / 4, y: 0.5, w: 0.5 - gap, h: 1 }, { x: 0.75 + gap / 4, y: 0.5, w: 0.5 - gap, h: 1 }]
+          : lay === '2v'
+            ? [{ x: 0.5, y: 0.25 - gap / 4, w: 1, h: 0.5 - gap }, { x: 0.5, y: 0.75 + gap / 4, w: 1, h: 0.5 - gap }]
+            : lay === '3v'
+              ? [0, 1, 2].map((i) => ({ x: 0.5, y: (i + 0.5) / 3, w: 1, h: 1 / 3 - gap }))
+              : [
+                  { x: 0.25, y: 0.25, w: 0.5 - gap, h: 0.5 - gap },
+                  { x: 0.75, y: 0.25, w: 0.5 - gap, h: 0.5 - gap },
+                  { x: 0.25, y: 0.75, w: 0.5 - gap, h: 0.5 - gap },
+                  { x: 0.75, y: 0.75, w: 0.5 - gap, h: 0.5 - gap },
+                ];
+      const ref = anchorAt(placed(), at);
+      for (let i = 0; i < Math.min(srcs.length, slots.length); i++) {
+        const s = srcs[i]!;
+        const sl = slots[i]!;
+        needAsset(ctx, s, ['video', 'image']);
+        const id = nextId(tl, 'b');
+        tl.broll.push({
+          id, src: s, in: 0, ref, d, fit: 'cover', z,
+          fx: [
+            { type: 'kf', keys: [{ t: 0, s: Math.max(sl.w, sl.h), x: sl.x - 0.5, y: sl.y - 0.5 }] },
+            { type: 'mask', shape: 'rect', x: sl.x, y: sl.y, w: sl.w, h: sl.h, feather: 0, invert: false },
+          ],
+        });
+        created.push(id);
+      }
+      return `splitscreen ${lay} x${Math.min(srcs.length, slots.length)}`;
+    }
+    case 'pip': {
+      const a = needAsset(ctx, op.src as string, ['video', 'image']);
+      const at = t(op.at).t;
+      const inT = op.in as number;
+      const d = a.kind === 'image' ? (op.d as number) : Math.min(op.d as number, a.dur - inT);
+      if (d <= 0) throw new TmepError('E_RANGE', `pip in=${inT} is past end of ${op.src}`);
+      const sc = op.scale as number;
+      const pad = 0.05;
+      const pos = op.pos as 'br' | 'bl' | 'tr' | 'tl';
+      const cx = pos.endsWith('r') ? 1 - pad - sc / 2 : pad + sc / 2;
+      const cy = pos.startsWith('b') ? 1 - pad - sc / 2 : pad + sc / 2;
+      const id = nextId(tl, 'b');
+      tl.broll.push({
+        id, src: op.src as string, in: inT, ref: anchorAt(placed(), at), d, fit: 'cover', z: op.z as number,
+        fx: [
+          { type: 'kf', keys: [{ t: 0, s: sc, x: cx - 0.5, y: cy - 0.5, o: 0 }, { t: 0.25, o: 1, e: 'out' }] },
+          { type: 'mask', shape: 'rect', x: cx, y: cy, w: sc, h: sc, feather: op.feather as number, invert: false },
+        ],
+      });
+      created.push(id);
+      return `pip ${id} ${pos}@${r2(at)}`;
+    }
+    case 'parallax': {
+      const srcs = op.srcs as string[];
+      const at = t(op.at).t;
+      const d = op.d as number;
+      const drift = op.drift as number;
+      const baseZ = op.z as number;
+      const ref = anchorAt(placed(), at);
+      for (let i = 0; i < srcs.length; i++) {
+        needAsset(ctx, srcs[i]!, ['video', 'image']);
+        const depth = (i + 1) / srcs.length;
+        const dx = drift * depth;
+        const id = nextId(tl, 'b');
+        tl.broll.push({
+          id, src: srcs[i]!, in: 0, ref, d, fit: 'cover', z: baseZ + i,
+          fx: [{ type: 'kf', keys: [{ t: 0, s: 1 + dx * 2, x: -dx / 2 }, { t: d, s: 1 + dx * 2, x: dx / 2, e: 'linear' }] }],
+        });
+        created.push(id);
+      }
+      return `parallax x${srcs.length}@${r2(at)}`;
+    }
+    case 'color': {
+      const targets = op.clip ? [findClip(tl, op.clip as string)] : undefined;
+      if (op.clear) {
+        if (targets) for (const c of targets) delete c.color;
+        else delete tl.color;
+        return `color cleared`;
+      }
+      const grade: ColorGrade = {};
+      for (const k of ['exposure', 'contrast', 'temp', 'tint', 'saturation', 'vibrance', 'highlights', 'shadows', 'curves', 'lut', 'vignette', 'inputColorSpace'] as const) {
+        if (op[k] !== undefined) (grade as Record<string, unknown>)[k] = op[k];
+      }
+      if (targets) {
+        for (const c of targets) c.color = { ...(c.color ?? {}), ...grade };
+        return `color ${targets.map((c) => c.id).join(',')}`;
+      }
+      tl.color = { ...(tl.color ?? {}), ...grade };
+      return 'color timeline';
+    }
+    case 'audio': {
+      if (op.clip) {
+        const c = findClip(tl, op.clip as string);
+        c.audio = { ...(c.audio ?? {}) };
+        for (const k of ['eq', 'denoise', 'deess', 'comp', 'hp', 'lp', 'fadeIn', 'fadeOut'] as const) {
+          if (op[k] !== undefined) (c.audio as Record<string, unknown>)[k] = op[k];
+        }
+        return `audio ${c.id}`;
+      }
+      tl.master = { ...(tl.master ?? {}) };
+      for (const k of ['target', 'lufs', 'tp', 'lra', 'twoPass', 'limiter'] as const) {
+        if (op[k] !== undefined) (tl.master as Record<string, unknown>)[k] = op[k];
+      }
+      if (op.lufs !== undefined) tl.loudness = op.lufs as number;
+      return `audio master`;
     }
     default:
       throw new TmepError('E_INPUT', `unhandled op ${String(op.op)}`);

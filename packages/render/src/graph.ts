@@ -8,8 +8,9 @@
  * resume. Audio is built separately, in bounded stages, and muxed in at the end (audio.ts).
  */
 import path from 'node:path';
-import { type Timeline, type Placed, type Clip, type BRoll, type Effect, resolveRef } from '../../core/src/index.ts';
+import { type Timeline, type Placed, type Clip, type BRoll, type Effect, type FxMask, type FxBlend, resolveRef, sampleSpeedRamp } from '../../core/src/index.ts';
 import { compileFx, compileOverlayFx, transformFilter } from './effects.ts';
+import { colorFilterChain } from './color.ts';
 
 export interface MediaRef {
   path: string;
@@ -117,8 +118,32 @@ export interface UnitArgs {
   graph: string;
 }
 
+/** Build piecewise setpts expression for a variable speed ramp. */
+function speedRampPtsExpr(c: Clip): string {
+  const keys = c.speedRamp!;
+  const srcDur = Math.max(0.01, c.out - c.in);
+  const segs = 16;
+  const du = srcDur / segs;
+  let outT = 0;
+  const pts: { srcT: number; outT: number }[] = [{ srcT: 0, outT: 0 }];
+  for (let i = 0; i < segs; i++) {
+    const s = Math.max(0.1, sampleSpeedRamp(keys, (i + 0.5) * du));
+    outT += du / s;
+    pts.push({ srcT: (i + 1) * du, outT });
+  }
+  let expr = `${n3(pts[pts.length - 1]!.outT)}/TB`;
+  for (let i = pts.length - 2; i >= 0; i--) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    const slope = (b.outT - a.outT) / Math.max(1e-6, b.srcT - a.srcT);
+    const segExpr = `(${n3(a.outT)}+(T-${n3(a.srcT)})*${n3(slope)})/TB`;
+    expr = i === 0 ? segExpr : `if(lt(T,${n3(b.srcT)}),${segExpr},${expr})`;
+  }
+  return `setpts='${expr}'`;
+}
+
 /** Build ffmpeg args for one video unit. `assName` is relative to cwd (job dir). */
-export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRef>, enc: EncParams, placed: Placed[], out: string, assName: string | undefined, fontsDir: string | undefined, gfxOverlays: GfxOverlay[] = []): UnitArgs {
+export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRef>, enc: EncParams, placed: Placed[], out: string, assName: string | undefined, fontsDir: string | undefined, gfxOverlays: GfxOverlay[] = [], maskFiles?: Map<FxMask, string>): UnitArgs {
   const fps = tl.settings.fps;
   const { W, H } = outSize(tl, enc.scale);
   const inputs: string[] = [];
@@ -129,18 +154,35 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
   unit.clips.forEach((p, j) => {
     const c = p.clip;
     const m = media[c.src]!;
-    const srcDur = (p.frames / fps) * c.speed;
+    const isFreeze = c.freeze !== undefined && c.freeze > 0;
+    const srcDur = isFreeze ? (2 / fps) : (c.speedRamp?.length ? Math.max(0.1, c.out - c.in) : (p.frames / fps) * c.speed);
     if (m.kind === 'image') inputs.push('-loop', '1', '-framerate', String(fps), '-t', n3(srcDur + 0.5), '-i', m.path);
     else if (m.kind === 'audio') inputs.push('-f', 'lavfi', '-t', n3(srcDur + 0.5), '-i', `color=c=${tl.settings.bg.replace('#', '0x')}:s=${W}x${H}:r=${fps}`);
-    else inputs.push('-ss', n3(c.in), '-t', n3(srcDur + 0.5), '-i', m.path);
+    else inputs.push('-ss', n3(c.in), '-t', n3(isFreeze ? Math.max(0.2, 2 / fps) : srcDur + 0.5), '-i', m.path);
     const chain: string[] = ['setpts=PTS-STARTPTS'];
-    if (c.speed !== 1) chain.push(`setpts=PTS/${n3(c.speed)}`);
-    chain.push(`fps=${fps}`);
+    if (isFreeze) {
+      chain.push(`trim=end_frame=1`, 'loop=loop=-1:size=1', `setpts=N/(${fps}*TB)`);
+    } else {
+      if (c.reverse && m.kind === 'video') {
+        chain.push(`trim=duration=${n3(srcDur)}`, 'reverse', 'setpts=PTS-STARTPTS');
+      }
+      if (c.speedRamp?.length) chain.push(speedRampPtsExpr(c));
+      else if (c.speed !== 1) chain.push(`setpts=PTS/${n3(c.speed)}`);
+      chain.push(`fps=${fps}`);
+    }
+    if (c.stabilize && m.kind === 'video' && !isFreeze) {
+      const rx = Math.min(64, Math.max(16, Math.round(((c.stabilize.shakiness ?? 5) * 4) / 16) * 16));
+      chain.push(`deshake=rx=${rx}:ry=${rx}:edge=clamp`);
+    }
     chain.push(fitChain(c.fit, W, H, c.cx, c.cy, tl.settings.bg, `c${j}`));
     const z = zoomExpr(c, p.frames, fps);
     if (z) chain.push(perspective(z));
-    const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`);
+    const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`, maskFiles);
     if (fx) chain.push(fx);
+    const clipCol = colorFilterChain(c.color);
+    if (clipCol) chain.push(clipCol);
+    const globalCol = colorFilterChain(tl.color);
+    if (globalCol) chain.push(globalCol);
     chain.push('format=yuv420p', 'tpad=stop_mode=clone:stop_duration=1', `trim=end_frame=${p.frames}`, 'setpts=PTS-STARTPTS');
     const body = chain.join(',');
     g.push(`[${k}:v]${body}[v${j}]`);
@@ -151,7 +193,9 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const p = unit.clips[j]!;
     const off = (p.startFrame - unit.startFrame) / fps;
     const d = p.transFrames / fps;
-    g.push(`[${cur}][v${j}]xfade=transition=${p.clip.trans?.type ?? 'fade'}:duration=${n3(d)}:offset=${n3(off)}[x${j}]`);
+    const rawTr = p.clip.trans?.type ?? 'fade';
+    const tr = rawTr === 'luma' ? 'fadegrays' : rawTr;
+    g.push(`[${cur}][v${j}]xfade=transition=${tr}:duration=${n3(d)}:offset=${n3(off)}[x${j}]`);
     cur = `x${j}`;
   }
   // Render in explicit z-order (low to high). Legacy defaults: b-roll 0,
@@ -172,7 +216,7 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const fades: string[] = [];
     if (!b.scene && T >= U0 - 1e-6) fades.push(`fade=t=in:st=0:d=0.12:alpha=1`);
     if (!b.scene && T + b.d <= U1 + 1e-6) fades.push(`fade=t=out:st=${n3(Math.max(0, len - 0.12))}:d=0.12:alpha=1`);
-    const overlayFx = compileOverlayFx(b.fx, W, H, fps, frames, `b${bi}`, s - T);
+    const overlayFx = compileOverlayFx(b.fx, W, H, fps, frames, `b${bi}`, s - T, maskFiles);
     const sw = b.scene && even(W * b.scene.w), sh = b.scene && even(H * b.scene.h);
     const sceneFit = sw && sh ? [`scale=${sw}:${sh}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
       `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black@0`, 'setsar=1'] : undefined;
@@ -192,7 +236,13 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
       `setpts=PTS-STARTPTS+${n3(ls)}/TB`,
     ].join(',');
     g.push(`[${k}:v]${chain}[b${bi}]`);
-    g.push(`[${cur}][b${bi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
+    const blendFx = b.fx?.find((f): f is FxBlend => f.type === 'blend');
+    if (blendFx && blendFx.mode !== 'normal') {
+      const opVal = blendFx.opacity !== undefined ? `:all_opacity=${n3(blendFx.opacity)}` : '';
+      g.push(`[${cur}]format=yuva420p[bg${bi}];[bg${bi}][b${bi}]blend=all_mode=${blendFx.mode}${opVal}:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
+    } else {
+      g.push(`[${cur}][b${bi}]overlay=eof_action=pass:enable='between(t,${n3(ls)},${n3(ls + len)})'[o${bi}]`);
+    }
     cur = `o${bi}`;
     k++;
   };
@@ -222,7 +272,7 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
     const frames = Math.round(len * fps);
     const offset = s - layer.at;
     const fd = fontsDir ? `:fontsdir=${fontsDir}` : '';
-    const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset);
+    const fx = compileOverlayFx(layer.fx, W, H, fps, frames, `g${gi}`, offset, maskFiles);
     const camera = layer.camera && transformFilter(layer.camera, W, H, fps, 'black', offset, true);
     const chain = [
       `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${n3(len + 0.5)}`,

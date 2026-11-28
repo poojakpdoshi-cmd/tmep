@@ -60,6 +60,8 @@ import { compileScenes, diagnoseScenes, sceneRange } from '../../motion/src/scen
 import { ICON_NAMES } from '../../motion/src/icons.ts';
 import { SFX, SFX_KINDS } from '../../render/src/sfx.ts';
 import { renderTimeline, contactSheet, type RenderOptions } from '../../render/src/render.ts';
+import { runInspector } from '../../render/src/inspector.ts';
+import { computeShotMatch } from '../../render/src/color.ts';
 import { startJob, waitJob, cancelJob, jobView, readJob } from '../../render/src/jobs.ts';
 
 export interface Ctx {
@@ -464,17 +466,45 @@ export async function compile(ctx: Ctx, input: Record<string, unknown> & { dryRu
   const p = await openProject(ctx.project, !(input as { dryRun?: boolean })?.dryRun, ctx.projectRoots);
   const hasTl = await exists(path.join(p.dir, 'revs', 'r0001.json')).catch(() => false) ? await p.hasTimeline() : false;
   const base = hasTl ? await p.timeline() : emptyTimeline('9:16');
-  const compiled = compileIntent(input, { ratio: base.settings.ratio, captionPos: base.captions.pos });
+  const assets = await p.assets().catch(() => []);
+  const assetHashes = assets.map((a) => `${a.id}:${a.hash}`);
+  const cacheKey = hashOf({ v: '3.5', input, ratio: base.settings.ratio, captionPos: base.captions.pos, assetHashes });
+  const cacheFile = p.cachePath('workflows', `${cacheKey}.json`);
+  let compiled = await readJsonOr<ReturnType<typeof compileIntent> | undefined>(cacheFile, undefined);
+  const cacheHit = !!compiled;
+  if (!compiled) {
+    compiled = compileIntent(input, { ratio: base.settings.ratio, captionPos: base.captions.pos });
+    if (!(input as { dryRun?: boolean })?.dryRun && (await exists(p.dir))) {
+      await writeJson(cacheFile, compiled, false).catch(() => {});
+    }
+  }
   const rawDry = Boolean((input as { dryRun?: boolean })?.dryRun);
   if (rawDry) {
     const c = await opContext(p, base);
     const { tl } = applyOps(base, compiled.ops, c);
     const transcripts = await transcriptsFor(p, tl.clips.map((clip) => clip.src));
     const diag = diagnoseScenes(tl, timelineWords(tl, transcripts), new Map((await p.assets()).map((a) => [a.id, a])));
-    return { ok: diag.ok ? 1 : 0, dryRun: true, ops: compiled.ops, corrections: compiled.corrections, diagnostics: diag.issues };
+    return { ok: diag.ok ? 1 : 0, dryRun: true, cacheHit, ops: compiled.ops, corrections: compiled.corrections, diagnostics: diag.issues };
   }
-  const res = await edit(ctx, { ops: compiled.ops, note: `compile ${compiled.spec.layers.map((l) => l.kind).join('+')}`, expectedRev: (input as { expectedRev?: number })?.expectedRev });
-  return { ...res, ops: compiled.ops, corrections: compiled.corrections };
+  const noteKind = compiled.spec ? compiled.spec.layers.map((l) => l.kind).join('+') : String(input.kind ?? 'workflow');
+  const res = await edit(ctx, { ops: compiled.ops, note: `compile ${noteKind}`, expectedRev: (input as { expectedRev?: number })?.expectedRev });
+  return { ...res, cacheHit, ops: compiled.ops, corrections: compiled.corrections };
+}
+
+/** Deterministic shot-matching assistance between a reference clip and a target clip. */
+export async function colormatch(ctx: Ctx, inp: { targetClip: string; refClip: string; apply?: boolean }): Promise<Record<string, unknown>> {
+  const p = await openProject(ctx.project, false, ctx.projectRoots);
+  const tl = await p.timeline();
+  const target = tl.clips.find((c) => c.id === inp.targetClip);
+  const ref = tl.clips.find((c) => c.id === inp.refClip);
+  if (!target || !ref) throw new TmepError('E_NOT_FOUND', `clip not found: ${!target ? inp.targetClip : inp.refClip}`);
+  const [ta, ra] = await Promise.all([p.asset(target.src), p.asset(ref.src)]);
+  const { grade, refStats, targetStats } = await computeShotMatch(ra.path, ta.path);
+  if (inp.apply !== false) {
+    const res = await edit(ctx, { ops: [{ op: 'color', clip: target.id, ...grade }], note: `colormatch ${target.id}<-${ref.id}` });
+    return { ...res, grade, refStats, targetStats };
+  }
+  return { ok: 1, grade, refStats, targetStats };
 }
 
 export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo?: number; checkout?: number; note?: string; ratio?: Ratio; expectedRev?: number; dryRun?: boolean }): Promise<Record<string, unknown>> {
@@ -527,7 +557,7 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
 }
 
 // ---------------------------------------------------------------- inspect
-export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown }): Promise<Record<string, unknown>> {
+export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number }): Promise<Record<string, unknown>> {
   if (inp.what === 'scenes') {
     const p = await openProject(ctx.project, false);
     const tl = await p.timeline(inp.rev);
@@ -666,8 +696,15 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
       for (const f of files) jobs.push(jobView(await readJob(p, f.slice(0, -5)), 'minimal'));
       return { jobs };
     }
+    case 'qa': {
+      const tl = await p.timeline(inp.rev);
+      const words = timelineWords(tl, await transcriptsFor(p, tl.clips.map((c) => c.src)));
+      const renderedPath = inp.file ? await resolveSafePath(inp.file, p.root, ctx.outRoots ?? [p.root], 'qa file') : undefined;
+      const report = await runInspector(tl, words, { renderedPath, targetLufs: inp.targetLufs });
+      return { ...report, ok: report.ok ? 1 : 0 };
+    }
     default:
-      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs');
+      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|qa');
   }
 }
 
