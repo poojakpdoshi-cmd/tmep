@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { TmepError } from '../../core/src/index.ts';
 import type { Box, FootageAnalysis, Shot } from './footage.ts';
 import { modelDir, modelStatus, semanticRuntime } from './models.ts';
+import { classifyFrames, sceneModel, type SceneClass } from './scenes.ts';
 
 const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'semantic.py');
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -31,6 +32,9 @@ export interface SemFrame {
   poses?: { box: [number, number, number, number]; kp: Kp }[];
   hands?: [string, number, string, number, number, number, number][];
   emb?: number[];
+  /** Phase 6 scene features: MobileNetV3-large embedding and top ImageNet classes [index, p]. */
+  embL?: number[];
+  cls?: [number, number][];
   ms?: number;
 }
 
@@ -66,13 +70,14 @@ export interface SemanticRecord {
     events: EventCandidate[];
   };
 }
-export type SceneType = 'talking-head' | 'multi-person conversation' | 'screen/slides' | 'crowd/field' | 'object close-up' | 'action' | 'empty/landscape' | 'other';
+/** Phase 6 taxonomy (docs/phase-6/PROGRESS.md); `other` when neither the classifier nor a rule applies. */
+export type SceneType = SceneClass | 'other';
 export interface EventCandidate { id: string; t: number; t0: number; t1: number; score: number; confidence: number; signals: Record<string, number>; evidence: string[]; note: string }
 
 /** Run the worker. Rejects with E_CANCELLED on abort; worker failure surfaces its stderr tail. */
-export async function runWorker(python: string, env: NodeJS.ProcessEnv, ffmpeg: string, file: string, o: { fps: number; w: number; h: number; maxSeconds: number; tasks: string[]; signal?: AbortSignal }): Promise<{ frames: SemFrame[]; loadMs: number; maxRssMB?: number }> {
+export async function runWorker(python: string, env: NodeJS.ProcessEnv, ffmpeg: string, file: string, o: { fps: number; w: number; h: number; maxSeconds: number; tasks: string[]; signal?: AbortSignal; start?: number }): Promise<{ frames: SemFrame[]; loadMs: number; maxRssMB?: number }> {
   return new Promise((resolve, reject) => {
-    const p = spawn(python, [WORKER, modelDir(), ffmpeg, file, String(o.fps), String(o.w), String(o.h), String(o.maxSeconds), o.tasks.join(',')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    const p = spawn(python, [WORKER, modelDir(), ffmpeg, file, String(o.fps), String(o.w), String(o.h), String(o.maxSeconds), o.tasks.join(','), String(o.start ?? 0)], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
     const frames: SemFrame[] = [];
     let loadMs = 0, buf = '', err = '', done = false, maxRssMB: number | undefined;
     const abort = () => p.kill('SIGKILL');
@@ -256,6 +261,9 @@ export function sceneTypes(a: FootageAnalysis, frames: SemFrame[]): SemanticReco
   return a.observed.shots.map((s) => {
     const fr = frames.filter((f) => f.t >= s.t0 && f.t < s.t1);
     if (!fr.length) return { shot: s.id, label: 'other' as SceneType, confidence: 0, evidence: ['no semantic samples in this shot'] };
+    // Phase 6: the trained classifier when its features were computed; the Phase 5 rules otherwise.
+    const c = classifyFrames(fr);
+    if (c) return { shot: s.id, label: c.label, confidence: c.confidence, evidence: [`scene classifier over ${c.frames} frames (runner-up: ${c.runnerUp})`] };
     const share = (p: (f: SemFrame) => boolean) => fr.filter(p).length / fr.length;
     const persons = (f: SemFrame) => (f.objects ?? []).filter((o) => o[0] === 'person');
     const bigFaces = (f: SemFrame, min: number) => (f.faces ?? []).filter((x) => x[3] * x[4] >= min).length;
@@ -265,13 +273,13 @@ export function sceneTypes(a: FootageAnalysis, frames: SemFrame[]): SemanticReco
     // Rules are checked in order of specificity: people and faces first, motion last, so a handheld
     // talking head is not called action.
     const ordered: [SceneType, number, string][] = [
-      ['multi-person conversation', s.motion < 6 ? share((f) => bigFaces(f, 0.006) >= 2 || (big(f) >= 2 && big(f) <= 4)) : 0, 'two to four large people or two prominent faces, low motion'],
+      ['group', s.motion < 6 ? share((f) => bigFaces(f, 0.006) >= 2 || (big(f) >= 2 && big(f) <= 4)) : 0, 'two to four large people or two prominent faces, low motion'],
       ['talking-head', share((f) => bigFaces(f, 0.012) === 1 && persons(f).length <= 2), 'one prominent face, at most two people'],
-      ['crowd/field', share((f) => persons(f).length >= 4 && median(persons(f).map((p) => p[4] * p[5])) < 0.05), 'four or more small people'],
-      ['object close-up', share((f) => (f.objects ?? []).some((o) => o[0] !== 'person' && o[4] * o[5] >= 0.12) && !(f.faces ?? []).length), 'a large non-person object, no face'],
-      ['screen/slides', text.length && words >= 4 ? share((f) => !persons(f).length) * Math.min(1, words / 8) : 0, `${Math.round(words)} OCR words per sample, no people`],
-      ['action', s.motion >= 6 || (s.motion >= 2 * medMotion && s.motion >= 3) ? share((f) => persons(f).length >= 1) : 0, `motion ${s.motion} (clip median ${r3(medMotion)}) with people`],
-      ['empty/landscape', share((f) => !(f.objects ?? []).length && !(f.faces ?? []).length), 'no detections'],
+      ['sports', share((f) => persons(f).length >= 4 && median(persons(f).map((p) => p[4] * p[5])) < 0.05), 'four or more small people'],
+      ['close-up', share((f) => (f.objects ?? []).some((o) => o[0] !== 'person' && o[4] * o[5] >= 0.12) && !(f.faces ?? []).length), 'a large non-person object, no face'],
+      ['screen', text.length && words >= 4 ? share((f) => !persons(f).length) * Math.min(1, words / 8) : 0, `${Math.round(words)} OCR words per sample, no people`],
+      ['sports', s.motion >= 6 || (s.motion >= 2 * medMotion && s.motion >= 3) ? share((f) => persons(f).length >= 1) : 0, `motion ${s.motion} (clip median ${r3(medMotion)}) with people`],
+      ['scenery', share((f) => !(f.objects ?? []).length && !(f.faces ?? []).length), 'no detections'],
     ];
     const first = ordered.find((c) => c[1] >= 0.5);
     const [label, conf, why] = first ?? [...ordered].sort((x, y) => y[1] - x[1])[0]!;
@@ -399,9 +407,12 @@ export async function semanticAvailability(tasks: string[]): Promise<{ ok: boole
 }
 
 export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts: SemanticOptions = {}): Promise<{ record?: SemanticRecord; reason?: string; ms: number; loadMs: number; perFrameMs: number; maxRssMB?: number }> {
-  const tasks = ['objects', 'faces', 'pose', 'embed', ...(opts.gestures ? ['gestures'] : [])];
+  const base = ['objects', 'faces', 'pose', 'embed', ...(opts.gestures ? ['gestures'] : [])];
   const t0 = Date.now();
-  const av = await semanticAvailability(tasks);
+  const av = await semanticAvailability(base);
+  // Scene features need two more models; without them scene types fall back to detection rules.
+  const sceneOk = !!sceneModel() && (await modelStatus(['sceneEmbed', 'sceneClasses'])).models.every((m) => m.verified);
+  const tasks = [...base, ...(sceneOk ? ['scene'] : [])];
   if (!av.ok) return { reason: av.reason, ms: Date.now() - t0, loadMs: 0, perFrameMs: 0 };
   const seconds = a.asset.analyzedSeconds;
   const fps = opts.fps ?? semanticFps(seconds);

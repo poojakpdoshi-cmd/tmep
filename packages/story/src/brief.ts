@@ -17,6 +17,8 @@ export const BRIEF_TASKS = ['informative', 'sports', 'cinematic', 'product', 'po
 export type BriefTask = (typeof BRIEF_TASKS)[number];
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
+/** Measured on an untouched real-footage test set (docs/phase-6/INTELLIGENCE.md); kept in sync by bench/phase6/scene-eval.ts. */
+export const SCENE_NOTE = 'scene types are hints: 0.74 accurate on 149 frames of unseen real clips (group and close-up below 0.15 recall) — verify before relying on them';
 const span = (a: number, b: number): [number, number] => [r1(a), r1(b)];
 
 export function editingBrief(a: FootageAnalysis, task: BriefTask = 'generic', words: Word[] = [], max = 6): Record<string, unknown> {
@@ -47,7 +49,7 @@ export function editingBrief(a: FootageAnalysis, task: BriefTask = 'generic', wo
     inferred: {
       scenes: inf.scenes.slice(0, max).map((s) => ({ id: s.id, at: span(s.t0, s.t1), shots: s.shots.length })),
       ...(inf.presenter && { presenter: { x: inf.presenter.x, y: inf.presenter.y, w: inf.presenter.w, h: inf.presenter.h, conf: inf.presenter.confidence } }),
-      ...(sceneRuns.length && { sceneTypes: sceneRuns.slice(0, max * 2), sceneTypesNote: 'rule-based hints from detections; agreed with labels on 9 of 23 held-out real UGC spans — verify before relying on them' }),
+      ...(sceneRuns.length && { sceneTypes: sceneRuns.slice(0, max * 2), sceneTypesNote: SCENE_NOTE }),
       ...(inf.subjects && { subjects: { presenter: inf.subjects.presenter, primary: inf.subjects.primary, moving: inf.subjects.moving.slice(0, max) } }),
     },
     ...(gaps.length && { unavailable: gaps }),
@@ -110,13 +112,13 @@ export function editingBrief(a: FootageAnalysis, task: BriefTask = 'generic', wo
     return {
       ...base, steadyShots: steady, graphicRegions: regions, ...(text.length && { visibleText: text }),
       ...(o.tracks && { objects: tracksBrief((t) => t.label !== 'person') }),
-      ...(inf.sceneTypes && { closeUps: shotsOf('object close-up'), screens: shotsOf('screen/slides') }),
+      ...(inf.sceneTypes && { closeUps: shotsOf('close-up'), screens: shotsOf('screen') }),
       note: 'steady shots suit callouts and ui_demo presets; product demonstrations must come from real recordings of the product (request them as assets) — never simulate one',
     };
   }
   if (task === 'podcast') {
     const speech = o.speech ?? [];
-    const singles = shotsOf('talking-head'), groups = shotsOf('multi-person conversation');
+    const singles = shotsOf('talking-head'), groups = shotsOf('group');
     const longSingles = singles.filter((s) => s.at[1] - s.at[0] >= 12);
     return {
       ...base,
@@ -134,7 +136,7 @@ export function editingBrief(a: FootageAnalysis, task: BriefTask = 'generic', wo
     return {
       ...base,
       topic: kw.map((k) => k.k),
-      ...(inf.sceneTypes && { boardOrScreenShots: shotsOf('screen/slides').slice(0, max), presenterShots: shotsOf('talking-head').slice(0, max) }),
+      ...(inf.sceneTypes && { boardOrScreenShots: shotsOf('screen').slice(0, max), presenterShots: shotsOf('talking-head').slice(0, max) }),
       ...(o.textTracks?.length && { onScreenText: o.textTracks.filter((t) => t.text.length >= 3).slice(0, max * 2).map((t) => ({ text: t.text, at: span(t.t0, t.t1) })) }),
       ...(inf.alignment?.length && { spokenAndShown: inf.alignment.slice(0, max).map((x) => ({ word: x.word, at: x.t, on: x.target, dt: x.dt })) }),
       ...(o.gestures?.length && { gestures: o.gestures.slice(0, max).map((g) => ({ at: r1(g.t), label: g.label })) }),

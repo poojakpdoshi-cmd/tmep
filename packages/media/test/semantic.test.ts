@@ -114,7 +114,7 @@ test('scene rules: talking head, screen with text, empty frames', () => {
   const frames: SemFrame[] = [];
   for (let t = 0; t < 12; t += 0.5) frames.push(t < 4 ? person(t, 0.4) : { t, objects: [], faces: [] });
   const a = { observed: { shots, text: [{ t: 5, text: 'Quarterly revenue grew twelve percent year over year', conf: 0.9 }, { t: 6, text: 'Three drivers of growth this quarter', conf: 0.9 }] } } as never;
-  assert.deepEqual(sceneTypes(a, frames).map((s) => s.label), ['talking-head', 'screen/slides', 'empty/landscape']);
+  assert.deepEqual(sceneTypes(a, frames).map((s) => s.label), ['talking-head', 'screen', 'scenery'], 'without scene features the detection rules apply (Phase 6 labels)');
 });
 
 test('model manager plans downloads without fetching anything', async () => {

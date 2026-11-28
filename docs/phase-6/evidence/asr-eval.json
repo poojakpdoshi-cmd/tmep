@@ -1,0 +1,32 @@
+[
+ {
+  "werDialogueRegions": 0.527,
+  "file": "sherpa-onnx-nemo-ctc-en-conformer-small.full.json",
+  "engine": "ctc",
+  "timing": "token",
+  "refWords": 311,
+  "hypWords": 306,
+  "wer": 0.611,
+  "correctWords": 155,
+  "timingAgreement": 0.974,
+  "audioSeconds": 734.15,
+  "ms": 10392,
+  "rtf": 0.014,
+  "maxRssMB": 301.4
+ },
+ {
+  "werDialogueRegions": 0.527,
+  "file": "sherpa-onnx-whisper-tiny.en.full.json",
+  "engine": "whisper",
+  "timing": "segment",
+  "refWords": 311,
+  "hypWords": 355,
+  "wer": 0.701,
+  "correctWords": 171,
+  "timingAgreement": 0.836,
+  "audioSeconds": 734.15,
+  "ms": 27588,
+  "rtf": 0.038,
+  "maxRssMB": 520.5
+ }
+]

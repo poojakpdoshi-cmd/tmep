@@ -48,7 +48,7 @@ import {
 import { probe, detectSilence, extractSpeechWav, ffmpegInfo } from '../../media/src/ffmpeg.ts';
 import { analyzeReferenceReel, type ReferenceOptions, type ReferencePacing } from '../../media/src/reference.ts';
 import { type Transcript, makeTranscript, parseSubtitles, parseTranscriptJson, transcriptText } from '../../speech/src/transcript.ts';
-import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus } from '../../speech/src/engines.ts';
+import { transcribeWhisperCpp, transcribeFasterWhisper, whisperCppBatch, fasterWhisperBatch, findWhisperCpp, resolveGgmlModel, hasFasterWhisper, engineStatus, hasSherpa, transcribeSherpa, sherpaModel } from '../../speech/src/engines.ts';
 import { sentences, speechStats, keywords, searchSentences } from '../../speech/src/analyze.ts';
 import { planTimeline } from '../../story/src/planner.ts';
 import { compileIntent } from '../../story/src/compiler.ts';
@@ -174,7 +174,9 @@ export async function transcriptsFor(p: Project, ids: Iterable<string>): Promise
 interface SpeechOptions { engine?: string; lang?: string; model?: string; prompt?: string; force?: boolean; signal?: AbortSignal }
 
 function transcriptKey(a: Asset, engine: string, inp: SpeechOptions, fileHash?: string): string {
-  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model: inp.model ?? null, prompt: inp.prompt ?? null, f: fileHash ?? null });
+  // sherpa-onnx models come from an environment directory: the directory is part of the key.
+  const model = inp.model ?? (engine === 'sherpa-onnx' ? sherpaModel() ?? null : null);
+  return hashOf({ a: a.hash, engine, lang: inp.lang ?? 'auto', model, prompt: inp.prompt ?? null, f: fileHash ?? null });
 }
 
 async function speechWav(p: Project, a: Asset, signal?: AbortSignal): Promise<string> {
@@ -213,6 +215,7 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
     if (inp.file) engine = 'import';
     else if ((await findWhisperCpp()) && (await resolveGgmlModel(inp.model))) engine = 'whisper.cpp';
     else if (await hasFasterWhisper()) engine = 'faster-whisper';
+    else if (await hasSherpa({ model: inp.model })) engine = 'sherpa-onnx';
     else throw new TmepError('E_ENGINE_MISSING', 'no local speech engine installed', 'install whisper.cpp (+ ggml model) or faster-whisper, or pass file:"subs.srt|.vtt|.json" to import a transcript; see `tmep doctor`');
   }
   const envRoots = parseAllowedRoots();
@@ -235,7 +238,8 @@ export async function transcribe(ctx: Ctx, inp: { asset: string; engine?: string
       const wav = await speechWav(p, a, inp.signal);
       if (engine === 'whisper.cpp') tr = await transcribeWhisperCpp(wav, p.workPath(`wcpp-${key}`), { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
       else if (engine === 'faster-whisper') tr = await transcribeFasterWhisper(wav, { lang: inp.lang, model: inp.model, prompt: inp.prompt, signal: inp.signal });
-      else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, import');
+      else if (engine === 'sherpa-onnx') tr = await transcribeSherpa(wav, { lang: inp.lang, model: inp.model, signal: inp.signal });
+      else throw new TmepError('E_INPUT', `unknown engine "${engine}"`, 'engines: auto, whisper.cpp, faster-whisper, sherpa-onnx, import');
     }
     validateTranscript(tr, a);
     await writeJson(cacheFile, tr, false);

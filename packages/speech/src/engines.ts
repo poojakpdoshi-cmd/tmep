@@ -4,6 +4,8 @@
  *  whisper.cpp   - single native binary + GGML model file. No Python. Prebuilt Windows
  *                  binaries exist. Default recommendation for minimal install friction.
  *  faster-whisper - Python + CTranslate2. Best throughput on NVIDIA GPUs (CUDA 12/cuDNN 9).
+ *  sherpa-onnx   - Python + sherpa-onnx with a local model directory (NeMo CTC / transducer give word
+ *                  timestamps; Whisper models give segment-spread timings). $FRAME_SHERPA_MODEL.
  *  import        - bring your own transcript (SRT/VTT/JSON from any tool).
  *
  * Engine binaries/models are configured with env vars:
@@ -175,12 +177,30 @@ export async function fasterWhisperBatch(wavs: string[], workDir: string, o: Eng
   }));
 }
 
+const SHERPA_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'py', 'sherpa_asr.py');
+const sherpaEnv = () => { const extra = process.env.FRAME_PYTHONPATH ?? process.env.TMEP_PYTHONPATH; return extra ? { ...process.env, PYTHONPATH: [extra, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } : process.env; };
+export const sherpaModel = (o: EngineOptions = {}) => o.model && /[\\/]/.test(o.model) ? o.model : (process.env.FRAME_SHERPA_MODEL ?? process.env.TMEP_SHERPA_MODEL);
+export async function hasSherpa(o: EngineOptions = {}): Promise<boolean> {
+  const dir = sherpaModel(o); const py = await findPython();
+  if (!dir || !py || !(await exists(dir))) return false;
+  try { return (await run(py, ['-c', 'import sherpa_onnx'], { timeoutMs: 30000, env: sherpaEnv() })).code === 0; } catch { return false; }
+}
+export async function transcribeSherpa(wav: string, o: EngineOptions = {}): Promise<Transcript> {
+  const py = await findPython(); const dir = sherpaModel(o);
+  if (!py || !dir || !(await hasSherpa(o))) throw new TmepError('E_ENGINE_MISSING', 'sherpa-onnx engine not configured', 'pip install sherpa-onnx and set FRAME_SHERPA_MODEL to a model directory (e.g. sherpa-onnx-nemo-ctc-en-conformer-small from the sherpa-onnx GitHub releases)');
+  const res = await run(py, [SHERPA_SCRIPT, wav, dir], { signal: o.signal, maxBuffer: 64 * 1024 * 1024, env: sherpaEnv() });
+  if (res.code !== 0) throw new TmepError('E_ENGINE_FAILED', 'sherpa-onnx failed', undefined, res.stderr.slice(-2000));
+  const j = JSON.parse(res.stdout) as { words: { w: string; s: number; e: number }[]; engine: string; timing: string };
+  return makeTranscript('sherpa-onnx', o.lang && o.lang !== 'auto' ? o.lang : 'en', j.words, { model: `${path.basename(dir)} (${j.engine})`, ...(j.timing === 'segment' && { approx: true }) });
+}
+
 export async function engineStatus(): Promise<Record<string, unknown>> {
   const wcpp = await findWhisperCpp();
   const model = wcpp ? await resolveGgmlModel() : undefined;
   return {
     'whisper.cpp': wcpp ? (model ? 'ready' : 'binary found, model missing') : 'not installed',
     'faster-whisper': (await hasFasterWhisper()) ? 'ready' : 'not installed',
+    'sherpa-onnx': (await hasSherpa()) ? 'ready' : sherpaModel() ? 'model set, sherpa_onnx not importable' : 'not configured (FRAME_SHERPA_MODEL)',
     import: 'ready',
   };
 }

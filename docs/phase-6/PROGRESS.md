@@ -31,6 +31,9 @@ committed **before** any classifier is run on them. Train split: the next 2 clip
 | Stage | Status |
 |---|---|
 | 6.0 closure + intelligence (scene classifier, dynamic reframe, camera motion, presenter, screen recognition, semantic retrieval, licence audit, speech eval) | in progress |
+| ↳ speech eval (Tears of Steel vs subtitles) | done: WER 0.53 in dialogue regions for both NeMo-CTC-small and Whisper-tiny; CTC timing agreement 0.97 (`evidence/asr-eval.json`); `sherpa-onnx` engine added |
+| ↳ scene classifier | done: **0.738** on the untouched test set (149 frames; target 0.85 missed); CV on train 0.64 (`evidence/scene-eval.json`). First test run read 0.081 because of a NaN bug (zero sd in stored model); fixed without changing the model, then re-run once |
+| ↳ worker frame timing | fixed: fps filter kept the last frame of each slot (2 fps frames were up to 0.25 s late); now exact `select` sampling |
 | 6.1 production orchestrator | pending |
 | 6.2 director | pending |
 | 6.3 MCP/CLI production interface | pending |

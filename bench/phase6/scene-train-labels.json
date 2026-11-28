@@ -1,0 +1,784 @@
+{
+ "schema": "frame.labels/1",
+ "task": "scene classification (TRAIN)",
+ "times": [
+  2.5,
+  7.5,
+  12.5,
+  17.5
+ ],
+ "note": "Training labels. CoverSong_360P-59d1 excluded: same performer and setting as test clip CoverSong_360P-0aa2. Extended with 2 more clips per category (seed 6006, positions 5-6) after the first CV round showed too few group/animation examples.",
+ "annotator": "single annotator (agent)",
+ "clips": [
+  {
+   "id": "Animation_360P-69e0",
+   "file": "original_videos_h264/Animation_360P-69e0_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "Animation_360P-5712",
+   "file": "original_videos_h264/Animation_360P-5712_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-5d20",
+   "file": "original_videos_h264/CoverSong_360P-5d20_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "Gaming_360P-73c7",
+   "file": "original_videos_h264/Gaming_360P-73c7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-7acb",
+   "file": "original_videos_h264/Gaming_360P-7acb_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-55e9",
+   "file": "original_videos_h264/HowTo_360P-55e9_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "close-up",
+    "close-up"
+   ]
+  },
+  {
+   "id": "HowTo_360P-6a0e",
+   "file": "original_videos_h264/HowTo_360P-6a0e_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-4bb4",
+   "file": "original_videos_h264/Lecture_360P-4bb4_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "screen",
+    "screen",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Lecture_360P-30eb",
+   "file": "original_videos_h264/Lecture_360P-30eb_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-5281",
+   "file": "original_videos_h264/LiveMusic_360P-5281_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-121f",
+   "file": "original_videos_h264/LiveMusic_360P-121f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LyricVideo_360P-3afc",
+   "file": "original_videos_h264/LyricVideo_360P-3afc_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "LyricVideo_360P-5868",
+   "file": "original_videos_h264/LyricVideo_360P-5868_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-5699",
+   "file": "original_videos_h264/MusicVideo_360P-5699_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "performance",
+    "performance",
+    "screen"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-5f8d",
+   "file": "original_videos_h264/MusicVideo_360P-5f8d_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-5bcc",
+   "file": "original_videos_h264/NewsClip_360P-5bcc_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-7a96",
+   "file": "original_videos_h264/NewsClip_360P-7a96_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "scenery",
+    "group"
+   ]
+  },
+  {
+   "id": "Sports_360P-61f6",
+   "file": "original_videos_h264/Sports_360P-61f6_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-32d3",
+   "file": "original_videos_h264/Sports_360P-32d3_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    null,
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-74dd",
+   "file": "original_videos_h264/TelevisionClip_360P-74dd_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "group",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-3b9a",
+   "file": "original_videos_h264/TelevisionClip_360P-3b9a_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-3936",
+   "file": "original_videos_h264/VerticalVideo_360P-3936_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-634f",
+   "file": "original_videos_h264/VerticalVideo_360P-634f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Vlog_360P-4795",
+   "file": "original_videos_h264/Vlog_360P-4795_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "scenery",
+    null,
+    null
+   ]
+  },
+  {
+   "id": "Gaming_360P-0b98",
+   "file": "original_videos_h264/Gaming_360P-0b98_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-041c",
+   "file": "original_videos_h264/HowTo_360P-041c_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "HowTo_360P-0562",
+   "file": "original_videos_h264/HowTo_360P-0562_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "close-up",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "Lecture_360P-03bc",
+   "file": "original_videos_h264/Lecture_360P-03bc_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-051a",
+   "file": "original_videos_h264/Lecture_360P-051a_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-0376",
+   "file": "original_videos_h264/NewsClip_360P-0376_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-0ff8",
+   "file": "original_videos_h264/NewsClip_360P-0ff8_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "Sports_360P-02c3",
+   "file": "original_videos_h264/Sports_360P-02c3_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-0c66",
+   "file": "original_videos_h264/Sports_360P-0c66_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-11b7",
+   "file": "original_videos_h264/Sports_360P-11b7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-1803",
+   "file": "original_videos_h264/Sports_360P-1803_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-0951",
+   "file": "original_videos_h264/TelevisionClip_360P-0951_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "talking-head",
+    "group"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-0d29",
+   "file": "original_videos_h264/VerticalVideo_360P-0d29_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "id": "Vlog_360P-1e5b",
+   "file": "original_videos_h264/Vlog_360P-1e5b_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "group",
+    "group"
+   ]
+  },
+  {
+   "id": "Vlog_360P-22a0",
+   "file": "original_videos_h264/Vlog_360P-22a0_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-187a",
+   "file": "original_videos_h264/Gaming_360P-187a_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-2330",
+   "file": "original_videos_h264/Gaming_360P-2330_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-3794",
+   "file": "original_videos_h264/Gaming_360P-3794_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-06be",
+   "file": "original_videos_h264/HowTo_360P-06be_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "close-up",
+    "close-up"
+   ]
+  },
+  {
+   "id": "HowTo_360P-09f8",
+   "file": "original_videos_h264/HowTo_360P-09f8_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-127f",
+   "file": "original_videos_h264/HowTo_360P-127f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "close-up",
+    "close-up",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "Lecture_360P-114f",
+   "file": "original_videos_h264/Lecture_360P-114f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    null,
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-20c3",
+   "file": "original_videos_h264/Lecture_360P-20c3_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-2276",
+   "file": "original_videos_h264/Lecture_360P-2276_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "scenery"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-1093",
+   "file": "original_videos_h264/NewsClip_360P-1093_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "talking-head",
+    "scenery",
+    "group"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-1b1c",
+   "file": "original_videos_h264/NewsClip_360P-1b1c_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-1e1c",
+   "file": "original_videos_h264/NewsClip_360P-1e1c_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Sports_360P-1d5c",
+   "file": "original_videos_h264/Sports_360P-1d5c_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Sports_360P-2725",
+   "file": "original_videos_h264/Sports_360P-2725_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-27b0",
+   "file": "original_videos_h264/Sports_360P-27b0_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  },
+  {
+   "id": "Vlog_360P-2973",
+   "file": "original_videos_h264/Vlog_360P-2973_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "Vlog_360P-2e9d",
+   "file": "original_videos_h264/Vlog_360P-2e9d_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "group",
+    "group",
+    "group",
+    "group"
+   ]
+  },
+  {
+   "id": "Vlog_360P-433e",
+   "file": "original_videos_h264/Vlog_360P-433e_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    null
+   ]
+  },
+  {
+   "id": "Animation_360P-4edc",
+   "file": "original_videos_h264/Animation_360P-4edc_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "Animation_360P-3e40",
+   "file": "original_videos_h264/Animation_360P-3e40_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-3218",
+   "file": "original_videos_h264/CoverSong_360P-3218_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-13d2",
+   "file": "original_videos_h264/CoverSong_360P-13d2_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "Gaming_360P-7975",
+   "file": "original_videos_h264/Gaming_360P-7975_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-5e0f",
+   "file": "original_videos_h264/Gaming_360P-5e0f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-1dba",
+   "file": "original_videos_h264/HowTo_360P-1dba_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "close-up",
+    "close-up"
+   ]
+  },
+  {
+   "id": "HowTo_360P-2a3b",
+   "file": "original_videos_h264/HowTo_360P-2a3b_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-7f7e",
+   "file": "original_videos_h264/Lecture_360P-7f7e_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Lecture_360P-6d29",
+   "file": "original_videos_h264/Lecture_360P-6d29_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "scenery"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-22c5",
+   "file": "original_videos_h264/LiveMusic_360P-22c5_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-2b0f",
+   "file": "original_videos_h264/LiveMusic_360P-2b0f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-5358",
+   "file": "original_videos_h264/MusicVideo_360P-5358_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-462f",
+   "file": "original_videos_h264/MusicVideo_360P-462f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-67ce",
+   "file": "original_videos_h264/NewsClip_360P-67ce_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "scenery",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-2c91",
+   "file": "original_videos_h264/NewsClip_360P-2c91_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Sports_360P-2ace",
+   "file": "original_videos_h264/Sports_360P-2ace_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "sports",
+    "scenery",
+    "sports"
+   ]
+  },
+  {
+   "id": "Sports_360P-4ad7",
+   "file": "original_videos_h264/Sports_360P-4ad7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "scenery"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-6490",
+   "file": "original_videos_h264/VerticalVideo_360P-6490_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "close-up",
+    "close-up",
+    "scenery"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-54f7",
+   "file": "original_videos_h264/VerticalVideo_360P-54f7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    null
+   ]
+  }
+ ]
+}
