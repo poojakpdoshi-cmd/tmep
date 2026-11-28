@@ -14,7 +14,8 @@
  */
 import { TmepError } from './errors.ts';
 
-export const EASES = ['linear', 'in', 'out', 'io', 'back', 'spring', 'hold'] as const;
+// Phase 4A adds professional curves; every curve has identical JS (ease) and FFmpeg (easeExpr) forms.
+export const EASES = ['linear', 'in', 'out', 'io', 'back', 'spring', 'hold', 'expo', 'expoio', 'circ', 'smooth', 'elastic', 'bounce', 'snap'] as const;
 export type Ease = (typeof EASES)[number];
 export const KEY_PROPS = ['s', 'x', 'y', 'r', 'o'] as const;
 export type KeyProp = (typeof KEY_PROPS)[number];
@@ -195,6 +196,25 @@ export function ease(e: Ease, p: number): number {
       return p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-6 * p) * Math.cos(p * Math.PI * 2.5);
     case 'hold':
       return p >= 1 ? 1 : 0;
+    case 'expo': // exponential ease-out: fast start, long settle (UI/kinetic type standard)
+      return p >= 1 ? 1 : 1 - 2 ** (-10 * p);
+    case 'expoio':
+      return p <= 0 ? 0 : p >= 1 ? 1 : p < 0.5 ? 2 ** (20 * p - 10) / 2 : (2 - 2 ** (-20 * p + 10)) / 2;
+    case 'circ':
+      return Math.sqrt(1 - (p - 1) ** 2);
+    case 'smooth': // smootherstep: zero velocity and acceleration at both ends
+      return p * p * p * (p * (6 * p - 15) + 10);
+    case 'elastic':
+      return p <= 0 ? 0 : p >= 1 ? 1 : 2 ** (-10 * p) * Math.sin((p * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+    case 'bounce': {
+      const n1 = 7.5625, d1 = 2.75;
+      if (p < 1 / d1) return n1 * p * p;
+      if (p < 2 / d1) return n1 * (p -= 1.5 / d1) * p + 0.75;
+      if (p < 2.5 / d1) return n1 * (p -= 2.25 / d1) * p + 0.9375;
+      return n1 * (p -= 2.625 / d1) * p + 0.984375;
+    }
+    case 'snap': // critically-damped spring: quick, no overshoot
+      return p >= 1 ? 1 : 1 - (1 + 8 * p) * Math.exp(-8 * p) * (1 - p) - p * Math.exp(-8);
   }
 }
 

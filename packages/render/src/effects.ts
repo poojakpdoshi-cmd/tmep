@@ -46,6 +46,22 @@ export function easeExpr(e: Ease, p: string): string {
       return `if(lte(${p},0),0,if(gte(${p},1),1,1-exp(-6*${p})*cos(${p}*2.5*PI)))`;
     case 'hold':
       return `gte(${p},1)`;
+    case 'expo':
+      return `if(gte(${p},1),1,1-pow(2,-10*${p}))`;
+    case 'expoio':
+      return `if(lte(${p},0),0,if(gte(${p},1),1,if(lt(${p},0.5),pow(2,20*${p}-10)/2,(2-pow(2,-20*${p}+10))/2)))`;
+    case 'circ':
+      return `sqrt(1-pow(${p}-1,2))`;
+    case 'smooth':
+      return `(pow(${p},3)*(${p}*(6*${p}-15)+10))`;
+    case 'elastic':
+      return `if(lte(${p},0),0,if(gte(${p},1),1,pow(2,-10*${p})*sin((${p}*10-0.75)*2*PI/3)+1))`;
+    case 'bounce': {
+      const b = (k: number, c: number) => `(7.5625*pow(${p}-${k},2)+${c})`;
+      return `if(lt(${p},${1 / 2.75}),7.5625*pow(${p},2),if(lt(${p},${2 / 2.75}),${b(1.5 / 2.75, 0.75)},if(lt(${p},${2.5 / 2.75}),${b(2.25 / 2.75, 0.9375)},${b(2.625 / 2.75, 0.984375)})))`;
+    }
+    case 'snap':
+      return `if(gte(${p},1),1,1-(1+8*${p})*exp(-8*${p})*(1-${p})-${p}*exp(-8))`;
   }
 }
 
