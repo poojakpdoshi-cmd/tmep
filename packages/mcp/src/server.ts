@@ -184,6 +184,10 @@ export class McpServer {
         return jobView(j, ctx.detail);
       }
       case 'video_plan': {
+        if (a.mode === 'produce') {
+          const { mode: _m, reference, ...rest } = a as Record<string, unknown>;
+          return produce(ctx, { ...rest, ...(typeof reference === 'string' && { reference }) } as never, flight?.ctrl.signal);
+        }
         if (a.mode === 'structured') {
           return api.editPlan(ctx, { action: a.action as never, asset: a.asset as string, task: a.task as string, overrides: a.overrides as never, dryRun: a.dryRun as boolean, rebase: a.rebase as boolean, semantic: a.semantic as boolean });
         }
@@ -212,8 +216,6 @@ export class McpServer {
         if (j.result?.sheet) view.sheet = j.result.sheet;
         return view;
       }
-      case 'video_produce':
-        return produce(ctx, a as never, flight?.ctrl.signal);
       case 'video_status':
         return api.status(ctx, { job: a.job as string, cancel: a.cancel as boolean, wait: a.wait as number });
       case 'video_help':
