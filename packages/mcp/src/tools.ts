@@ -50,8 +50,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_inspect',
-    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa. Pass file for QA on a rendered MP4.',
-    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), file: str().optional(), targetLufs: num().optional(), ...project, ...detail }),
+    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief. qa: pass file for a rendered MP4. footage/brief: local analysis of a video asset (cached); brief task informative|sports|cinematic|product|generic; faces/ocr use local OpenCV/tesseract when installed.',
+    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), file: str().optional(), targetLufs: num().optional(), task: str().optional(), faces: bool().optional(), ocr: bool().optional(), force: bool().optional(), maxSeconds: num().optional(), ...project, ...detail }),
     annotations: { readOnlyHint: true },
   },
   {

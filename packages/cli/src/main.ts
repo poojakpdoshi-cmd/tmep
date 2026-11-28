@@ -63,6 +63,9 @@ usage: frame <command> [args] [-p project_dir] [--detail minimal|standard|debug]
   undo [n] | redo [n] | checkout <rev>
   inspect [project|assets|timeline|transcript|silence|diff|log|jobs|scenes] [--asset v1] [--from s] [--to s] [--find q] [--words]
   inspect scenes [--scene id | --spec json]
+  inspect footage --asset v1 [--faces] [--ocr] [--force]   local footage analysis (cached)
+  inspect brief --asset v1 [--task informative|sports|cinematic|product|generic] [--max n]
+  inspect qa [--file out.mp4]
   render [--preview] [--range a,b] [--quality draft|standard|high] [--out file.mp4] [--alpha] [--frames n] [--detach]
   status <job> [--cancel] [--wait s] | jobs
   render --scene id [--range localStart,localEnd]
@@ -186,7 +189,9 @@ export async function main(argv: string[]): Promise<number> {
         return 0;
       case 'inspect':
         print(await api.inspect(ctx, { what: args._[0], asset: args.asset as string, from: args.from as number, to: args.to as number, find: args.find as string, words: !!args.words, max: args.max as number, rev: args.rev as number,
-          ...(args._[0] === 'scenes' && { scene: args.scene as string, spec: args.spec === undefined ? undefined : JSON.parse(String(args.spec)) }) }), pretty);
+          ...(args._[0] === 'scenes' && { scene: args.scene as string, spec: args.spec === undefined ? undefined : JSON.parse(String(args.spec)) }),
+          ...((args._[0] === 'footage' || args._[0] === 'brief') && { task: args.task as string, faces: !!args.faces, ocr: !!args.ocr, force: !!args.force, maxSeconds: args.maxSeconds as number }),
+          ...(args._[0] === 'qa' && { file: args.file as string, targetLufs: args.targetLufs as number }) }), pretty);
         return 0;
       case 'render': {
         if (args.detach) {

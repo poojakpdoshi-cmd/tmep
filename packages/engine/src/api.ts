@@ -61,6 +61,9 @@ import { ICON_NAMES } from '../../motion/src/icons.ts';
 import { SFX, SFX_KINDS } from '../../render/src/sfx.ts';
 import { renderTimeline, contactSheet, type RenderOptions } from '../../render/src/render.ts';
 import { runInspector } from '../../render/src/inspector.ts';
+import { footageFindings, sourceToOutput } from '../../render/src/footage-qa.ts';
+import { analyzeFootage, FOOTAGE_VERSION, type FootageAnalysis } from '../../media/src/footage.ts';
+import { editingBrief, BRIEF_TASKS, type BriefTask } from '../../story/src/brief.ts';
 import { computeShotMatch } from '../../render/src/color.ts';
 import { startJob, waitJob, cancelJob, jobView, readJob } from '../../render/src/jobs.ts';
 
@@ -473,7 +476,29 @@ export async function compile(ctx: Ctx, input: Record<string, unknown> & { dryRu
   let compiled = await readJsonOr<ReturnType<typeof compileIntent> | undefined>(cacheFile, undefined);
   const cacheHit = !!compiled;
   if (!compiled) {
-    compiled = compileIntent(input, { ratio: base.settings.ratio, captionPos: base.captions.pos });
+    let intent: Record<string, unknown> = input;
+    const notes: { code: 'placement'; msg: string }[] = [];
+    if (typeof input.footage === 'string') {
+      // Footage-aware placement: keep presets clear of the presenter region found in the analysis.
+      const { footage, ...rest } = input as Record<string, unknown> & { footage: string };
+      intent = rest;
+      const analysis = (await cachedFootage(p, [footage])).get(footage) ?? (await footageAnalysis(p, { asset: footage })).analysis;
+      const pres = analysis.inferred.presenter;
+      if (pres) {
+        const [W, H] = RATIOS[(rest.ratio as Ratio | undefined) ?? base.settings.ratio];
+        const clip = base.clips.find((c) => c.src === footage);
+        const b = sourceToOutput(pres, { w: analysis.asset.w, h: analysis.asset.h }, { w: W, h: H }, clip?.cx, clip?.cy);
+        const x0 = Math.max(0, b.x - b.w / 2), x1 = Math.min(1, b.x + b.w / 2), y0 = Math.max(0, b.y - b.h / 2), y1 = Math.min(1, b.y + b.h / 2);
+        if (x1 - x0 > 0.01 && y1 - y0 > 0.01) {
+          intent = { ...rest, avoid: [...((rest.avoid as unknown[]) ?? []), { x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 }] };
+          notes.push({ code: 'placement', msg: `kept clear of the presenter region from ${footage} (confidence ${pres.confidence})` });
+        }
+      } else {
+        notes.push({ code: 'placement', msg: `${footage}: no presenter region detected (${analysis.capabilities.faces.status === 'ok' ? 'no persistent face' : 'face detection unavailable'}); placement uses safe zones only` });
+      }
+    }
+    compiled = compileIntent(intent, { ratio: base.settings.ratio, captionPos: base.captions.pos });
+    compiled.corrections.push(...notes);
     if (!(input as { dryRun?: boolean })?.dryRun && (await exists(p.dir))) {
       await writeJson(cacheFile, compiled, false).catch(() => {});
     }
@@ -564,7 +589,76 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
 }
 
 // ---------------------------------------------------------------- inspect
-export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number }): Promise<Record<string, unknown>> {
+// ---------------------------------------------------------------- footage intelligence (Phase 4B)
+interface FootageInput { asset: string; faces?: boolean; ocr?: boolean; force?: boolean; maxSeconds?: number }
+
+/** Content-addressed cache keys: media hash + analyzer version + settings + transcript; adapters layer on the base. */
+export async function footageKeys(p: Project, assetId: string, inp: Omit<FootageInput, 'asset'>) {
+  const a = await p.asset(assetId);
+  if (a.kind !== 'video') throw new TmepError('E_INPUT', `footage analysis needs a video asset (${assetId} is ${a.kind})`);
+  const words = (await transcriptsFor(p, [assetId]))[assetId] ?? [];
+  const maxSeconds = inp.maxSeconds ?? 1800;
+  if (!(maxSeconds >= 1 && maxSeconds <= 7200)) throw new TmepError('E_INPUT', 'maxSeconds must be 1–7200');
+  const base = hashOf({ kind: 'footage', v: FOOTAGE_VERSION, media: a.hash, maxSeconds, tr: words.length ? hashOf(words) : null });
+  const layered = inp.faces || inp.ocr ? hashOf({ base, faces: !!inp.faces, ocr: !!inp.ocr }) : base;
+  return { a, words, maxSeconds, base, layered };
+}
+
+export async function footageAnalysis(p: Project, inp: FootageInput, signal?: AbortSignal): Promise<{ analysis: FootageAnalysis; cached: boolean }> {
+  const k = await footageKeys(p, inp.asset, inp);
+  const layeredFile = p.cachePath('footage', `${k.layered}.json`);
+  const hit = inp.force ? undefined : await readJsonOr<FootageAnalysis | undefined>(layeredFile, undefined);
+  if (hit) return { analysis: hit, cached: true };
+  const baseFile = p.cachePath('footage', `${k.base}.json`);
+  let base = inp.force ? undefined : await readJsonOr<FootageAnalysis | undefined>(baseFile, undefined);
+  if (!base) {
+    base = await analyzeFootage(k.a.path, { maxSeconds: k.maxSeconds, words: k.words, signal });
+    await writeJson(baseFile, base, false);
+  }
+  if (k.layered === k.base) return { analysis: base, cached: false };
+  // Only the requested adapters run; the video/audio passes are reused from the base record.
+  const layered = await analyzeFootage(k.a.path, { base, faces: inp.faces, ocr: inp.ocr, signal });
+  await writeJson(layeredFile, layered, false);
+  return { analysis: layered, cached: false };
+}
+
+/** Cached analyses of the given assets (most complete layer first); never runs a new analysis. */
+async function cachedFootage(p: Project, ids: Iterable<string>): Promise<Map<string, FootageAnalysis>> {
+  const out = new Map<string, FootageAnalysis>();
+  for (const id of new Set(ids)) {
+    const a = await p.asset(id).catch(() => undefined);
+    if (!a || a.kind !== 'video') continue;
+    for (const v of [{ faces: true, ocr: true }, { faces: true }, { ocr: true }, {}]) {
+      const k = await footageKeys(p, id, v);
+      const hit = await readJsonOr<FootageAnalysis | undefined>(p.cachePath('footage', `${k.layered}.json`), undefined);
+      if (hit) { out.set(id, hit); break; }
+    }
+  }
+  return out;
+}
+
+function footageSummary(a: FootageAnalysis, cached: boolean, detail: Ctx['detail']): Record<string, unknown> {
+  if (detail === 'debug') return { ok: 1, cached, ...a };
+  const caps = Object.fromEntries(Object.entries(a.capabilities).map(([k, c]) => [k, c.status === 'ok' ? 'ok' : `unavailable: ${(c as { reason: string }).reason}`]));
+  return {
+    ok: 1, ...(cached && { cached: true }), dur: a.asset.dur, shots: a.observed.shots.length, scenes: a.inferred.scenes.length,
+    pacing: a.inferred.pacing.label, silences: a.observed.silences.length, moments: a.inferred.moments.slice(0, detail === 'minimal' ? 3 : 8).map((m) => ({ t: m.t, conf: m.confidence, why: m.evidence.join('; ') })),
+    ...(a.inferred.presenter && { presenter: a.inferred.presenter }),
+    quiet: a.inferred.quietRegions.map((q) => [q.x, q.y]), ...(detail !== 'minimal' && { capabilities: caps }),
+  };
+}
+
+export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number; task?: string; faces?: boolean; ocr?: boolean; force?: boolean; maxSeconds?: number }): Promise<Record<string, unknown>> {
+  if (inp.what === 'footage' || inp.what === 'brief') {
+    if (!inp.asset) throw new TmepError('E_INPUT', `inspect ${inp.what} needs asset`, 'e.g. {what:"brief", asset:"v1", task:"informative"}');
+    const task = (inp.task ?? 'generic') as BriefTask;
+    if (inp.what === 'brief' && !(BRIEF_TASKS as readonly string[]).includes(task)) throw new TmepError('E_INPUT', `unknown brief task "${inp.task}"`, `task: ${BRIEF_TASKS.join('|')}`);
+    const p = await openProject(ctx.project, false);
+    const { analysis, cached } = await footageAnalysis(p, { asset: inp.asset, faces: inp.faces, ocr: inp.ocr, force: inp.force, maxSeconds: inp.maxSeconds });
+    if (inp.what === 'footage') return footageSummary(analysis, cached, ctx.detail);
+    const words = (await transcriptsFor(p, [inp.asset]))[inp.asset] ?? [];
+    return { ok: 1, ...(cached && { cached: true }), ...editingBrief(analysis, task, words, Math.min(12, Math.max(1, inp.max ?? 6))) };
+  }
   if (inp.what === 'scenes') {
     const p = await openProject(ctx.project, false);
     const tl = await p.timeline(inp.rev);
@@ -709,10 +803,13 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
       const assets = new Map((await p.assets()).map((a) => [a.id, a]));
       const renderedPath = inp.file ? await resolveSafePath(inp.file, p.root, ctx.outRoots ?? [p.root], 'qa file') : undefined;
       const report = await runInspector(tl, words, { renderedPath, targetLufs: inp.targetLufs, assets });
-      return { ...report, ok: report.ok ? 1 : 0 };
+      // Footage-aware advisories from cached analyses (inspect {what:"footage"} creates them).
+      const extra = footageFindings(tl, await cachedFootage(p, tl.clips.map((c) => c.src)));
+      const findings = [...report.findings, ...extra];
+      return { ...report, findings, advisories: report.advisories + extra.length, ok: report.ok ? 1 : 0 };
     }
     default:
-      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|qa');
+      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief');
   }
 }
 
