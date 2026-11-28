@@ -42,6 +42,9 @@ export interface Zoom {
 export interface Transition {
   type: string;
   d: number;
+  /** Handle footage this transition added to the previous clip's out / this clip's in (s), so it can be reverted. */
+  hOut?: number;
+  hIn?: number;
 }
 
 export interface SpeedKey {
@@ -60,6 +63,8 @@ export interface AudioClipPost {
   lp?: number;
   fadeIn?: number;
   fadeOut?: number;
+  /** Gain staging applied before the chain (dB), measured by the renderer for compressed clips. */
+  preGainDb?: number;
 }
 
 export interface AudioMaster {
@@ -328,8 +333,14 @@ export function layout(tl: Timeline): Placed[] {
   const fps = tl.settings.fps;
   const out: Placed[] = [];
   let cursor = 0;
+  // Error diffusion: each clip ends at the frame nearest its exact cumulative end, so rounding
+  // never accumulates across many short clips (it used to: 100 × 0.05 s laid out as 4.37 s).
+  let exact = 0, emitted = 0;
   tl.clips.forEach((clip, idx) => {
-    const frames = clipFrames(clip, fps);
+    const dur = clip.freeze !== undefined && clip.freeze > 0 ? clip.freeze : speedRampDuration(clip);
+    exact += dur;
+    const frames = Math.max(1, Math.round(exact * fps) - emitted);
+    emitted += frames;
     let transFrames = 0;
     if (idx > 0 && clip.trans && clip.trans.d > 0) {
       const prev = out[idx - 1]!;
@@ -421,12 +432,20 @@ const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, '').tr
  *   "end"                     end of timeline
  */
 export function resolveAnchor(tl: Timeline, words: TlWord[], a: unknown, placed = layout(tl)): { t: number; word?: TlWord; endT?: number } {
-  if (typeof a === 'number') return { t: a };
+  // Absolute times must lie on the timeline (they used to be stored verbatim, e.g. -3 or 999).
+  const onTimeline = (t: number) => {
+    const dur = duration(tl);
+    if (!Number.isFinite(t) || t < 0) throw new TmepError('E_RANGE', `time ${t}s is before the timeline start`);
+    void dur; // range ends may run past the end (a cut "to" beyond the end is clamped); points are checked by ops
+    return { t };
+  };
+  if (typeof a === 'number') return onTimeline(a);
   if (typeof a !== 'string') throw new TmepError('E_ANCHOR', `bad anchor ${JSON.stringify(a)}`);
   const s = a.trim();
-  if (/^-?\d+(\.\d+)?s?$/.test(s)) return { t: parseFloat(s) };
+  if (/^-?\d+(\.\d+)?s?$/.test(s)) return onTimeline(parseFloat(s));
   if (s === 'end') return { t: duration(tl) };
   if (s.startsWith('w:')) {
+    if (!/^w:\d+$/.test(s)) throw new TmepError('E_ANCHOR', `bad word anchor "${s}"`, 'w:N takes a whole word index, e.g. w:12');
     const k = parseInt(s.slice(2), 10);
     const w = words[k];
     if (!w) throw new TmepError('E_ANCHOR', `no word ${k} (timeline has ${words.length})`);
@@ -434,6 +453,7 @@ export function resolveAnchor(tl: Timeline, words: TlWord[], a: unknown, placed 
   }
   if (s.startsWith('c:')) {
     const [id, mod] = s.slice(2).split('^');
+    if (mod !== undefined && mod !== 'end') throw new TmepError('E_ANCHOR', `bad clip anchor modifier "^${mod}"`, 'use c:ID or c:ID^end');
     const p = placed.find((x) => x.clip.id === id);
     if (!p) throw new TmepError('E_ANCHOR', `no clip ${id}`);
     return mod === 'end' ? { t: p.start + p.dur } : { t: p.start, endT: p.start + p.dur };
@@ -449,6 +469,7 @@ export function resolveAnchor(tl: Timeline, words: TlWord[], a: unknown, placed 
     const m = /#(\d+)$/.exec(body);
     if (m) {
       nth = parseInt(m[1]!, 10);
+      if (nth < 1) throw new TmepError('E_ANCHOR', `"@…#${nth}": occurrence numbers start at 1`);
       body = body.slice(0, m.index);
     }
     const target = norm(body).split(/\s+/).filter(Boolean);

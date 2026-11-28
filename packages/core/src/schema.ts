@@ -78,7 +78,8 @@ export function num(opts: { min?: number; max?: number; int?: boolean } = {}): S
   return new Schema<number>(json, (v, p, iss) => {
     // Agents sometimes send numbers as strings ("1.5"). Accept numeric strings.
     let n = v;
-    if (typeof n === 'string' && n.trim() !== '' && Number.isFinite(Number(n))) n = Number(n);
+    // Decimal notation only: "0x2", "1e400" or " " are not numbers here.
+    if (typeof n === 'string' && /^\s*-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/.test(n) && Number.isFinite(Number(n))) n = Number(n);
     if (typeof n !== 'number' || !Number.isFinite(n)) {
       iss.push({ path: at(p), msg: `expected number, got ${typeName(v)}` });
       return v;

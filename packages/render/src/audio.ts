@@ -228,6 +228,7 @@ export interface StemArgs {
 /** FFmpeg arguments for one speech chunk: at most `maxClips` + 1 inputs, PCM out. */
 function audioPostFilters(ap: AudioClipPost): string[] {
   const f: string[] = [];
+  if (ap.preGainDb) f.push(`volume=${n3(ap.preGainDb)}dB`);
   if (ap.hp) f.push(`highpass=f=${Math.round(ap.hp)}`);
   if (ap.lp) f.push(`lowpass=f=${Math.round(ap.lp)}`);
   if (ap.denoise && ap.denoise > 0) f.push(`afftdn=nf=${Math.round(-15 - ap.denoise * 25)}`);

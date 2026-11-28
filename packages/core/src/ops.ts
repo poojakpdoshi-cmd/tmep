@@ -67,7 +67,7 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   broll: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }), in: num({ min: 0 }).default(0), fit: fit.default('cover'), z: num({ int: true, min: -100, max: 100 }).optional() }),
   gfx: obj({ op: str(), preset: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(2.5), props: record(any()).default({}), z: num({ int: true, min: -100, max: 100 }).optional() }),
   scene: obj({ op: str(), spec: visualSceneSchema }),
-  set: obj({ op: str(), id: str(), at: anchor.optional(), d: num({ min: 0.1, max: 600 }).optional(), props: record(any()).optional(), vol: num().optional(), z: num({ int: true, min: -100, max: 100 }).optional() }),
+  set: obj({ op: str(), id: str(), at: anchor.optional(), d: num({ min: 0.1, max: 600 }).optional(), props: record(any()).optional(), vol: num({ min: -60, max: 12 }).optional(), gain: num({ min: 0, max: 4 }).optional(), mute: bool().optional(), z: num({ int: true, min: -100, max: 100 }).optional() }),
   captions: obj({
     op: str(),
     style: oneOf(['kinetic', 'karaoke', 'clean', 'boxed', 'none'] as const).optional(),
@@ -253,7 +253,9 @@ export function parseOpString(line: string): Record<string, unknown> {
   // unquoted multi-word phrase anchors: "@generative ai can" -> one token
   for (let i = 0; i < toks.length; i++) {
     if (toks[i]!.startsWith('@')) {
-      while (i + 1 < toks.length && !toks[i + 1]!.includes('=') && !/^-?\d+(\.\d+)?$/.test(toks[i + 1]!) && !toks[i + 1]!.startsWith('@')) {
+      // A phrase ends at the next key=value, number, time (12.5s) or anchor token (@…, end, w:N, c:ID).
+      const anchorLike = (x: string) => x.includes('=') || x.startsWith('@') || /^-?\d+(\.\d+)?s?$/.test(x) || /^(end|w:\S+|c:\S+)$/.test(x);
+      while (i + 1 < toks.length && !anchorLike(toks[i + 1]!)) {
         toks[i] = `${toks[i]} ${toks[i + 1]}`;
         toks.splice(i + 1, 1);
       }
@@ -303,22 +305,40 @@ export function isFiller(w: string): boolean {
  * silence so the overlap holds no speech. The duration shrinks to the silence that is
  * available; returns the applied duration (0 = not applied).
  */
+/** Undo the handles a transition added (recorded since Phase 5; older revisions carry none). */
+export function revertTransition(tl: Timeline, i: number): boolean {
+  const c = tl.clips[i];
+  const prev = tl.clips[i - 1];
+  if (!c?.trans) return false;
+  const reverted = c.trans.hOut !== undefined || c.trans.hIn !== undefined;
+  if (prev && c.trans.hOut) prev.out = r2(prev.out - c.trans.hOut, 3);
+  if (c.trans.hIn) c.in = r2(c.in + c.trans.hIn, 3);
+  delete c.trans;
+  return reverted;
+}
+
 export function addTransition(tl: Timeline, i: number, type: string, d: number, transcripts: Record<string, Word[] | undefined>, srcDur: (id: string) => number): number {
   const c = tl.clips[i];
   const prev = tl.clips[i - 1];
   if (!c || !prev) return 0;
+  // Re-applying a transition first removes the handles the previous one added (idempotent).
+  if (c.trans) revertTransition(tl, i);
   const pw = transcripts[prev.src] ?? [];
   const cw = transcripts[c.src] ?? [];
+  // A word that straddles the cut leaves no silent handle on that side.
+  const straddleOut = pw.some((w) => w.s < prev.out - 1e-3 && w.e > prev.out + 1e-3);
+  const straddleIn = cw.some((w) => w.s < c.in - 1e-3 && w.e > c.in + 1e-3);
   const nextWordAfter = pw.length ? (pw.find((w) => w.s >= prev.out - 1e-3)?.s ?? Infinity) : Infinity;
   const prevWordBefore = cw.length ? ([...cw].reverse().find((w) => w.e <= c.in + 1e-3)?.e ?? -Infinity) : -Infinity;
-  const hOut = Math.max(0, Math.min(d, nextWordAfter - 0.03 - prev.out, srcDur(prev.src) - prev.out));
-  const hIn = Math.max(0, Math.min(d, c.in - (prevWordBefore + 0.03), c.in));
+  const hOut = straddleOut ? 0 : Math.max(0, Math.min(d, nextWordAfter - 0.03 - prev.out, srcDur(prev.src) - prev.out));
+  const hIn = straddleIn ? 0 : Math.max(0, Math.min(d, c.in - (prevWordBefore + 0.03), c.in));
   const td = Math.min(d, hOut + hIn);
   if (td < 0.15) return 0;
-  const useOut = Math.min(hOut, td);
+  const useOut = r2(Math.min(hOut, td), 3);
+  const useIn = r2(td - useOut, 3);
   prev.out = r2(prev.out + useOut, 3);
-  c.in = r2(c.in - (td - useOut), 3);
-  c.trans = { type, d: r2(td, 3) };
+  c.in = r2(c.in - useIn, 3);
+  c.trans = { type, d: r2(td, 3), hOut: useOut, hIn: useIn };
   return td;
 }
 
@@ -353,6 +373,13 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
   const words = () => timelineWords(tl, ctx.transcripts);
   const placed = () => layout(tl);
   const t = (a: unknown) => resolveAnchor(tl, words(), a);
+  // A point placement (graphic, sound, zoom, freeze…) must land on the timeline.
+  const pt = (a: unknown) => {
+    const r = t(a);
+    const dur = duration(tl);
+    if (dur > 0 && r.t > dur + 1 / tl.settings.fps) throw new TmepError('E_RANGE', `time ${r.t}s is past the timeline end (${r2(dur, 3)}s)`, 'use "end" for the last frame');
+    return r;
+  };
   switch (op.op) {
     case 'cut': {
       const a = t(op.from);
@@ -371,20 +398,30 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
         const target = op.text.toLowerCase().split(/\s+/).map(clean).filter(Boolean);
         const toks = ws.map((w) => clean(w.w));
         for (let i = 0; i + target.length <= toks.length; i++) {
-          if (target.every((x, j) => toks[i + j] === x)) {
-            const first = ws[i]!;
-            const last = ws[i + target.length - 1]!;
-            if (first.src === last.src) {
-              const tr = ctx.transcripts[first.src]!;
-              hits.push({ src: first.src, s: tr[first.i]!.s, e: tr[last.i]!.e });
-            }
+          if (!target.every((x, j) => toks[i + j] === x)) continue;
+          // Delete the phrase as it is heard on the timeline: one source range per run of words that
+          // are consecutive in the same source (a phrase can span a cut between reordered clips).
+          let run: { src: string; s: number; e: number; i: number } | undefined;
+          for (let j = 0; j < target.length; j++) {
+            const w = ws[i + j]!, src = ctx.transcripts[w.src]![w.i]!;
+            if (run && run.src === w.src && w.i === run.i + 1) { run.e = src.e; run.i = w.i; continue; }
+            if (run) hits.push({ src: run.src, s: run.s, e: run.e });
+            run = { src: w.src, s: src.s, e: src.e, i: w.i };
           }
+          if (run) hits.push({ src: run.src, s: run.s, e: run.e });
         }
         if (!hits.length) throw new TmepError('E_ANCHOR', `"${op.text}" not found in timeline transcript`);
       } else throw new TmepError('E_INPUT', 'delete needs text or fillers:true');
-      let removed = 0;
-      for (const h of hits) removed += removeSrcRange(tl, h.src, h.s - pad, h.e + pad);
-      return `delete ${hits.length}x ${r2(removed)}s`;
+      // Remove each distinct source range once, and report the real change in timeline length.
+      const before = layout(tl).reduce((m, p) => Math.max(m, p.start + p.dur), 0);
+      const uniq = [...new Map(hits.map((h) => [`${h.src}:${h.s}:${h.e}`, h])).values()];
+      for (const h of uniq) removeSrcRange(tl, h.src, h.s - pad, h.e + pad);
+      const removed = before - layout(tl).reduce((m, p) => Math.max(m, p.start + p.dur), 0);
+      if (removed <= 1e-6) {
+        if (op.fillers) return 'delete 0x 0s (no fillers on the timeline)';
+        throw new TmepError('E_RANGE', `"${op.text}" matched but no timeline footage was removed`, 'the matched words may be outside every clip range');
+      }
+      return `delete ${uniq.length}x ${r2(removed)}s`;
     }
     case 'tighten': {
       const max = op.max as number;
@@ -420,7 +457,8 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     case 'add': {
       const src = op.src as string;
       const a = needAsset(ctx, src, ['video', 'image', 'audio']);
-      const out = (op.out as number | undefined) ?? (a.kind === 'image' ? 3 : a.dur);
+      // An image without an explicit out holds for 3 s from its in-point.
+      const out = (op.out as number | undefined) ?? (a.kind === 'image' ? (op.in as number) + 3 : a.dur);
       const c = newClip(tl, src, op.in as number, a.kind === 'image' ? out : Math.min(out, a.dur));
       const idx = (op.index as number | undefined) ?? tl.clips.length;
       tl.clips.splice(idx, 0, c);
@@ -432,10 +470,14 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       const oldIn = c.in;
       if (op.in !== undefined) c.in = op.in as number;
       if (op.out !== undefined) c.out = op.out as number;
+      // Clamp to the media now, so later ops in the same batch see the real range (and say so).
+      const media = ctx.assets[c.src];
+      let clamped = '';
+      if (media && media.kind !== 'image' && media.dur > 0 && c.out > media.dur) { c.out = media.dur; clamped = ` (out clamped to media end ${media.dur}s)`; }
       if (c.out <= c.in) throw new TmepError('E_RANGE', `clip ${c.id} would be empty`);
       // effects are clip-local: moving the start keeps them on the same source content
       if (c.fx && c.in !== oldIn) c.fx = shiftFx(c.fx, (c.in - oldIn) / c.speed);
-      return `trim ${c.id}`;
+      return `trim ${c.id}${clamped}`;
     }
     case 'move': {
       const c = findClip(tl, op.clip as string);
@@ -542,7 +584,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `fx ${kind} ${targets.length === 1 ? targets[0]!.id : `${targets.length} clips`}`;
     }
     case 'zoom': {
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const hit = tlToSrc(placed(), at);
       if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
       const c = hit.p.clip;
@@ -561,29 +603,34 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       if (!op.all) {
         if (op.clip) targets = [findClip(tl, op.clip as string)];
         else if (op.at !== undefined) {
-          const at = t(op.at).t;
+          const at = pt(op.at).t;
           const ps = placed().slice(1);
           const best = ps.reduce((b, p) => (Math.abs(p.start - at) < Math.abs(b.start - at) ? p : b), ps[0]!);
           if (!best) throw new TmepError('E_STATE', 'transitions need at least two clips');
           targets = [best.clip];
         } else throw new TmepError('E_INPUT', 'transition needs clip, at, or all:true');
       }
-      let applied = 0;
+      let applied = 0, first = 0;
+      // A still image can be held as long as needed, so its handle is unlimited.
+      const handleDur = (id: string) => (ctx.assets[id]?.kind === 'image' ? Infinity : ctx.assets[id]?.dur ?? Infinity);
       for (const c of targets) {
         const idx = tl.clips.indexOf(c);
-        if (idx <= 0) continue;
+        if (idx <= 0) { first++; continue; }
         if (!tr) {
-          delete c.trans;
+          // Removing a transition also gives back the handle footage it added.
+          revertTransition(tl, idx);
           continue;
         }
         // jump cuts inside continuous speech get no transition: it would overlap words
-        if (addTransition(tl, idx, tr.type, tr.d, ctx.transcripts, (id) => ctx.assets[id]?.dur ?? Infinity) > 0) applied++;
+        if (addTransition(tl, idx, tr.type, tr.d, ctx.transcripts, handleDur) > 0) applied++;
       }
-      return `transition ${type} x${tr ? applied : targets.length}${tr && applied < targets.length ? ` (${targets.length - applied} skipped: no silence for handles)` : ''}`;
+      const noHandle = targets.length - first - applied;
+      const why = [first ? `${first} skipped: the first clip has no previous clip` : '', tr && noHandle > 0 ? `${noHandle} skipped: no silent handle footage` : ''].filter(Boolean).join('; ');
+      return `transition ${type} x${tr ? applied : targets.length - first}${why ? ` (${why})` : ''}`;
     }
     case 'broll': {
       const a = needAsset(ctx, op.src as string, ['video', 'image']);
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const id = nextId(tl, 'b');
       const inT = op.in as number;
       const d = a.kind === 'image' ? (op.d as number) : Math.min(op.d as number, a.dur - inT);
@@ -597,7 +644,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
         const hint = closest(op.preset as string, ctx.presets);
         throw new TmepError('E_INPUT', `unknown gfx preset "${op.preset}"`, hint ? `did you mean "${hint}"?` : `presets: ${ctx.presets.join(',')}`);
       }
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const id = nextId(tl, 'g');
       tl.gfx.push({ id, preset: op.preset as string, ref: anchorAt(placed(), at), d: op.d as number, props: op.props as Record<string, unknown>, ...(op.z !== undefined ? { z: op.z as number } : {}) });
       created.push(id);
@@ -612,20 +659,29 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'set': {
       const id = op.id as string;
-      const item = [...tl.gfx, ...tl.sfx, ...tl.broll].find((x) => x.id === id) as
-        | { ref: { at?: number }; d?: number; props?: Record<string, unknown>; vol?: number; z?: number }
-        | undefined;
-      if (!item) throw new TmepError('E_NOT_FOUND', `no gfx/sfx/broll ${id}`);
-      if (op.at !== undefined) item.ref = anchorAt(placed(), t(op.at).t);
-      if (op.d !== undefined && 'd' in item) item.d = op.d as number;
-      if (op.props && item.props) Object.assign(item.props, op.props);
-      if (op.vol !== undefined && 'vol' in item) item.vol = op.vol as number;
-      if (op.z !== undefined) {
-        if (!tl.broll.some((x) => x.id === id) && !tl.gfx.some((x) => x.id === id)) {
-          throw new TmepError('E_INPUT', 'z is only supported for b-roll and graphics');
-        }
-        item.z = op.z as number;
+      // Clips: linear gain and mute (the mixer always honoured them; no op could set them before).
+      const clip = tl.clips.find((c) => c.id === id);
+      if (clip) {
+        const bad = ['at', 'd', 'props', 'vol', 'z'].filter((k) => op[k] !== undefined);
+        if (bad.length) throw new TmepError('E_INPUT', `set ${id}: ${bad.join(', ')} do not apply to clips`, 'clips take gain (0–4, linear) and mute');
+        if (op.gain === undefined && op.mute === undefined) throw new TmepError('E_INPUT', `set ${id}: nothing to set`, 'clips take gain and mute');
+        if (op.gain !== undefined) clip.vol = op.gain as number;
+        if (op.mute !== undefined) clip.mute = op.mute as boolean;
+        return `set ${id}${op.gain !== undefined ? ` gain=${clip.vol}` : ''}${op.mute !== undefined ? ` mute=${clip.mute}` : ''}`;
       }
+      const kind = tl.gfx.some((x) => x.id === id) ? 'gfx' : tl.sfx.some((x) => x.id === id) ? 'sfx' : tl.broll.some((x) => x.id === id) ? 'broll' : undefined;
+      if (!kind) throw new TmepError('E_NOT_FOUND', `no clip/gfx/sfx/broll ${id}`);
+      const item = [...tl.gfx, ...tl.sfx, ...tl.broll].find((x) => x.id === id) as { ref: { at?: number }; d?: number; props?: Record<string, unknown>; vol?: number; z?: number };
+      // Fields that do not apply to this kind are errors, not silent no-ops.
+      const allowed: Record<string, string[]> = { gfx: ['at', 'd', 'props', 'z'], sfx: ['at', 'vol'], broll: ['at', 'd', 'z'] };
+      const bad = ['at', 'd', 'props', 'vol', 'z', 'gain', 'mute'].filter((k) => op[k] !== undefined && !allowed[kind]!.includes(k));
+      if (kind === 'sfx' && op.z !== undefined) throw new TmepError('E_INPUT', 'z is only supported for b-roll and graphics');
+      if (bad.length) throw new TmepError('E_INPUT', `set ${id}: ${bad.join(', ')} do not apply to ${kind}`, `${kind} takes ${allowed[kind]!.join(', ')}`);
+      if (op.at !== undefined) item.ref = anchorAt(placed(), pt(op.at).t);
+      if (op.d !== undefined) item.d = op.d as number;
+      if (op.props) item.props = { ...(item.props ?? {}), ...(op.props as Record<string, unknown>) };
+      if (op.vol !== undefined) item.vol = op.vol as number;
+      if (op.z !== undefined) item.z = op.z as number;
       return `set ${id}`;
     }
     case 'captions': {
@@ -653,7 +709,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       if (ctx.sfxKinds && !ctx.sfxKinds.includes(op.kind as string)) {
         throw new TmepError('E_INPUT', `unknown sfx "${op.kind}"`, `kinds: ${ctx.sfxKinds.join(',')}`);
       }
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const id = nextId(tl, 's');
       tl.sfx.push({ id, kind: op.kind as string, ref: anchorAt(placed(), at), vol: op.vol as number });
       created.push(id);
@@ -728,7 +784,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `ramp ${targets.length === 1 ? targets[0]!.id : `${targets.length} clips`} (${keys.length}k)`;
     }
     case 'freeze': {
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const hit = tlToSrc(placed(), at);
       if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
       const c = hit.p.clip;
@@ -758,7 +814,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
       return `reverse ${op.on ? 'on' : 'off'} ${targets.length} clips`;
     }
     case 'punch': {
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const hit = tlToSrc(placed(), at);
       if (!hit) throw new TmepError('E_RANGE', `no clip at ${r2(at)}s`);
       const c = hit.p.clip;
@@ -812,7 +868,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'splitscreen': {
       const srcs = op.srcs as string[];
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const d = op.d as number;
       const lay = op.layout as '2h' | '2v' | '2x2' | '3v';
       const gap = op.gap as number;
@@ -849,7 +905,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'pip': {
       const a = needAsset(ctx, op.src as string, ['video', 'image']);
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const inT = op.in as number;
       const d = a.kind === 'image' ? (op.d as number) : Math.min(op.d as number, a.dur - inT);
       if (d <= 0) throw new TmepError('E_RANGE', `pip in=${inT} is past end of ${op.src}`);
@@ -871,7 +927,7 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
     }
     case 'parallax': {
       const srcs = op.srcs as string[];
-      const at = t(op.at).t;
+      const at = pt(op.at).t;
       const d = op.d as number;
       const drift = op.drift as number;
       const baseZ = op.z as number;

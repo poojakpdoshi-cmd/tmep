@@ -14,6 +14,9 @@ import {
   type Word,
   type FxMask,
   type Effect,
+  type Placed,
+  readJsonOr,
+  writeJson,
   TmepError,
   layout,
   timelineWords,
@@ -29,6 +32,7 @@ import {
 import { rasterizeComplexMaskPng, rasterizeComplexMaskSequence, maskAnimated } from './effects.ts';
 import { BT709_OUTPUT_TAGS, detectColorSpace } from './color.ts';
 import { ffmpeg, ffmpegInfo, probe } from '../../media/src/ffmpeg.ts';
+import { run } from '../../media/src/exec.ts';
 import { compileAss } from '../../motion/src/compile.ts';
 import { compileScenes, type SceneGraphic } from '../../motion/src/scene.ts';
 import { rasterIdentity, rasterizeVectorRun, VECTOR_VERSION } from '../../motion/src/vector.ts';
@@ -203,6 +207,39 @@ async function withWorkDir<T>(project: Project, fn: (work: string) => Promise<T>
   }
 }
 
+/** Integrated (gated) loudness of a source range, LUFS; -70 for silence. */
+async function measureLoudness(file: string, t0: number, t1: number): Promise<number> {
+  const { ffmpeg: bin } = await ffmpegInfo();
+  const r = await run(bin, ['-hide_banner', '-nostats', '-ss', String(t0), '-t', String(Math.max(0.1, t1 - t0)), '-i', file, '-vn', '-af', 'ebur128', '-f', 'null', '-'], { timeoutMs: 300000 });
+  const m = /I:\s+(-?[\d.]+) LUFS\s*\n\s*Threshold/.exec(r.stderr) ?? [...r.stderr.matchAll(/I:\s+(-?[\d.]+) LUFS/g)].pop();
+  return m ? Number(m[1]) : -70;
+}
+
+/**
+ * Gain staging for compressed dialogue: compressor thresholds are absolute, so a quiet recording
+ * (e.g. -34 LUFS) was never compressed. Each compressed clip is measured once (cached by media hash
+ * and range) and raised so speech reaches about -20 LUFS before the chain (0..+18 dB). Hot sources are
+ * never attenuated: that would take them out of the compressor's range and turn the requested
+ * compression into a no-op (caught by the effect matrix). Silent ranges are left alone.
+ */
+async function stageDialogueGain(project: Project, placed: Placed[], media: Record<string, MediaRef>): Promise<void> {
+  for (const p of placed) {
+    const c = p.clip;
+    const m = media[c.src];
+    if (!c.audio?.comp || !m?.audio || m.kind === 'image' || c.mute) continue;
+    const file = project.cachePath('gain', `${hashOf({ v: 1, h: m.hash, in: c.in, out: c.out })}.json`);
+    let lufs = (await readJsonOr<{ lufs: number } | undefined>(file, undefined))?.lufs;
+    if (lufs === undefined) {
+      lufs = await measureLoudness(m.path, c.in, c.out);
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      await writeJson(file, { lufs }, false);
+    }
+    if (lufs <= -60) continue;
+    const gain = Math.max(0, Math.min(18, -20 - lufs));
+    if (gain >= 1) c.audio = { ...c.audio, preGainDb: Math.round(gain * 10) / 10 };
+  }
+}
+
 async function renderUnlocked(project: Project, tl: Timeline, transcripts: Record<string, Word[] | undefined>, opts: RenderOptions, hooks: RenderHooks, work: string): Promise<RenderResult> {
   const t0 = Date.now();
   if (!tl.clips.length) throw new TmepError('E_STATE', 'timeline has no clips');
@@ -219,6 +256,7 @@ async function renderUnlocked(project: Project, tl: Timeline, transcripts: Recor
   const scenes = tl.scenes?.length ? compileScenes(tl, words, new Map((await project.assets()).map((a) => [a.id, a]))) : undefined;
   if (scenes?.media.length) tl = { ...tl, broll: [...tl.broll, ...scenes.media] };
   const media = await mediaMap(project, tl);
+  await stageDialogueGain(project, placed, media);
   const compiled = compileAss(tl, words, placed);
   const { W, H } = outSize(tl, enc.scale);
   const progress = hooks.onProgress ?? (() => {});

@@ -23,8 +23,8 @@ export interface ToolDef {
 export const TOOLS: ToolDef[] = [
   {
     name: 'video_import',
-    description: 'Register media files. Returns asset ids (v1 video, a1 audio, i1 image); same content keeps its id.',
-    schema: obj({ paths: arr(str({ min: 1 }), { min: 1, max: 50 }), ...project }),
+    description: 'Register media files. Returns asset ids (v1 video, a1 audio, i1 image); same content keeps its id. library={kind,title,description,tags,licence:{id,source,attribution,url},provenance,genuine} adds visual assets (images, clips, screen recordings, SVG, charts, diagrams) to the asset library instead.',
+    schema: obj({ paths: arr(str({ min: 1 }), { min: 1, max: 50 }), library: record(any()).optional(), ...project }),
   },
   {
     name: 'video_reference',
@@ -40,8 +40,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_plan',
-    description: 'Build an edit from transcript+template, compile high-level intent, or compile script/storyboard JSON. off: sfx,graphics,zooms,transitions.',
-    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), script: str().optional(), storyboard: record(any()).optional(), intent: record(any()).optional(), dryRun: bool().optional(), wpm: num().optional(), narration: str().optional(), ...project }),
+    description: 'Build an edit from transcript+template, compile high-level intent, or compile script/storyboard JSON. off: sfx,graphics,zooms,transitions. mode=structured: inspectable plan from footage intelligence (action build|show|refresh|override|compile; asset, task, overrides {itemId: accept|drop|{ops}}, dryRun, rebase, semantic).',
+    schema: obj({ reference: str().optional(), src: union([str(), arr(str())]).optional(), template: str().optional(), target: num().optional(), ratio: str().optional(), title: str().optional(), sub: str().optional(), music: str().optional(), captions: record(any()).optional(), off: arr(str()).optional(), script: str().optional(), storyboard: record(any()).optional(), intent: record(any()).optional(), dryRun: bool().optional(), wpm: num().optional(), narration: str().optional(), mode: str().optional(), action: str().optional(), asset: str().optional(), task: str().optional(), overrides: record(any()).optional(), rebase: bool().optional(), semantic: bool().optional(), ...project }),
   },
   {
     name: 'video_edit',
@@ -50,8 +50,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_inspect',
-    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief. qa: pass file for a rendered MP4. footage/brief: local analysis of a video asset (cached); brief task informative|sports|cinematic|product|generic; faces/ocr use local OpenCV/tesseract when installed.',
-    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), file: str().optional(), targetLufs: num().optional(), task: str().optional(), faces: bool().optional(), ocr: bool().optional(), force: bool().optional(), maxSeconds: num().optional(), ...project, ...detail }),
+    description: 'Selective state read. what project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief|library (action list|search find=query|dups|recommend asset=v1). qa: pass file for a rendered MP4. footage/brief: local analysis of a video asset (cached); brief task informative|sports|cinematic|product|podcast|educational|generic; faces/ocr use local OpenCV/tesseract; temporalText = OCR every second; semantic = local MediaPipe objects/pose/tracking/scene types (models via video_doctor).',
+    schema: obj({ what: str().optional(), asset: str().optional(), from: num().optional(), to: num().optional(), find: str().optional(), words: bool().optional(), max: num().optional(), rev: num().optional(), scene: str().optional(), spec: record(any()).optional(), file: str().optional(), targetLufs: num().optional(), task: str().optional(), faces: bool().optional(), ocr: bool().optional(), temporalText: bool().optional(), semantic: bool().optional(), gestures: bool().optional(), action: str().optional(), kind: str().optional(), minScore: num().optional(), product: str().optional(), force: bool().optional(), maxSeconds: num().optional(), ...project, ...detail }),
     annotations: { readOnlyHint: true },
   },
   {
@@ -72,8 +72,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'video_doctor',
-    description: 'Check FFmpeg, encoders, and local speech engines.',
-    schema: obj({}),
+    description: 'Check FFmpeg, encoders, local speech engines; models=true adds semantic model status. install=[names] returns the download plan (sizes, licences); with confirm=true it downloads.',
+    schema: obj({ models: bool().optional(), install: arr(str()).optional(), confirm: bool().optional() }),
     annotations: { readOnlyHint: true },
   },
 ];

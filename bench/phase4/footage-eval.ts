@@ -86,7 +86,9 @@ for (const c of cases) {
   const t0 = Date.now();
   const a = await analyzeFootage(c.file);
   const ms = Date.now() - t0;
-  const det = a.observed.shots.slice(1).map((s) => s.t0);
+  // Hard cuts only; gradual transitions (Phase 5) are reported separately.
+  const det = a.observed.shots.slice(1).filter((s) => s.boundary !== 'gradual').map((s) => s.t0);
+  const gradual = (a.observed.transitions ?? []).map((g) => g.t);
   const matched = c.truth.cuts.map((g) => det.find((d) => within(d, g, 0.15)));
   const ctp = matched.filter((m) => m !== undefined).length;
   const cfp = det.filter((d) => !c.truth.cuts.some((g) => within(d, g, 0.15))).length;
@@ -100,7 +102,7 @@ for (const c of cases) {
   const hits = c.truth.events.filter((e) => a.inferred.moments.some((m) => within(m.t, e + 0.3, 1))).length;
   momentHit += hits; momentTotal += c.truth.events.length;
   const quietOk = c.name === 'fast-pan' ? null : a.inferred.quietRegions[0] !== undefined && a.inferred.quietRegions[0]!.x < 0.34 && a.inferred.quietRegions[0]!.y < 0.34;
-  const row = { name: c.name, dur: a.asset.dur, ms, rssMB: +((process.memoryUsage().rss - rss0) / 1048576).toFixed(1), truthCuts: c.truth.cuts.map((x) => +x.toFixed(2)), detectedCuts: det,
+  const row = { name: c.name, dur: a.asset.dur, ms, rssMB: +((process.memoryUsage().rss - rss0) / 1048576).toFixed(1), truthCuts: c.truth.cuts.map((x) => +x.toFixed(2)), detectedCuts: det, gradual,
     cutTP: ctp, cutFP: cfp, cutFN: c.truth.cuts.length - ctp, notCutFalseHits: notCutHits, meanCutErrMs: timeErr.length ? +(timeErr.reduce((s, x) => s + x, 0) / timeErr.length * 1000).toFixed(1) : null,
     silenceIoU: iou, events: c.truth.events, moments: a.inferred.moments.map((m) => ({ t: m.t, conf: m.confidence, evidence: m.evidence })), momentRecall: `${hits}/${c.truth.events.length}`,
     quietRegionTopLeft: quietOk, scenes: a.inferred.scenes.length, pacing: a.inferred.pacing };

@@ -1,0 +1,219 @@
+{
+ "date": "2026-11-28T11:53:01.803Z",
+ "host": "linux x64 4 cpu, node v22.23.5",
+ "media": "synthetic labelled footage (not real-world accuracy)",
+ "summary": {
+  "cutPrecision": 1,
+  "cutRecall": 1,
+  "meanCutErrMs": 0,
+  "dissolveFlashFalseCuts": 0,
+  "momentRecall": "5/5"
+ },
+ "rows": [
+  {
+   "name": "fast-pan",
+   "dur": 12,
+   "ms": 533,
+   "rssMB": -5.4,
+   "truthCuts": [],
+   "detectedCuts": [],
+   "gradual": [],
+   "cutTP": 0,
+   "cutFP": 0,
+   "cutFN": 0,
+   "notCutFalseHits": 0,
+   "meanCutErrMs": null,
+   "silenceIoU": [],
+   "events": [],
+   "moments": [],
+   "momentRecall": "0/0",
+   "quietRegionTopLeft": null,
+   "scenes": 1,
+   "pacing": {
+    "cutsPerMinute": 0,
+    "meanShotSec": 12,
+    "label": "low"
+   }
+  },
+  {
+   "name": "montage",
+   "dur": 16,
+   "ms": 422,
+   "rssMB": 0.6,
+   "truthCuts": [
+    3,
+    5.5,
+    7.5,
+    11,
+    13
+   ],
+   "detectedCuts": [
+    3,
+    5.5,
+    7.5,
+    11,
+    13
+   ],
+   "gradual": [],
+   "cutTP": 5,
+   "cutFP": 0,
+   "cutFN": 0,
+   "notCutFalseHits": 0,
+   "meanCutErrMs": 0,
+   "silenceIoU": [
+    0.83
+   ],
+   "events": [
+    4.2,
+    10.1
+   ],
+   "moments": [
+    {
+     "t": 4.75,
+     "conf": 0.816,
+     "evidence": [
+      "audio 19.4 dB above median",
+      "2 cuts within 4 s"
+     ]
+    },
+    {
+     "t": 8.25,
+     "conf": 0.797,
+     "evidence": [
+      "motion 4.4× median"
+     ]
+    },
+    {
+     "t": 10.25,
+     "conf": 0.951,
+     "evidence": [
+      "audio 21.3 dB above median",
+      "motion 4.2× median"
+     ]
+    }
+   ],
+   "momentRecall": "2/2",
+   "quietRegionTopLeft": true,
+   "scenes": 6,
+   "pacing": {
+    "cutsPerMinute": 18.75,
+    "meanShotSec": 2.667,
+    "label": "medium"
+   }
+  },
+  {
+   "name": "dissolve-flash",
+   "dur": 15,
+   "ms": 379,
+   "rssMB": 2.3,
+   "truthCuts": [
+    4,
+    11
+   ],
+   "detectedCuts": [
+    4,
+    11
+   ],
+   "gradual": [
+    7.5
+   ],
+   "cutTP": 2,
+   "cutFP": 0,
+   "cutFN": 0,
+   "notCutFalseHits": 0,
+   "meanCutErrMs": 0,
+   "silenceIoU": [
+    0.83
+   ],
+   "events": [
+    6.3
+   ],
+   "moments": [
+    {
+     "t": 6.75,
+     "conf": 0.779,
+     "evidence": [
+      "audio 20.8 dB above median"
+     ]
+    },
+    {
+     "t": 10.75,
+     "conf": 0.952,
+     "evidence": [
+      "motion 12.9× median"
+     ]
+    }
+   ],
+   "momentRecall": "1/1",
+   "quietRegionTopLeft": true,
+   "scenes": 4,
+   "pacing": {
+    "cutsPerMinute": 12,
+    "meanShotSec": 3.75,
+    "label": "medium"
+   }
+  },
+  {
+   "name": "fast-cuts",
+   "dur": 8,
+   "ms": 314,
+   "rssMB": 0,
+   "truthCuts": [
+    1,
+    1.8,
+    3,
+    3.9,
+    5,
+    6,
+    6.7
+   ],
+   "detectedCuts": [
+    1,
+    1.8,
+    3,
+    3.9,
+    5,
+    6,
+    6.7
+   ],
+   "gradual": [],
+   "cutTP": 7,
+   "cutFP": 0,
+   "cutFN": 0,
+   "notCutFalseHits": 0,
+   "meanCutErrMs": 0,
+   "silenceIoU": [],
+   "events": [
+    3.1,
+    6.4
+   ],
+   "moments": [
+    {
+     "t": 3.75,
+     "conf": 0.988,
+     "evidence": [
+      "audio 17.8 dB above median",
+      "motion 6.9× median",
+      "4 cuts within 4 s"
+     ]
+    },
+    {
+     "t": 6.75,
+     "conf": 0.876,
+     "evidence": [
+      "audio 20.9 dB above median",
+      "3 cuts within 4 s"
+     ]
+    }
+   ],
+   "momentRecall": "2/2",
+   "quietRegionTopLeft": true,
+   "scenes": 7,
+   "pacing": {
+    "cutsPerMinute": 52.5,
+    "meanShotSec": 1,
+    "label": "high"
+   }
+  }
+ ]
+}

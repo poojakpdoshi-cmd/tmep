@@ -1,0 +1,41 @@
+{
+ "media": {
+  "file": "Sports_360P-11b7_crf_10_ss_00_t_20.0.mp4",
+  "dur": 20,
+  "size": "480x360"
+ },
+ "conventional": {
+  "toolCalls": 2,
+  "agentWrittenTok": 1842,
+  "agentReadTok": 229174,
+  "runtimeMs": 3065,
+  "note": "write script + run; output still needs tracking, scene, event and reframe reasoning"
+ },
+ "conventionalLean": {
+  "toolCalls": 2,
+  "agentWrittenTok": 1902,
+  "agentReadTok": 2785
+ },
+ "frame": {
+  "toolCalls": 1,
+  "agentWrittenTok": 51,
+  "agentReadTok": 788,
+  "runtimeMs": 4335,
+  "cachedMs": 41,
+  "cacheBytes": 13569
+ },
+ "briefKeys": [
+  "ok",
+  "brief",
+  "task",
+  "media",
+  "observed",
+  "inferred",
+  "unavailable",
+  "moments",
+  "eventCandidates",
+  "fastSubjects",
+  "loudest",
+  "note"
+ ]
+}

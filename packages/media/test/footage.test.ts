@@ -101,3 +101,24 @@ test('briefs are compact, task-specific and state what is unavailable instead of
   const noTr = editingBrief(analysis(), 'informative') as Record<string, any>;
   assert.match(noTr.note, /no transcript/);
 });
+
+test('Phase 5 QA: graphics over a moving subject at the times it passes, subject cut by the crop, b-roll hiding it', () => {
+  const tl = emptyTimeline('9:16');
+  tl.clips = [newClip(tl, 'v1', 0, 10)];
+  // A runner crosses the 16:9 frame left → right over 10 s; a card sits on the right from 6 s to 9 s.
+  const boxes = Array.from({ length: 21 }, (_, i) => [i * 0.5, 0.05 + i * 0.04, 0.4, 0.1, 0.4] as [number, number, number, number, number]);
+  const runner = { id: 'person1', label: 'person', t0: 0, t1: 10, n: 21, score: 0.8, coverage: 1, speed: 0.08, area: 0.04, faceSamples: 0, boxes };
+  const a = analysis({ subjects: { primary: 'person1', moving: ['person1'], basis: [] }, reframe: [{ aspect: '9:16', subject: 'person1', keys: [{ t: 0, cx: 0.3, cy: 0.5 }], subjectInside: 1, basis: 'test' }] });
+  a.observed.tracks = [runner];
+  tl.scenes = [{ id: 'k', spec: { v: 1, at: 6, offset: 0, duration: 3, z: 0, layers: [{ id: 'card', kind: 'rect', x: 0.75, y: 0.6, w: 0.4, h: 0.3 }] } as never }];
+  const f = footageFindings(tl, new Map([['v1', a]]));
+  const g = f.find((x) => x.code === 'graphics-over-subject');
+  assert.ok(g, f.map((x) => x.code).join());
+  assert.ok((g!.detail!.times as number[]).every((t) => t >= 6 && t < 9), JSON.stringify(g!.detail));
+  const crop = f.find((x) => x.code === 'crop-cuts-subject');
+  assert.equal(crop?.fix, 'reframe c1 cx=0.3 cy=0.5', 'the runner leaves a centred 9:16 crop; a valid reframe op is offered');
+  tl.broll = [{ id: 'b1', src: 'v2', in: 0, ref: { at: 2 }, d: 3, fit: 'cover' } as never];
+  assert.ok(footageFindings(tl, new Map([['v1', a]])).some((x) => x.code === 'overlay-over-subject'));
+  // No tracks → no Phase 5 findings (nothing is guessed).
+  assert.ok(!footageFindings(tl, new Map([['v1', analysis()]])).some((x) => /subject/.test(x.code)));
+});

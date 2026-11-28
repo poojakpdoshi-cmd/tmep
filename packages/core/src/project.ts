@@ -15,6 +15,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { promises as fsp, openSync, closeSync, unlinkSync, statSync, writeSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { hostname } from 'node:os';
 import { assertSafeId } from './security.ts';
 import { TmepError } from './errors.ts';
 import { readJsonOr, writeJson, readJson, exists } from './util.ts';
@@ -120,7 +121,7 @@ export class Project {
     if (held?.has(this.dir)) return fn();
 
     const lock = path.join(this.dir, 'lock');
-    const token = `${process.pid}:${randomUUID()}`;
+    const token = `${process.pid}:${randomUUID()}:${hostname()}`;
     const deadline = Date.now() + 15000;
     for (;;) {
       try {
@@ -134,7 +135,18 @@ export class Project {
       } catch {
         try {
           const st = statSync(lock);
-          if (Date.now() - st.mtimeMs > 60000) {
+          // A lock whose owner process is gone (same host) is stale now, not after 60 s.
+          const content0 = readFileSync(lock, 'utf8');
+          const [pidStr, , host] = content0.split(':');
+          const pid = Number(pidStr);
+          const sameHost = host === undefined || host === hostname();
+          let dead = false;
+          if (sameHost && Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+            try { process.kill(pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+          }
+          // An empty lock means its creator died between create and write (owners write at once).
+          const emptyStale = content0 === '' && Date.now() - st.mtimeMs > 2000;
+          if (dead || emptyStale || Date.now() - st.mtimeMs > 60000) {
             const content = readFileSync(lock, 'utf8');
             if (statSync(lock).mtimeMs === st.mtimeMs && readFileSync(lock, 'utf8') === content) {
               unlinkSync(lock); // stale lock
@@ -143,7 +155,7 @@ export class Project {
         } catch {
           /* raced */
         }
-        if (Date.now() > deadline) throw new TmepError('E_STATE', 'project is locked by another process');
+        if (Date.now() > deadline) throw new TmepError('E_STATE', `project is locked by another process (${(() => { try { return `pid ${readFileSync(lock, 'utf8').split(':')[0]}`; } catch { return 'unknown owner'; } })()})`, 'a lock held by a crashed process on this machine is reclaimed automatically; otherwise wait for the other edit to finish');
         await new Promise((r) => setTimeout(r, 40));
       }
     }

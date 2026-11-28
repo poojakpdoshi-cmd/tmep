@@ -567,7 +567,8 @@ function validateFrames(
         report('safe-area', [layer.id], time, `${layer.id}: outside the frame or safe area at ${time.toFixed(3)}s`);
       }
       if (hasCaption && !layer.overlap && intersects(screen, band)) report('caption', [layer.id], time, `${layer.id}: overlaps the caption band at ${time.toFixed(3)}s`);
-      if (!layer.overlap && (layer.kind === 'rect' || layer.kind === 'text')) {
+      // Phase 5: shapes, morphs and motion-path layers collide too (Phase 4 covered rect/text only).
+      if (!layer.overlap && (['rect', 'text', 'rrect', 'ellipse', 'polygon', 'path'] as string[]).includes(layer.kind)) {
         for (const other of active) if (intersects(screen, other.box)) {
           report('collision', [other.layer.id, layer.id], time, `${layer.id} and ${other.layer.id}: collision at ${time.toFixed(3)}s`);
         }

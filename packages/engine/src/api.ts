@@ -63,7 +63,10 @@ import { renderTimeline, contactSheet, type RenderOptions } from '../../render/s
 import { runInspector } from '../../render/src/inspector.ts';
 import { footageFindings, sourceToOutput } from '../../render/src/footage-qa.ts';
 import { analyzeFootage, FOOTAGE_VERSION, type FootageAnalysis } from '../../media/src/footage.ts';
+import { modelStatus, installModels } from '../../media/src/models.ts';
+import { LIBRARY_SCHEMA, ASSET_KINDS, describeAsset, duplicates as libraryDuplicates, search as librarySearch, recommend as libraryRecommend, type Library, type EntryMeta, type AssetKind } from '../../media/src/library.ts';
 import { editingBrief, BRIEF_TASKS, type BriefTask } from '../../story/src/brief.ts';
+import { buildPlan, refreshPlan, applyOverrides, compilePlan, type EditPlan, type Override } from '../../story/src/plan.ts';
 import { computeShotMatch } from '../../render/src/color.ts';
 import { startJob, waitJob, cancelJob, jobView, readJob } from '../../render/src/jobs.ts';
 
@@ -589,8 +592,128 @@ export async function edit(ctx: Ctx, inp: { ops?: unknown[]; undo?: number; redo
 }
 
 // ---------------------------------------------------------------- inspect
+// ---------------------------------------------------------------- visual asset library (Phase 5)
+const libFile = (p: Project) => path.join(p.root, '.tmep', 'library.json');
+const readLib = async (p: Project) => readJsonOr<Library>(libFile(p), { schema: LIBRARY_SCHEMA, entries: [] });
+
+export interface LibraryInput { action?: 'list' | 'add' | 'search' | 'dups' | 'recommend' | 'licence'; paths?: string[]; meta?: EntryMeta; query?: string; kind?: string; max?: number; asset?: string; id?: string; minScore?: number; product?: string }
+
+/** The project's visual asset library: add with metadata and licence, search, find duplicates, recommend. */
+export async function library(ctx: Ctx, inp: LibraryInput): Promise<Record<string, unknown>> {
+  const action = inp.action ?? 'list';
+  if (inp.kind !== undefined && !(ASSET_KINDS as readonly string[]).includes(inp.kind)) throw new TmepError('E_INPUT', `unknown asset kind "${inp.kind}"`, `kind: ${ASSET_KINDS.join('|')}`);
+  if (inp.meta?.kind !== undefined && !(ASSET_KINDS as readonly string[]).includes(inp.meta.kind)) throw new TmepError('E_INPUT', `unknown asset kind "${inp.meta.kind}"`, `kind: ${ASSET_KINDS.join('|')}`);
+  const p = await openProject(ctx.project, action === 'add', ctx.projectRoots);
+  if (action === 'add' || action === 'licence') {
+    return p.withLock(async () => {
+      const lib = await readLib(p);
+      if (action === 'licence') {
+        const e = lib.entries.find((x) => x.id === inp.id);
+        if (!e) throw new TmepError('E_NOT_FOUND', `library entry ${inp.id} not found`);
+        const l = inp.meta?.licence ?? {};
+        e.licence = { ...e.licence, ...l, verified: !!(l.id ?? e.licence.id) && (l.id ?? e.licence.id) !== 'unknown' && l.verified !== false };
+        if (inp.meta?.genuine !== undefined) e.genuine = inp.meta.genuine;
+        await writeJson(libFile(p), lib, false);
+        return { ok: 1, id: e.id, licence: e.licence, genuine: e.genuine };
+      }
+      if (!inp.paths?.length) throw new TmepError('E_INPUT', 'library add needs paths');
+      const envRoots = parseAllowedRoots();
+      const allowed = ctx.mediaRoots ?? (envRoots.length ? [ctx.project, ...envRoots] : undefined);
+      const added: Record<string, unknown>[] = [];
+      for (const raw of inp.paths) {
+        const file = await resolveSafePath(raw, ctx.project, allowed, 'library path');
+        if (!(await exists(file))) throw new TmepError('E_NOT_FOUND', `file not found: ${raw}`);
+        const next = `L${lib.entries.reduce((m, e) => Math.max(m, Number(e.id.slice(1)) || 0), 0) + 1}`;
+        const e = await describeAsset(file, inp.meta ?? {}, next);
+        const same = lib.entries.find((x) => x.sha256 === e.sha256 && x.file === e.file);
+        if (same) { added.push({ id: same.id, existed: true }); continue; }
+        lib.entries.push(e);
+        added.push({ id: e.id, kind: e.kind, licence: e.licence.id, verified: e.licence.verified, ...(e.dhash && { dhash: e.dhash }) });
+      }
+      await writeJson(libFile(p), lib, false);
+      const dups = libraryDuplicates(lib.entries).filter((d) => added.some((a) => a.id === d.a || a.id === d.b));
+      return { ok: 1, added, ...(dups.length && { duplicates: dups }) };
+    });
+  }
+  const lib = await readLib(p);
+  const max = Math.min(50, Math.max(1, inp.max ?? 10));
+  if (action === 'list') return { entries: lib.entries.slice(0, 200).map((e) => ({ id: e.id, kind: e.kind, file: path.basename(e.file), ...(e.title && { title: e.title }), tags: e.tags, licence: e.licence.id, verified: e.licence.verified, ...(e.genuine !== undefined && { genuine: e.genuine }) })) };
+  if (action === 'dups') return { duplicates: libraryDuplicates(lib.entries) };
+  if (action === 'search') {
+    if (!inp.query) throw new TmepError('E_INPUT', 'library search needs query');
+    return { results: librarySearch(lib.entries, inp.query, { kind: inp.kind as AssetKind | undefined, max }) };
+  }
+  if (action === 'recommend') {
+    if (!inp.asset) throw new TmepError('E_INPUT', 'library recommend needs asset (a transcribed source)', 'e.g. {what:"library", action:"recommend", asset:"v1"}');
+    const words = (await transcriptsFor(p, [inp.asset]))[inp.asset] ?? [];
+    if (!words.length) throw new TmepError('E_NO_TRANSCRIPT', `${inp.asset} has no transcript`, 'run transcribe first');
+    const segs: { t0: number; t1: number; text: string }[] = [];
+    for (const w of words) {
+      const last = segs.at(-1);
+      if (last && w.s - last.t1 < 0.6 && last.t1 - last.t0 < 8 && !/[.!?]$/.test(last.text)) { last.t1 = w.e; last.text += ` ${w.w}`; } else segs.push({ t0: w.s, t1: w.e, text: w.w });
+    }
+    const tl = (await p.manifest()).head ? await p.timeline() : undefined;
+    return libraryRecommend(lib.entries, segs, { minScore: inp.minScore, max, aspect: tl?.settings.ratio, product: inp.product }) as unknown as Record<string, unknown>;
+  }
+  throw new TmepError('E_INPUT', `unknown library action "${action}"`, 'action: list|add|search|dups|recommend|licence');
+}
+
+// ---------------------------------------------------------------- structured editing plan (Phase 5.4)
+export interface EditPlanInput { action?: 'build' | 'show' | 'refresh' | 'override' | 'compile'; asset?: string; task?: string; overrides?: Record<string, Override>; dryRun?: boolean; rebase?: boolean; semantic?: boolean }
+const planFile = (p: Project, asset: string, task: string) => path.join(p.root, '.tmep', 'plans', `${asset}-${task}.json`);
+
+/**
+ * build: analyse (cached) and propose; refresh: recompute only items whose inputs changed; override:
+ * accept/drop/replace items; compile: resolve to ops and apply through `edit` (dryRun supported). A
+ * plan compiles only against the revision it was built on unless `rebase` is set.
+ */
+export async function editPlan(ctx: Ctx, inp: EditPlanInput): Promise<Record<string, unknown>> {
+  const action = inp.action ?? 'build';
+  if (!inp.asset) throw new TmepError('E_INPUT', 'plan needs asset', 'e.g. {mode:"structured", asset:"v1", task:"informative"}');
+  const task = inp.task ?? 'generic';
+  if (!(BRIEF_TASKS as readonly string[]).includes(task)) throw new TmepError('E_INPUT', `unknown plan task "${task}"`, `task: ${BRIEF_TASKS.join('|')}`);
+  const p = await openProject(ctx.project, action === 'build', ctx.projectRoots);
+  const file = planFile(p, inp.asset, task);
+  const inputs = async () => {
+    const { analysis } = await footageAnalysis(p, { asset: inp.asset!, faces: true, semantic: inp.semantic });
+    const m = await p.manifest();
+    const tl = m.head ? await p.timeline() : undefined;
+    return { asset: inp.asset!, dur: (await p.asset(inp.asset!)).dur, analysis, words: (await transcriptsFor(p, [inp.asset!]))[inp.asset!] ?? [], library: (await readLib(p)).entries, ratio: tl?.settings.ratio ?? '16:9', task, baseRev: m.head };
+  };
+  const view = (pl: EditPlan, extra: Record<string, unknown> = {}) => ({ ok: 1, plan: path.relative(p.root, file), baseRev: pl.baseRev, items: pl.items.map((it) => ({ id: it.id, kind: it.kind, status: it.status, ...(it.at && { at: it.at }), reason: it.reason, conf: it.confidence, ...(ctx.detail !== 'minimal' && { evidence: it.evidence, ops: it.ops }), ...(it.recomputed && { recomputed: true }) })), ...(pl.requests.length && { assetRequests: pl.requests }), notes: pl.notes, ...extra });
+  if (action === 'build') { const pl = buildPlan(await inputs()); await writeJson(file, pl, false); return view(pl); }
+  const prev = await readJsonOr<EditPlan | undefined>(file, undefined);
+  if (!prev) throw new TmepError('E_NOT_FOUND', `no plan for ${inp.asset}/${task}`, 'build it first (action:"build")');
+  if (action === 'show') return view(prev);
+  if (action === 'refresh') { const r = refreshPlan(prev, await inputs()); await writeJson(file, r.plan, false); return view(r.plan, { changed: r.changed, kept: r.kept, recomputed: r.recomputed }); }
+  if (action === 'override') {
+    let pl: EditPlan;
+    try { pl = applyOverrides(prev, inp.overrides ?? {}); } catch (e) { throw new TmepError('E_INPUT', (e as Error).message); }
+    await writeJson(file, pl, false); return view(pl);
+  }
+  if (action !== 'compile') throw new TmepError('E_INPUT', `unknown plan action "${action}"`, 'action: build|show|refresh|override|compile');
+  const pl = inp.overrides ? applyOverrides(prev, inp.overrides) : prev;
+  const head = (await p.manifest()).head;
+  if (head !== pl.baseRev && !inp.rebase) throw new TmepError('E_CONFLICT', `the project moved from rev ${pl.baseRev} to ${head} since the plan was built`, 'refresh the plan, or compile with rebase:true to apply it on the current head');
+  const lib = await readLib(p);
+  const imported = new Map<string, string>();
+  for (const it of pl.items.filter((x) => x.status !== 'dropped')) for (const op of it.ops) for (const v of Object.values(op)) {
+    if (typeof v !== 'string' || !v.startsWith('library:') || imported.has(v.slice(8))) continue;
+    const e = lib.entries.find((x) => x.id === v.slice(8));
+    if (!e) throw new TmepError('E_NOT_FOUND', `library entry ${v.slice(8)} no longer exists`);
+    if (inp.dryRun) { imported.set(e.id, `(import ${path.basename(e.file)})`); continue; }
+    const r = await importMedia(ctx, { paths: [e.file] }) as { assets?: { id: string }[] };
+    imported.set(e.id, r.assets?.[0]?.id ?? '');
+  }
+  const { ops, skipped } = compilePlan(pl, (id) => imported.get(id)!);
+  if (inp.dryRun && [...imported.values()].some((v) => v.startsWith('('))) return { ok: 1, dryRun: true, ops, skipped, note: 'library assets would be imported first; ops show placeholders' };
+  const res = await edit(ctx, { ops, dryRun: inp.dryRun, note: `plan ${inp.asset}/${task}`, ...(!inp.rebase && { expectedRev: pl.baseRev }) });
+  return { ...res, compiled: ops.length, ...((inp.dryRun || ctx.detail !== 'minimal') && { ops }), ...(skipped.length && { skipped }) };
+}
+
 // ---------------------------------------------------------------- footage intelligence (Phase 4B)
-interface FootageInput { asset: string; faces?: boolean; ocr?: boolean; force?: boolean; maxSeconds?: number }
+interface FootageInput { asset: string; faces?: boolean; ocr?: boolean; temporalText?: boolean; semantic?: boolean; gestures?: boolean; force?: boolean; maxSeconds?: number }
+const ADAPTERS = ['faces', 'ocr', 'temporalText', 'semantic', 'gestures'] as const;
 
 /** Content-addressed cache keys: media hash + analyzer version + settings + transcript; adapters layer on the base. */
 export async function footageKeys(p: Project, assetId: string, inp: Omit<FootageInput, 'asset'>) {
@@ -600,7 +723,12 @@ export async function footageKeys(p: Project, assetId: string, inp: Omit<Footage
   const maxSeconds = inp.maxSeconds ?? 1800;
   if (!(maxSeconds >= 1 && maxSeconds <= 7200)) throw new TmepError('E_INPUT', 'maxSeconds must be 1–7200');
   const base = hashOf({ kind: 'footage', v: FOOTAGE_VERSION, media: a.hash, maxSeconds, tr: words.length ? hashOf(words) : null });
-  const layered = inp.faces || inp.ocr ? hashOf({ base, faces: !!inp.faces, ocr: !!inp.ocr }) : base;
+  const on = ADAPTERS.filter((k) => inp[k] && (k !== 'gestures' || inp.semantic));
+  // Semantic results depend on the exact model files: their checksums are part of the key.
+  const models = inp.semantic ? (await modelStatus()).models.filter((m) => m.verified).map((m) => m.file) : [];
+  const layered = !on.length ? base : on.length <= 2 && on.every((k) => k === 'faces' || k === 'ocr')
+    ? hashOf({ base, faces: !!inp.faces, ocr: !!inp.ocr }) // Phase 4 keys stay valid
+    : hashOf({ base, adapters: on, models });
   return { a, words, maxSeconds, base, layered };
 }
 
@@ -617,8 +745,9 @@ export async function footageAnalysis(p: Project, inp: FootageInput, signal?: Ab
   }
   if (k.layered === k.base) return { analysis: base, cached: false };
   // Only the requested adapters run; the video/audio passes are reused from the base record.
-  const layered = await analyzeFootage(k.a.path, { base, faces: inp.faces, ocr: inp.ocr, signal });
-  await writeJson(layeredFile, layered, false);
+  const layered = await analyzeFootage(k.a.path, { base, faces: inp.faces, ocr: inp.ocr, temporalText: inp.temporalText, semantic: inp.semantic, gestures: inp.gestures, words: k.words, signal });
+  // An adapter that could not run is reported, not cached: installing it later must take effect.
+  if (!(inp.semantic && layered.capabilities.semantic?.status !== 'ok')) await writeJson(layeredFile, layered, false);
   return { analysis: layered, cached: false };
 }
 
@@ -628,7 +757,9 @@ async function cachedFootage(p: Project, ids: Iterable<string>): Promise<Map<str
   for (const id of new Set(ids)) {
     const a = await p.asset(id).catch(() => undefined);
     if (!a || a.kind !== 'video') continue;
-    for (const v of [{ faces: true, ocr: true }, { faces: true }, { ocr: true }, {}]) {
+    const combos = Array.from({ length: 16 }, (_, m) => ({ faces: !!(m & 1), ocr: !!(m & 2), temporalText: !!(m & 4), semantic: !!(m & 8) }))
+      .sort((x, y) => Object.values(y).filter(Boolean).length - Object.values(x).filter(Boolean).length);
+    for (const v of combos) {
       const k = await footageKeys(p, id, v);
       const hit = await readJsonOr<FootageAnalysis | undefined>(p.cachePath('footage', `${k.layered}.json`), undefined);
       if (hit) { out.set(id, hit); break; }
@@ -644,21 +775,26 @@ function footageSummary(a: FootageAnalysis, cached: boolean, detail: Ctx['detail
     ok: 1, ...(cached && { cached: true }), dur: a.asset.dur, shots: a.observed.shots.length, scenes: a.inferred.scenes.length,
     pacing: a.inferred.pacing.label, silences: a.observed.silences.length, moments: a.inferred.moments.slice(0, detail === 'minimal' ? 3 : 8).map((m) => ({ t: m.t, conf: m.confidence, why: m.evidence.join('; ') })),
     ...(a.inferred.presenter && { presenter: a.inferred.presenter }),
+    ...(a.observed.transitions?.length && { transitions: a.observed.transitions.map((g) => g.t) }),
+    ...(a.inferred.subjects && { subjects: { presenter: a.inferred.subjects.presenter, primary: a.inferred.subjects.primary, moving: a.inferred.subjects.moving.length }, tracks: (a.observed.tracks ?? []).filter((t) => t.n >= 3).length }),
+    ...(a.inferred.sceneTypes && { sceneTypes: a.inferred.sceneTypes.map((s) => `${s.shot}:${s.label}`) }),
+    ...(a.inferred.events?.length && { events: a.inferred.events.slice(0, detail === 'minimal' ? 3 : 8).map((e) => ({ t: e.t, signals: Object.keys(e.signals) })) }),
     quiet: a.inferred.quietRegions.map((q) => [q.x, q.y]), ...(detail !== 'minimal' && { capabilities: caps }),
   };
 }
 
-export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number; task?: string; faces?: boolean; ocr?: boolean; force?: boolean; maxSeconds?: number }): Promise<Record<string, unknown>> {
+export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number; task?: string; faces?: boolean; ocr?: boolean; temporalText?: boolean; semantic?: boolean; gestures?: boolean; force?: boolean; maxSeconds?: number }): Promise<Record<string, unknown>> {
   if (inp.what === 'footage' || inp.what === 'brief') {
     if (!inp.asset) throw new TmepError('E_INPUT', `inspect ${inp.what} needs asset`, 'e.g. {what:"brief", asset:"v1", task:"informative"}');
     const task = (inp.task ?? 'generic') as BriefTask;
     if (inp.what === 'brief' && !(BRIEF_TASKS as readonly string[]).includes(task)) throw new TmepError('E_INPUT', `unknown brief task "${inp.task}"`, `task: ${BRIEF_TASKS.join('|')}`);
     const p = await openProject(ctx.project, false);
-    const { analysis, cached } = await footageAnalysis(p, { asset: inp.asset, faces: inp.faces, ocr: inp.ocr, force: inp.force, maxSeconds: inp.maxSeconds });
+    const { analysis, cached } = await footageAnalysis(p, { asset: inp.asset, faces: inp.faces, ocr: inp.ocr, temporalText: inp.temporalText, semantic: inp.semantic, gestures: inp.gestures, force: inp.force, maxSeconds: inp.maxSeconds });
     if (inp.what === 'footage') return footageSummary(analysis, cached, ctx.detail);
     const words = (await transcriptsFor(p, [inp.asset]))[inp.asset] ?? [];
     return { ok: 1, ...(cached && { cached: true }), ...editingBrief(analysis, task, words, Math.min(12, Math.max(1, inp.max ?? 6))) };
   }
+  if (inp.what === 'library') return library(ctx, { action: (inp as { action?: LibraryInput['action'] }).action ?? 'list', query: inp.find, kind: (inp as { kind?: string }).kind, max: inp.max, asset: inp.asset, minScore: (inp as { minScore?: number }).minScore, product: (inp as { product?: string }).product });
   if (inp.what === 'scenes') {
     const p = await openProject(ctx.project, false);
     const tl = await p.timeline(inp.rev);
@@ -809,7 +945,7 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
       return { ...report, findings, advisories: report.advisories + extra.length, ok: report.ok ? 1 : 0 };
     }
     default:
-      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief');
+      throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief|library');
   }
 }
 
@@ -923,7 +1059,21 @@ export function help(topic = 'workflow', includeSchema = false): Record<string, 
 }
 
 // ---------------------------------------------------------------- doctor
-export async function doctor(): Promise<Record<string, unknown>> {
+/**
+ * Semantic model status, or an install. Nothing is downloaded unless `install` names models AND
+ * `confirm` is true; otherwise the plan (files, sizes, licences, source host) is returned.
+ */
+export async function models(inp: { install?: string[]; confirm?: boolean } = {}): Promise<Record<string, unknown>> {
+  if (inp.install?.length) {
+    const r = await installModels(inp.install, { confirm: inp.confirm });
+    return { ok: 1, installed: r.installed, ...(!inp.confirm && r.planned.length && { planned: r.planned.map((m) => ({ file: m.file, MB: +(m.bytes / 1e6).toFixed(1), licence: m.licence, from: new URL(m.url).host })), downloadMB: +(r.downloadBytes / 1e6).toFixed(1), hint: 'repeat with confirm:true (CLI: --yes) to download' }) };
+  }
+  const st = await modelStatus();
+  return { dir: st.dir, models: st.models.map((m) => ({ name: m.name, file: m.file, MB: +(m.bytes / 1e6).toFixed(1), licence: m.licence, task: m.task, state: m.verified ? 'ok' : m.installed ? 'checksum mismatch' : 'missing' })), downloadMB: +(st.downloadBytes / 1e6).toFixed(1), runtime: st.runtime };
+}
+
+export async function doctor(inp: { models?: boolean; install?: string[]; confirm?: boolean } = {}): Promise<Record<string, unknown>> {
+  if (inp.install?.length) return models(inp);
   const out: Record<string, unknown> = { tmep: VERSION, protocol: PROTOCOL, node: process.version, platform: `${process.platform}-${process.arch}` };
   try {
     const info = await ffmpegInfo();
@@ -933,5 +1083,6 @@ export async function doctor(): Promise<Record<string, unknown>> {
     out.ffmpeg = { error: (e as Error).message };
   }
   out.speech = await engineStatus();
+  if (inp.models) out.semantic = await models();
   return out;
 }

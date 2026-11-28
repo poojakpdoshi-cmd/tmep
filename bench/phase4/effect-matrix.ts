@@ -10,7 +10,7 @@
  * this verifies wiring and visibility, not aesthetic quality.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as api from '../../packages/engine/src/api.ts';
@@ -35,6 +35,14 @@ ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=4', '-f', 'lavfi', '-i', 'si
 // B: a different pattern with a green field (chroma key target) + 660 Hz with a 7 kHz component (de-ess target).
 ff(['-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=4,drawbox=x=380:y=40:w=220:h=280:color=0x00ff00:t=fill', '-f', 'lavfi', '-i', 'sine=f=660:d=4:sample_rate=48000,volume=0.4[s];sine=f=7000:d=4:sample_rate=48000,volume=0.15[h];[s][h]amix=inputs=2:normalize=0',
   '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', path.join(proj, 'b.mp4')]);
+// Phase 5: --real=<videoA>,<videoB> replaces the picture with real footage (audio stays synthetic,
+// because the licensed real clips are audio-removed). Evidence then goes to docs/phase-5.
+const real = args.find((a) => a.startsWith('--real='))?.slice(7).split(',');
+if (real) for (const [k, f] of [['a', real[0]!], ['b', real[1] ?? real[0]!]] as const) {
+  const synth = path.join(proj, `${k}.mp4`), tmp = path.join(proj, `${k}-real.mp4`);
+  ff(['-i', path.resolve(f), '-i', synth, '-map', '0:v', '-map', '1:a', '-t', '4', '-vf', 'scale=640:360:force_original_aspect_ratio=increase,crop=640:360,fps=30', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'copy', tmp]);
+  renameSync(tmp, synth);
+}
 // A tiny identity-with-a-twist LUT (swaps red and blue) inside the project.
 {
   const N = 2, rows: string[] = ['LUT_3D_SIZE 2'];
@@ -167,9 +175,9 @@ for (const c of cases) {
 }
 
 const pass = results.filter((r) => r.ok).length;
-const report = { date: new Date().toISOString(), host: `${os.platform()} ${os.arch()} ${os.cpus().length} cpu, node ${process.version}`, media: 'synthetic testsrc2/testsrc + tones', baseline: { dur: baseDur }, pass, total: results.length, results };
+const report = { date: new Date().toISOString(), host: `${os.platform()} ${os.arch()} ${os.cpus().length} cpu, node ${process.version}`, media: real ? `real video (${real.map((f) => path.basename(f)).join(', ')}; YouTube UGC, CC BY 4.0) + synthetic tones` : 'synthetic testsrc2/testsrc + tones', baseline: { dur: baseDur }, pass, total: results.length, results };
 if (!filter) {
-  const outFile = path.resolve(import.meta.dirname, '../../docs/phase-4/evidence/effect-matrix.json');
+  const outFile = path.resolve(import.meta.dirname, real ? '../../docs/phase-5/evidence/effect-matrix-real.json' : '../../docs/phase-4/evidence/effect-matrix.json');
   mkdirSync(path.dirname(outFile), { recursive: true });
   writeFileSync(outFile, JSON.stringify(report, null, 1) + '\n');
 }
