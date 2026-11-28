@@ -1,0 +1,58 @@
+{
+ "summary": {
+  "frames": 790,
+  "workerMs": 0,
+  "maxRssMB": 0,
+  "totalMs": 13560,
+  "speechSource": "transcript words",
+  "twoShotSpeakerAccuracy": null,
+  "twoShotCoverage": null,
+  "twoShotSteps": 0,
+  "visibleSpeakerRecall": 0.75,
+  "visibleSpeakerSteps": 20,
+  "reactionFalseSpeakerRate": null,
+  "reactionSteps": 0,
+  "offscreenAttributed": null,
+  "speakerInCrop": {
+   "phase6": 0.6,
+   "phase7": 1,
+   "steps": 20
+  },
+  "cropTravelPerMin": {
+   "phase6": 0,
+   "phase7": 0
+  },
+  "speakerSwitches": {
+   "phase7": 0,
+   "labelled": 0
+  },
+  "splitScreenRecommendations": 0
+ },
+ "windows": [
+  {
+   "window": "C",
+   "faceTracks": 7,
+   "cuts": 6,
+   "segments": [
+    [
+     387,
+     389,
+     "face4"
+    ],
+    [
+     390.25,
+     392.5,
+     "face6"
+    ]
+   ],
+   "p6": {
+    "subject": "person4",
+    "keys": 1
+   },
+   "p7": {
+    "keys": 13,
+    "recommendations": []
+   }
+  }
+ ]
+}

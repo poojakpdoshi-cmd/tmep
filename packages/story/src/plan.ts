@@ -83,13 +83,14 @@ export function mapToTimeline(ranges: [number, number][], t: number): number | u
 export const FOLLOW_MAX_SPEED = 0.35;
 /**
  * Follow keys from raw reframe keys: limit crop-centre speed (no whip pans), drop keys that a straight
- * line between neighbours already explains (≤ 0.01), keep shot changes as hard steps.
+ * line between neighbours already explains (≤ 0.01), keep shot changes (keys ≤ 0.05 s apart) as hard steps.
  */
 export function smoothFollow(keys: { t: number; cx: number; cy: number }[], maxSpeed = FOLLOW_MAX_SPEED): { t: number; cx: number; cy: number }[] {
   if (!keys.length) return [];
   const out = [{ ...keys[0]! }];
   for (const k of keys.slice(1)) {
-    const prev = out.at(-1)!, dt = Math.max(1e-3, k.t - prev.t), lim = maxSpeed * dt;
+    // Keys ≤ 0.05 s apart mark a cut (hard step): no speed limit there (Phase 7; it used to pan across cuts).
+    const prev = out.at(-1)!, dt = Math.max(1e-3, k.t - prev.t), lim = dt <= 0.05 ? Infinity : maxSpeed * dt;
     const step = (a: number, b: number) => a + Math.max(-lim, Math.min(lim, b - a));
     out.push({ t: k.t, cx: r2(step(prev.cx, k.cx)), cy: r2(step(prev.cy, k.cy)) });
   }
