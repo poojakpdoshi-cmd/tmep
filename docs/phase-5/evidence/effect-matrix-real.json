@@ -1,0 +1,1251 @@
+{
+ "date": "2026-11-28T12:25:08.771Z",
+ "host": "linux x64 4 cpu, node v22.23.5",
+ "media": "real video (Vlog_360P-1e5b_crf_10_ss_00_t_20.0.mp4, NewsClip_360P-1e1c_crf_10_ss_00_t_20.0.mp4; YouTube UGC, CC BY 4.0) + synthetic tones",
+ "baseline": {
+  "dur": 6
+ },
+ "pass": 87,
+ "total": 88,
+ "results": [
+  {
+   "name": "fx kf",
+   "expect": "video",
+   "did": [
+    "fx kf c1"
+   ],
+   "ok": true,
+   "videoDiff": 38.39,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.8,
+   "ms": 2323
+  },
+  {
+   "name": "fx zoomin",
+   "expect": "video",
+   "did": [
+    "fx zoomin c1"
+   ],
+   "ok": true,
+   "videoDiff": 21.19,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2357
+  },
+  {
+   "name": "fx zoomout",
+   "expect": "video",
+   "did": [
+    "fx zoomout c1"
+   ],
+   "ok": true,
+   "videoDiff": 23.61,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2170
+  },
+  {
+   "name": "fx push",
+   "expect": "video",
+   "did": [
+    "fx push c1"
+   ],
+   "ok": true,
+   "videoDiff": 17.63,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2227
+  },
+  {
+   "name": "fx pull",
+   "expect": "video",
+   "did": [
+    "fx pull c1"
+   ],
+   "ok": true,
+   "videoDiff": 19.04,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 1998
+  },
+  {
+   "name": "fx panleft",
+   "expect": "video",
+   "did": [
+    "fx panleft c1"
+   ],
+   "ok": true,
+   "videoDiff": 35.96,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 2319
+  },
+  {
+   "name": "fx panright",
+   "expect": "video",
+   "did": [
+    "fx panright c1"
+   ],
+   "ok": true,
+   "videoDiff": 33.76,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2058
+  },
+  {
+   "name": "fx panup",
+   "expect": "video",
+   "did": [
+    "fx panup c1"
+   ],
+   "ok": true,
+   "videoDiff": 33.93,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1827
+  },
+  {
+   "name": "fx pandown",
+   "expect": "video",
+   "did": [
+    "fx pandown c1"
+   ],
+   "ok": true,
+   "videoDiff": 35.41,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1923
+  },
+  {
+   "name": "fx mask rect",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 92.88,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1,
+   "ms": 1531
+  },
+  {
+   "name": "fx mask ellipse",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 102.7,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.9,
+   "ms": 1474
+  },
+  {
+   "name": "fx mask poly",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 98.29,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1,
+   "ms": 1717
+  },
+  {
+   "name": "fx mask concave",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 103.79,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1920
+  },
+  {
+   "name": "fx mask concave keyed",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 101.67,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.4,
+   "ms": 2043
+  },
+  {
+   "name": "fx mask bezier",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 88.04,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.1,
+   "ms": 1672
+  },
+  {
+   "name": "fx mask reveal",
+   "expect": "video",
+   "did": [
+    "fx mask c1"
+   ],
+   "ok": true,
+   "videoDiff": 57.87,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 5.1,
+   "ms": 5638
+  },
+  {
+   "name": "fx blur gaussian",
+   "expect": "video",
+   "did": [
+    "fx blur c1"
+   ],
+   "ok": true,
+   "videoDiff": 8.12,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.1,
+   "ms": 1944
+  },
+  {
+   "name": "fx blur directional",
+   "expect": "video",
+   "did": [
+    "fx blur c1"
+   ],
+   "ok": true,
+   "videoDiff": 11.72,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.4,
+   "ms": 1907
+  },
+  {
+   "name": "fx glow",
+   "expect": "video",
+   "did": [
+    "fx glow c1"
+   ],
+   "ok": true,
+   "videoDiff": 63.78,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1782
+  },
+  {
+   "name": "fx shadow (b-roll)",
+   "expect": "video",
+   "did": [
+    "pip b3 br@0.5",
+    "fx shadow b3"
+   ],
+   "ok": true,
+   "videoDiff": 10.55,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 8.8,
+   "ms": 9386
+  },
+  {
+   "name": "fx blend multiply (b-roll)",
+   "expect": "video",
+   "did": [
+    "pip b3 br@0.5",
+    "fx blend b3"
+   ],
+   "ok": true,
+   "videoDiff": 96.32,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 7.7,
+   "ms": 8593
+  },
+  {
+   "name": "fx chromakey (b-roll)",
+   "expect": "video",
+   "did": [
+    "broll b3@0.5",
+    "fx chromakey b3"
+   ],
+   "ok": true,
+   "videoDiff": 66.08,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 3.1,
+   "ms": 3622
+  },
+  {
+   "name": "fx mblur",
+   "expect": "video",
+   "did": [
+    "fx mblur c1"
+   ],
+   "ok": true,
+   "videoDiff": 12.83,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.8,
+   "ms": 2508
+  },
+  {
+   "name": "fx persp",
+   "expect": "video",
+   "did": [
+    "fx persp c1"
+   ],
+   "ok": true,
+   "videoDiff": 34.69,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.8,
+   "ms": 2362
+  },
+  {
+   "name": "fx chain cinematic-vignette",
+   "expect": "video",
+   "did": [
+    "fx chain c1"
+   ],
+   "ok": true,
+   "videoDiff": 17.28,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.3,
+   "ms": 3112
+  },
+  {
+   "name": "fx chain soft-glow-warm",
+   "expect": "video",
+   "did": [
+    "fx chain c1"
+   ],
+   "ok": true,
+   "videoDiff": 42.25,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 2100
+  },
+  {
+   "name": "fx chain dreamy-blur",
+   "expect": "video",
+   "did": [
+    "fx chain c1"
+   ],
+   "ok": true,
+   "videoDiff": 48.12,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2196
+  },
+  {
+   "name": "fx chain chroma-clean (b-roll)",
+   "expect": "video",
+   "did": [
+    "broll b3@0.5",
+    "fx chain b3"
+   ],
+   "ok": true,
+   "videoDiff": 66.73,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 3.3,
+   "ms": 3941
+  },
+  {
+   "name": "fx chain crisp-callout (b-roll)",
+   "expect": "video",
+   "did": [
+    "pip b3 br@0.5",
+    "fx chain b3"
+   ],
+   "ok": true,
+   "videoDiff": 10.55,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 6.8,
+   "ms": 7445
+  },
+  {
+   "name": "jcut",
+   "expect": "audio",
+   "did": [
+    "trim c2",
+    "jcut c2 0.6s"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.172,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.1,
+   "ms": 2696
+  },
+  {
+   "name": "lcut",
+   "expect": "audio",
+   "did": [
+    "lcut c1 0.6s"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 5.465,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1734
+  },
+  {
+   "name": "ramp",
+   "expect": "any",
+   "did": [
+    "ramp c1 (3k)"
+   ],
+   "ok": true,
+   "videoDiff": 50.37,
+   "audioDiff": 1.081,
+   "dur": 5.5,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1885
+  },
+  {
+   "name": "freeze",
+   "expect": "both",
+   "did": [
+    "freeze c3@1 1s"
+   ],
+   "ok": true,
+   "videoDiff": 59.26,
+   "audioDiff": 1,
+   "dur": 7,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2174
+  },
+  {
+   "name": "reverse",
+   "expect": "video",
+   "did": [
+    "reverse on 1 clips"
+   ],
+   "ok": true,
+   "videoDiff": 59.21,
+   "audioDiff": 1.995,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1835
+  },
+  {
+   "name": "punch",
+   "expect": "video",
+   "did": [
+    "punch c1@1 to=1.3"
+   ],
+   "ok": true,
+   "videoDiff": 42.65,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.2,
+   "ms": 2727
+  },
+  {
+   "name": "matchcut",
+   "expect": "video",
+   "did": [
+    "matchcut c1->c2"
+   ],
+   "ok": true,
+   "videoDiff": 15.31,
+   "audioDiff": 0.698,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 3.7,
+   "ms": 4154
+  },
+  {
+   "name": "reframe (9:16)",
+   "expect": "video",
+   "did": [
+    "format 9:16@30",
+    "reframe 1 clips"
+   ],
+   "ok": true,
+   "videoDiff": 59.89,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1,
+   "ms": 3016
+  },
+  {
+   "name": "stabilize",
+   "expect": "video",
+   "did": [
+    "stabilize on 1 clips"
+   ],
+   "ok": true,
+   "videoDiff": 27.82,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2290
+  },
+  {
+   "name": "splitscreen",
+   "expect": "video",
+   "did": [
+    "splitscreen 2h x2"
+   ],
+   "ok": true,
+   "videoDiff": 54.65,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 4.1,
+   "ms": 4628
+  },
+  {
+   "name": "pip",
+   "expect": "video",
+   "did": [
+    "pip b3 br@0.5"
+   ],
+   "ok": true,
+   "videoDiff": 5.46,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 5.2,
+   "ms": 5778
+  },
+  {
+   "name": "parallax",
+   "expect": "video",
+   "did": [
+    "parallax x2@0.5"
+   ],
+   "ok": true,
+   "videoDiff": 65.09,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 3.5,
+   "ms": 3942
+  },
+  {
+   "name": "color exposure=0.6",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 25.26,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.9,
+   "ms": 1493
+  },
+  {
+   "name": "color contrast=1.6",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 28.53,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1,
+   "ms": 1753
+  },
+  {
+   "name": "color temp=3000",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 37.19,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.9,
+   "ms": 2628
+  },
+  {
+   "name": "color tint=0.5",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 5.52,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.6,
+   "ms": 3181
+  },
+  {
+   "name": "color saturation=0.2",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 6.71,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.8,
+   "ms": 1541
+  },
+  {
+   "name": "color vibrance=0.8",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 7.76,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2,
+   "ms": 2568
+  },
+  {
+   "name": "color highlights=-0.6",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 9.86,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2172
+  },
+  {
+   "name": "color shadows=1",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 15.04,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 1985
+  },
+  {
+   "name": "color vignette=0.8",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 23.45,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1744
+  },
+  {
+   "name": "color inputColorSpace=bt601",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 2.21,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1981
+  },
+  {
+   "name": "color curves",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 20.29,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2297
+  },
+  {
+   "name": "color lut",
+   "expect": "video",
+   "did": [
+    "color c1"
+   ],
+   "ok": true,
+   "videoDiff": 14.32,
+   "audioDiff": 0,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.9,
+   "ms": 3492
+  },
+  {
+   "name": "audio c2 deess=1",
+   "expect": "audio",
+   "did": [
+    "audio c2"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.172,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1893
+  },
+  {
+   "name": "audio c1 eq=dialogue",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.14,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1,
+   "ms": 1586
+  },
+  {
+   "name": "audio c1 eq=warm",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.126,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1757
+  },
+  {
+   "name": "audio c1 eq=crisp",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.135,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1728
+  },
+  {
+   "name": "audio c1 denoise=0.9",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.166,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.1,
+   "ms": 1671
+  },
+  {
+   "name": "audio c1 comp=heavy",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": false,
+   "videoDiff": 0,
+   "audioDiff": 0.047,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.4,
+   "ms": 1966
+  },
+  {
+   "name": "audio c1 hp=500",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 1.538,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.1,
+   "ms": 1710
+  },
+  {
+   "name": "audio c1 lp=1000",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.645,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1838
+  },
+  {
+   "name": "audio c1 fadeIn=1.5",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.303,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.2,
+   "ms": 1887
+  },
+  {
+   "name": "audio c1 fadeOut=1.5",
+   "expect": "audio",
+   "did": [
+    "audio c1"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.326,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.3,
+   "ms": 1984
+  },
+  {
+   "name": "audio master lufs -24",
+   "expect": "audio",
+   "did": [
+    "audio master"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.678,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 2580
+  },
+  {
+   "name": "audio master target podcast",
+   "expect": "audio",
+   "did": [
+    "audio master"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 0.206,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.9,
+   "ms": 1669
+  },
+  {
+   "name": "audio master limiter",
+   "expect": "audio",
+   "did": [
+    "audio master"
+   ],
+   "ok": true,
+   "videoDiff": 0,
+   "audioDiff": 1.901,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.9,
+   "ms": 1713
+  },
+  {
+   "name": "transition fade",
+   "expect": "video",
+   "did": [
+    "transition fade x1"
+   ],
+   "ok": true,
+   "videoDiff": 25.09,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2182
+  },
+  {
+   "name": "transition dissolve",
+   "expect": "video",
+   "did": [
+    "transition dissolve x1"
+   ],
+   "ok": true,
+   "videoDiff": 25.57,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2329
+  },
+  {
+   "name": "transition fadeblack",
+   "expect": "video",
+   "did": [
+    "transition fadeblack x1"
+   ],
+   "ok": true,
+   "videoDiff": 47.54,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.4,
+   "ms": 1914
+  },
+  {
+   "name": "transition fadewhite",
+   "expect": "video",
+   "did": [
+    "transition fadewhite x1"
+   ],
+   "ok": true,
+   "videoDiff": 48.94,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 2082
+  },
+  {
+   "name": "transition wipeleft",
+   "expect": "video",
+   "did": [
+    "transition wipeleft x1"
+   ],
+   "ok": true,
+   "videoDiff": 24.09,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 1970
+  },
+  {
+   "name": "transition wiperight",
+   "expect": "video",
+   "did": [
+    "transition wiperight x1"
+   ],
+   "ok": true,
+   "videoDiff": 25.6,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 1990
+  },
+  {
+   "name": "transition slideleft",
+   "expect": "video",
+   "did": [
+    "transition slideleft x1"
+   ],
+   "ok": true,
+   "videoDiff": 26.9,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.6,
+   "ms": 2075
+  },
+  {
+   "name": "transition slideright",
+   "expect": "video",
+   "did": [
+    "transition slideright x1"
+   ],
+   "ok": true,
+   "videoDiff": 26.73,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 1950
+  },
+  {
+   "name": "transition slideup",
+   "expect": "video",
+   "did": [
+    "transition slideup x1"
+   ],
+   "ok": true,
+   "videoDiff": 35.06,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.4,
+   "ms": 1895
+  },
+  {
+   "name": "transition smoothleft",
+   "expect": "video",
+   "did": [
+    "transition smoothleft x1"
+   ],
+   "ok": true,
+   "videoDiff": 28.59,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.7,
+   "ms": 2151
+  },
+  {
+   "name": "transition smoothright",
+   "expect": "video",
+   "did": [
+    "transition smoothright x1"
+   ],
+   "ok": true,
+   "videoDiff": 29.18,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.5,
+   "ms": 2059
+  },
+  {
+   "name": "transition smoothup",
+   "expect": "video",
+   "did": [
+    "transition smoothup x1"
+   ],
+   "ok": true,
+   "videoDiff": 30.16,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 1.8,
+   "ms": 2420
+  },
+  {
+   "name": "transition circleopen",
+   "expect": "video",
+   "did": [
+    "transition circleopen x1"
+   ],
+   "ok": true,
+   "videoDiff": 31.97,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.3,
+   "ms": 3153
+  },
+  {
+   "name": "transition zoomin",
+   "expect": "video",
+   "did": [
+    "transition zoomin x1"
+   ],
+   "ok": true,
+   "videoDiff": 28.11,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.4,
+   "ms": 2865
+  },
+  {
+   "name": "transition radial",
+   "expect": "video",
+   "did": [
+    "transition radial x1"
+   ],
+   "ok": true,
+   "videoDiff": 28.47,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.1,
+   "ms": 2725
+  },
+  {
+   "name": "transition luma",
+   "expect": "video",
+   "did": [
+    "transition luma x1"
+   ],
+   "ok": true,
+   "videoDiff": 24.87,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 2.2,
+   "ms": 2797
+  },
+  {
+   "name": "transition cinematic-dissolve",
+   "expect": "video",
+   "did": [
+    "transition dissolve x1"
+   ],
+   "ok": true,
+   "videoDiff": 25.57,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.4,
+   "ms": 868
+  },
+  {
+   "name": "transition whip-pan-left",
+   "expect": "video",
+   "did": [
+    "transition smoothleft x1"
+   ],
+   "ok": true,
+   "videoDiff": 28.59,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.4,
+   "ms": 930
+  },
+  {
+   "name": "transition whip-pan-right",
+   "expect": "video",
+   "did": [
+    "transition smoothright x1"
+   ],
+   "ok": true,
+   "videoDiff": 29.18,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.5,
+   "ms": 1213
+  },
+  {
+   "name": "transition luma-fade",
+   "expect": "video",
+   "did": [
+    "transition luma x1"
+   ],
+   "ok": true,
+   "videoDiff": 24.87,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.4,
+   "ms": 1460
+  },
+  {
+   "name": "transition flash-cut",
+   "expect": "video",
+   "did": [
+    "transition fadewhite x1"
+   ],
+   "ok": true,
+   "videoDiff": 48.94,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.5,
+   "ms": 1010
+  },
+  {
+   "name": "transition iris-open",
+   "expect": "video",
+   "did": [
+    "transition circleopen x1"
+   ],
+   "ok": true,
+   "videoDiff": 31.97,
+   "audioDiff": 0.939,
+   "dur": 6,
+   "baseDur": 6,
+   "renderS": 0.4,
+   "ms": 988
+  }
+ ]
+}

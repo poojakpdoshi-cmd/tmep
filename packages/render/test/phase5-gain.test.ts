@@ -45,3 +45,21 @@ test('a quiet recording (≈ −34 LUFS) is compressed after gain staging', { ti
   assert.ok(plain - comp > 1.5, `dynamic spread must shrink with compression (it measured 0.0 dB before gain staging): ${plain.toFixed(1)} → ${comp.toFixed(1)} dB`);
   assert.ok(readdirSync(path.join(proj, '.tmep', 'cache', 'gain')).length === 1, 'the clip loudness is measured once and cached');
 });
+
+test('a hot recording is not attenuated before the compressor, so compression still acts', { timeout: 180_000 }, async (t) => {
+  if (skip) return t.skip(skip);
+  const src = path.join(dir, 'hot.mp4');
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=30:d=6', '-f', 'lavfi', '-i', 'sine=f=440:d=6:sample_rate=48000,volume=3.5,tremolo=f=2:d=0.9',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', src]);
+  assert.equal(r.status, 0);
+  const proj = path.join(dir, 'hot'); mkdirSync(proj);
+  const ctx = { project: proj, detail: 'standard' as const };
+  await api.importMedia(ctx, { paths: [src] });
+  await api.edit(ctx, { ratio: '16:9', ops: [{ op: 'add', src: 'v1', in: 0, out: 6 }] });
+  const render = async (name: string) => { const out = path.join(proj, 'renders', `${name}.mp4`); const x = await api.render(ctx, { out, preview: true, wait: 150 }); assert.equal(x.state, 'done', JSON.stringify(x)); return pcm(out); };
+  const plain = crest(await render('plain'));
+  await api.edit(ctx, { ops: ['audio c1 comp=heavy'] });
+  const comp = crest(await render('comp'));
+  // With downward staging (first 5.0 version) this measured no change: the source was pulled below the threshold.
+  assert.ok(plain - comp > 1.5, `hot source still compressed: ${plain.toFixed(1)} → ${comp.toFixed(1)} dB`);
+});

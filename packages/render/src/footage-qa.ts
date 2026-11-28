@@ -82,11 +82,15 @@ export function footageFindings(tl: Timeline, analyses: Map<string, FootageAnaly
       let worst = 1, at = 0;
       for (const t of times) {
         const b = outBox(primary, t); if (!b) continue;
-        const vis = Math.max(0, Math.min(1, b.x + b.w / 2) - Math.max(0, b.x - b.w / 2)) * Math.max(0, Math.min(1, b.y + b.h / 2) - Math.max(0, b.y - b.h / 2)) / Math.max(1e-9, b.w * b.h);
+        // Relative to what the output frame can hold: a close-up wider than the frame is not "cut".
+        const vis = (Math.max(0, Math.min(1, b.x + b.w / 2) - Math.max(0, b.x - b.w / 2)) / Math.min(1, b.w)) * (Math.max(0, Math.min(1, b.y + b.h / 2) - Math.max(0, b.y - b.h / 2)) / Math.min(1, b.h));
         if (vis < worst) { worst = vis; at = t; }
       }
       const rf = a.inferred.reframe?.find((r) => r.aspect === tl.settings.ratio && r.keys.length);
-      if (worst < 0.7) out.push({ code: 'crop-cuts-subject', severity: 'advisory', msg: `clip ${p.clip.id}: the ${tl.settings.ratio} crop keeps ${(worst * 100).toFixed(0)}% of ${primary.id} at ${at.toFixed(1)}s${rf ? '; subject-aware reframe keys are available' : ''}`, detail: { clip: p.clip.id, track: primary.id, t: +at.toFixed(2), visible: +worst.toFixed(2) }, ...(rf && { fix: `reframe ${p.clip.id} follow=${primary.id}` }) });
+      const keys = rf?.keys.filter((k) => k.t >= p.clip.in - 0.5 && k.t <= p.clip.out + 0.5) ?? [];
+      const med = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)]!;
+      const fix = keys.length ? `reframe ${p.clip.id} cx=${med(keys.map((k) => k.cx))} cy=${med(keys.map((k) => k.cy))}` : undefined;
+      if (worst < 0.7) out.push({ code: 'crop-cuts-subject', severity: 'advisory', msg: `clip ${p.clip.id}: the ${tl.settings.ratio} crop keeps ${(worst * 100).toFixed(0)}% of ${primary.id} at ${at.toFixed(1)}s${fix ? `; the subject's median crop centre is ${fix.split(' ').slice(2).join(' ')}` : ''}`, detail: { clip: p.clip.id, track: primary.id, t: +at.toFixed(2), visible: +worst.toFixed(2) }, ...(fix && { fix }) });
       for (const b of tl.broll) {
         const bt = resolveRef(placed, b.ref); if (bt === undefined) continue;
         const hits = times.filter((t) => t >= bt && t < bt + b.d && outBox(primary, t)).length;

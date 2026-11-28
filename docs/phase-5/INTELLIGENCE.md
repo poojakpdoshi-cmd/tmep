@@ -81,6 +81,20 @@ with this accuracy stated.
 Event candidates for sports (goals, wickets, boundaries) need labelled real matches with commentary audio;
 none were available, so **no event-recognition accuracy is claimed**.
 
+### Plan → compile → Inspector on a real clip (Sports_360P-1d5c, 9:16 output)
+
+`tmep editplan build --asset v1 --task cinematic --semantic` proposed `keep [0,20]` and a reframe to the
+interviewee (`cx 0.336`, kept in 47 % of samples — the other samples are the tower shots without a person);
+`compile` applied it; `inspect qa` then reported **0** subject-crop advisories. The rendered frames keep the
+face in the 9:16 crop: [`evidence/real-reframe-9x16-sheet.jpg`](evidence/real-reframe-9x16-sheet.jpg)
+(frames from *'Savvaļas putnu rehabilitācijas stacija Madonas novadā uzsākusi darbu'* by MADONARPTV,
+CC BY 4.0, via the YouTube UGC dataset). This run exposed two defects that synthetic tests had not: subject
+coverage and the Inspector's crop check required a close-up wider than the crop to fit entirely (0 % / 39 %
+reported for a correctly framed face), and the Inspector's suggested fix used a non-existent `follow=`
+parameter. Both now measure against what the crop can hold and emit a valid `reframe cx= cy=` op.
+A static centre is a compromise for subjects that travel; keyframed follow is computed (`inferred.reframe`)
+but not yet compiled into `reframe keys`.
+
 ## 4. Runtime, memory, storage (semantic layer, 20 s 640×360 clips, 2 fps = 40 frames)
 
 | Metric | Min | Median | Max |

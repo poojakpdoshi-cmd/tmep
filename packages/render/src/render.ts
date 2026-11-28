@@ -218,8 +218,9 @@ async function measureLoudness(file: string, t0: number, t1: number): Promise<nu
 /**
  * Gain staging for compressed dialogue: compressor thresholds are absolute, so a quiet recording
  * (e.g. -34 LUFS) was never compressed. Each compressed clip is measured once (cached by media hash
- * and range) and raised or lowered so speech sits near -20 LUFS before the chain. Bounded to
- * -12..+18 dB; silent ranges are left alone.
+ * and range) and raised so speech reaches about -20 LUFS before the chain (0..+18 dB). Hot sources are
+ * never attenuated: that would take them out of the compressor's range and turn the requested
+ * compression into a no-op (caught by the effect matrix). Silent ranges are left alone.
  */
 async function stageDialogueGain(project: Project, placed: Placed[], media: Record<string, MediaRef>): Promise<void> {
   for (const p of placed) {
@@ -234,8 +235,8 @@ async function stageDialogueGain(project: Project, placed: Placed[], media: Reco
       await writeJson(file, { lufs }, false);
     }
     if (lufs <= -60) continue;
-    const gain = Math.max(-12, Math.min(18, -20 - lufs));
-    if (Math.abs(gain) >= 1) c.audio = { ...c.audio, preGainDb: Math.round(gain * 10) / 10 };
+    const gain = Math.max(0, Math.min(18, -20 - lufs));
+    if (gain >= 1) c.audio = { ...c.audio, preGainDb: Math.round(gain * 10) / 10 };
   }
 }
 

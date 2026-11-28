@@ -116,7 +116,7 @@ test('Phase 5 QA: graphics over a moving subject at the times it passes, subject
   assert.ok(g, f.map((x) => x.code).join());
   assert.ok((g!.detail!.times as number[]).every((t) => t >= 6 && t < 9), JSON.stringify(g!.detail));
   const crop = f.find((x) => x.code === 'crop-cuts-subject');
-  assert.ok(crop && crop.fix === 'reframe c1 follow=person1' || crop?.fix?.startsWith('reframe'), 'the runner leaves a centred 9:16 crop; reframe keys are offered');
+  assert.equal(crop?.fix, 'reframe c1 cx=0.3 cy=0.5', 'the runner leaves a centred 9:16 crop; a valid reframe op is offered');
   tl.broll = [{ id: 'b1', src: 'v2', in: 0, ref: { at: 2 }, d: 3, fit: 'cover' } as never];
   assert.ok(footageFindings(tl, new Map([['v1', a]])).some((x) => x.code === 'overlay-over-subject'));
   // No tracks → no Phase 5 findings (nothing is guessed).

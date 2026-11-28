@@ -209,11 +209,14 @@ export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }
       if (Math.abs(sy - cy) > ch * 0.3) cy += (sy - cy) - Math.sign(sy - cy) * ch * 0.3;
     }
     cx = Math.min(1 - cw / 2, Math.max(cw / 2, cx)); cy = Math.min(1 - ch / 2, Math.max(ch / 2, cy));
-    if (x >= cx - cw / 2 - 0.01 && x + w <= cx + cw / 2 + 0.01 && y >= cy - ch / 2 - 0.01 && y + h <= cy + ch / 2 + 0.01) inside++;
+    // Kept = the crop holds as much of the subject as it can (a close-up wider than the crop counts when
+    // its centre 90 % of the crop width is inside).
+    const hw = Math.min(w, cw) * 0.45, hh = Math.min(h, ch) * 0.45, bx = x + w / 2, by = y + h / 2;
+    if (bx - hw >= cx - cw / 2 - 0.01 && bx + hw <= cx + cw / 2 + 0.01 && by - hh >= cy - ch / 2 - 0.01 && by + hh <= cy + ch / 2 + 0.01) inside++;
     const last = keys.at(-1);
     if (!last || Math.abs(last.cx - cx) > 0.005 || Math.abs(last.cy - cy) > 0.005 || si !== shots.filter((s) => s.t0 <= last.t).length - 1) keys.push({ t: t, cx: r3(cx), cy: r3(cy) });
   }
-  return { aspect: label, subject: tr.id, keys, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame` };
+  return { aspect: label, subject: tr.id, keys, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame; kept = the crop holds as much of the subject as it can` };
 }
 
 /** Activity from pose: wrist travel relative to shoulder width, and whole-body travel. */
