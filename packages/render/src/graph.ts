@@ -70,12 +70,30 @@ export function outSize(tl: Timeline, scale: number): { W: number; H: number } {
 }
 
 /** Fit any source into W x H. */
-function fitChain(fit: Clip['fit'], W: number, H: number, cx: number, cy: number, bg: string, id: string): string {
+/** Piecewise-linear expression over source time `T` through follow keys (clamped at both ends). */
+export function followExpr(keys: { t: number; v: number }[], T: string): string {
+  if (keys.length === 1) return n3(keys[0]!.v);
+  let e = n3(keys.at(-1)!.v);
+  for (let i = keys.length - 2; i >= 0; i--) {
+    const a = keys[i]!, b = keys[i + 1]!;
+    e = `if(lt(${T},${n3(b.t)}),${n3(a.v)}+(${n3(b.v - a.v)})*(${T}-${n3(a.t)})/${n3(Math.max(1e-3, b.t - a.t))},${e})`;
+  }
+  return `if(lt(${T},${n3(keys[0]!.t)}),${n3(keys[0]!.v)},${e})`;
+}
+
+function fitChain(fit: Clip['fit'], W: number, H: number, cx: number, cy: number, bg: string, id: string, follow?: { c: Clip }): string {
   if (fit === 'contain') return `scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${bg.replace('#', '0x')},setsar=1`;
   if (fit === 'blur') {
     const bw = even(W / 4);
     const bh = even(H / 4);
     return `split=2[bg0${id}][fg0${id}];[bg0${id}]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},boxblur=8:2,eq=brightness=-0.06:saturation=1.1,scale=${W}:${H}[bg1${id}];[fg0${id}]scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2[fg1${id}];[bg1${id}][fg1${id}]overlay=(W-w)/2:(H-h)/2,setsar=1`;
+  }
+  const f = follow?.c.follow?.filter((k) => k.t >= follow.c.in - 2 && k.t <= follow.c.out + 2);
+  if (f?.length) {
+    // Source time of the frame: clip in-point + output time × speed (ramps use their mean speed).
+    const T = `(${n3(follow!.c.in)}+t*${n3(follow!.c.speed)})`;
+    const ex = followExpr(f.map((k) => ({ t: k.t, v: k.cx })), T), ey = followExpr(f.map((k) => ({ t: k.t, v: k.cy })), T);
+    return `scale=${W}:${H}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${W}:${H}:'(iw-${W})*(${ex})':'(ih-${H})*(${ey})',setsar=1`;
   }
   return `scale=${W}:${H}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${W}:${H}:(iw-${W})*${n3(cx)}:(ih-${H})*${n3(cy)},setsar=1`;
 }
@@ -167,7 +185,7 @@ export function unitArgs(tl: Timeline, unit: Unit, media: Record<string, MediaRe
       const rx = Math.min(64, Math.max(16, Math.round(((c.stabilize.shakiness ?? 5) * 4) / 16) * 16));
       chain.push(`deshake=rx=${rx}:ry=${rx}:edge=clamp`);
     }
-    chain.push(fitChain(c.fit, W, H, c.cx, c.cy, tl.settings.bg, `c${j}`));
+    chain.push(fitChain(c.fit, W, H, c.cx, c.cy, tl.settings.bg, `c${j}`, { c }));
     const z = zoomExpr(c, p.frames, fps);
     if (z) chain.push(perspective(z));
     const fx = compileFx(c, W, H, fps, tl.settings.bg, p.frames, `c${j}`, maskFiles);

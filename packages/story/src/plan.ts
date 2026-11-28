@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import type { Word } from '../../core/src/index.ts';
 import type { FootageAnalysis } from '../../media/src/footage.ts';
 import { recommend, type AssetRequest, type LibraryEntry } from '../../media/src/library.ts';
+import { centreToOffset } from '../../media/src/semantic.ts';
 import { detectList, detectStat, splitSentences } from './rules.ts';
 
 export const PLAN_SCHEMA = 'frame.plan/1';
@@ -78,6 +79,28 @@ export function mapToTimeline(ranges: [number, number][], t: number): number | u
   return undefined;
 }
 
+export const FOLLOW_MAX_SPEED = 0.35;
+/**
+ * Follow keys from raw reframe keys: limit crop-centre speed (no whip pans), drop keys that a straight
+ * line between neighbours already explains (≤ 0.01), keep shot changes as hard steps.
+ */
+export function smoothFollow(keys: { t: number; cx: number; cy: number }[], maxSpeed = FOLLOW_MAX_SPEED): { t: number; cx: number; cy: number }[] {
+  if (!keys.length) return [];
+  const out = [{ ...keys[0]! }];
+  for (const k of keys.slice(1)) {
+    const prev = out.at(-1)!, dt = Math.max(1e-3, k.t - prev.t), lim = maxSpeed * dt;
+    const step = (a: number, b: number) => a + Math.max(-lim, Math.min(lim, b - a));
+    out.push({ t: k.t, cx: r2(step(prev.cx, k.cx)), cy: r2(step(prev.cy, k.cy)) });
+  }
+  const kept = [out[0]!];
+  for (let j = 1; j < out.length - 1; j++) {
+    const a = kept.at(-1)!, b = out[j]!, c = out[j + 1]!, u = (b.t - a.t) / Math.max(1e-3, c.t - a.t);
+    if (Math.abs(a.cx + (c.cx - a.cx) * u - b.cx) > 0.01 || Math.abs(a.cy + (c.cy - a.cy) * u - b.cy) > 0.01) kept.push(b);
+  }
+  if (out.length > 1) kept.push(out.at(-1)!);
+  return kept.slice(0, 400);
+}
+
 export function buildPlan(i: PlanInputs): EditPlan {
   const a = i.analysis, inf = a.inferred, items: PlanItem[] = [];
   const add = (it: Omit<PlanItem, 'id' | 'status'>) => items.push({ ...it, id: `${it.kind}-${it.at ? it.at[0].toFixed(2) : items.filter((x) => x.kind === it.kind).length}`, status: 'proposed' });
@@ -114,12 +137,18 @@ export function buildPlan(i: PlanInputs): EditPlan {
   }
   if (inf.quietRegions.length) add({ kind: 'graphic-zone', ops: [], reason: 'regions with least motion/detail and no subject: candidate places for graphics (used by footage-aware compile)', evidence: inf.quietRegions.slice(0, 3).map((q) => `(${q.x}, ${q.y}) activity ${q.activity}`), confidence: 0.6, deps: ['footage'] });
 
-  // Subject-aware reframe for a different output aspect.
+  // Subject-aware reframe for a different output aspect: a static centre when the subject stays put,
+  // smooth follow keyframes (source time) when it travels.
   const rf = inf.reframe?.find((r) => r.aspect === i.ratio && r.keys.length);
   if (rf) {
-    const xs = rf.keys.map((k) => k.cx).sort((p, q) => p - q), ys = rf.keys.map((k) => k.cy).sort((p, q) => p - q);
+    // Keys are window centres; the renderer takes offsets (cx/cy/follow convention).
+    const cw = rf.crop?.w ?? Math.min(1, (a.asset.h * 9) / 16 / a.asset.w), ch = rf.crop?.h ?? 1;
+    const off = rf.keys.map((k) => ({ t: k.t, cx: centreToOffset(k.cx, cw), cy: centreToOffset(k.cy, ch) }));
+    const xs = off.map((k) => k.cx).sort((p, q) => p - q), ys = off.map((k) => k.cy).sort((p, q) => p - q);
     const cx = xs[Math.floor(xs.length / 2)]!, cy = ys[Math.floor(ys.length / 2)]!;
-    add({ kind: 'reframe', ops: [{ op: 'reframe', cx, cy }], reason: `centre the ${i.ratio} crop on ${rf.subject}`, evidence: [rf.basis, `subject inside the crop in ${Math.round(rf.subjectInside * 100)}% of samples`, ...(xs.at(-1)! - xs[0]! > 0.15 ? [`subject travels (crop centre ${xs[0]}–${xs.at(-1)}): a static centre is a compromise; keys are in the footage record`] : [])], confidence: r2(0.4 + 0.5 * rf.subjectInside), deps: ['footage', 'format'] });
+    const travels = xs.at(-1)! - xs[0]! > 0.15;
+    const follow = travels ? smoothFollow(off) : undefined;
+    add({ kind: 'reframe', ops: [follow ? { op: 'reframe', cx, cy, follow } : { op: 'reframe', cx, cy }], reason: follow ? `follow ${rf.subject} with a smoothed ${i.ratio} crop (${follow.length} keys)` : `centre the ${i.ratio} crop on ${rf.subject}`, evidence: [rf.basis, `subject inside the crop in ${Math.round(rf.subjectInside * 100)}% of samples`, ...(travels ? [`subject travels (crop centre ${xs[0]}–${xs.at(-1)}): keyframed follow, speed-limited to ${FOLLOW_MAX_SPEED} frame widths/s`] : [])], confidence: r2(0.4 + 0.5 * rf.subjectInside), deps: ['footage', 'format'] });
   }
 
   // Audio and colour: measured, conservative.

@@ -140,7 +140,7 @@ export const OP_SCHEMAS: Record<string, Schema<Record<string, unknown>>> = {
   reverse: obj({ op: str(), clip: str().optional(), on: bool().default(true) }),
   punch: obj({ op: str(), at: anchor, to: num({ min: 1.01, max: 3 }).default(1.2), d: num({ min: 0.2, max: 15 }).default(1.2) }),
   matchcut: obj({ op: str(), fromClip: str(), toClip: str(), scale: num({ min: 1, max: 2 }).default(1.08), d: num({ min: 0, max: 1 }).default(0.2) }),
-  reframe: obj({ op: str(), clip: str().optional(), cx: num({ min: 0, max: 1 }).optional(), cy: num({ min: 0, max: 1 }).optional(), keys: any().optional() }),
+  reframe: obj({ op: str(), clip: str().optional(), cx: num({ min: 0, max: 1 }).optional(), cy: num({ min: 0, max: 1 }).optional(), keys: any().optional(), follow: any().optional() }),
   stabilize: obj({ op: str(), clip: str().optional(), smoothing: num({ int: true, min: 1, max: 60 }).default(10), shakiness: num({ int: true, min: 1, max: 10 }).default(5), accuracy: num({ int: true, min: 1, max: 15 }).default(10), off: bool().default(false) }),
   splitscreen: obj({ op: str(), srcs: arr(str(), { min: 2, max: 4 }), at: anchor.default(0), d: num({ min: 0.2, max: 600 }).default(4), layout: oneOf(['2h', '2v', '2x2', '3v'] as const).default('2h'), gap: num({ min: 0, max: 0.1 }).default(0.01), z: num({ int: true, min: -100, max: 100 }).default(2) }),
   pip: obj({ op: str(), src: str(), at: anchor, d: num({ min: 0.2, max: 600 }).default(4), in: num({ min: 0 }).default(0), pos: oneOf(['br', 'bl', 'tr', 'tl'] as const).default('br'), scale: num({ min: 0.1, max: 0.8 }).default(0.3), feather: num({ min: 0, max: 0.1 }).default(0.01), z: num({ int: true, min: -100, max: 100 }).default(4) }),
@@ -240,6 +240,18 @@ function coerce(v: string): unknown {
 }
 
 /** Parse the compact string form into an op object. */
+/** Follow keys: [{t, cx, cy}] or "t:cx,cy;…" (source seconds, centres 0..1), ascending, ≤ 400 keys; [] clears. */
+export function parseFollow(v: unknown): { t: number; cx: number; cy: number }[] {
+  const raw = typeof v === 'string' ? v.split(';').filter((x) => x.trim()).map((seg) => { const [t, xy] = seg.split(':'); const [cx, cy] = (xy ?? '').split(','); return { t: Number(t), cx: Number(cx), cy: cy === undefined ? 0.5 : Number(cy) }; }) : v;
+  if (!Array.isArray(raw) || raw.length > 400) throw new TmepError('E_INPUT', 'follow must be up to 400 keys [{t,cx,cy}] or "t:cx,cy;…"');
+  const keys = raw.map((k: { t?: unknown; cx?: unknown; cy?: unknown }) => ({ t: Number(k.t), cx: Number(k.cx), cy: k.cy === undefined ? 0.5 : Number(k.cy) }));
+  keys.forEach((k, i) => {
+    if (![k.t, k.cx, k.cy].every(Number.isFinite) || k.t < 0 || k.cx < 0 || k.cx > 1 || k.cy < 0 || k.cy > 1) throw new TmepError('E_INPUT', `follow key ${i}: t ≥ 0 and cx, cy in 0..1`);
+    if (i && k.t <= keys[i - 1]!.t) throw new TmepError('E_INPUT', 'follow keys must have increasing t');
+  });
+  return keys;
+}
+
 export function parseOpString(line: string): Record<string, unknown> {
   const toks = tokenize(line.trim());
   const name = toks.shift();
@@ -854,8 +866,12 @@ function applyOne(tl: Timeline, op: Record<string, unknown>, ctx: OpContext, cre
         if (op.keys !== undefined) {
           (c.fx ??= []).push({ type: 'kf', keys: parseKeys(op.keys) });
         }
+        if (op.follow !== undefined) {
+          const f = parseFollow(op.follow);
+          if (f.length) c.follow = f; else delete c.follow;
+        }
       }
-      return `reframe ${targets.length} clips`;
+      return `reframe ${targets.length} clips${op.follow !== undefined ? ' (follow)' : ''}`;
     }
     case 'stabilize': {
       const targets = op.clip ? [findClip(tl, op.clip as string)] : tl.clips;

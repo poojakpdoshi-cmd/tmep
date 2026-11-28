@@ -86,6 +86,8 @@ export interface Clip {
   /** Crop centre (0..1) used when `fit` is cover and the aspect ratio differs. */
   cx: number;
   cy: number;
+  /** Phase 6: crop centre keyframes in SOURCE seconds (subject follow); overrides cx/cy where present. */
+  follow?: { t: number; cx: number; cy: number }[];
   /** Static scale (1 = none). Alternating 1.0/1.1 between jump cuts hides the cut. */
   base: number;
   /** Additional scale reached at the clip's end (slow push-in). */

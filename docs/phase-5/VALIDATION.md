@@ -46,7 +46,7 @@ source was pulled below the compressor threshold. Staging is now upward only; th
 | Gate | Evidence | Result |
 |---|---|---|
 | All tests pass | `npm run typecheck`; `npm test`; `npm run test:e2e` | typecheck pass; unit **255/255**; e2e **79/79** (local) |
-| CI 6/6 | draft PR CI (ubuntu/windows/macos × Node 22/24) | CI_RESULT |
+| CI 6/6 | draft PR CI (ubuntu/windows/macos × Node 22/24) | **6/6 success** at `c4cb121` and `8ed6833` (run 46145333591) |
 | Real-footage results separate from synthetic | INTELLIGENCE.md §2–3 vs `evidence/footage-eval-synthetic.json` | pass |
 | Model accuracy / runtime / memory / storage measured | INTELLIGENCE.md §3–4 | measured (scene types 0.39; 45–78 ms/frame; 256–292 MB; 23.1 MB models) |
 | Workload benchmark | WORKLOAD_BENCHMARK.md, `evidence/workload-*.json` | measured payloads (provider tokens not measured) |

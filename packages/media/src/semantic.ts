@@ -61,7 +61,7 @@ export interface SemanticRecord {
   };
   inferred: {
     subjects: { presenter?: string; primary?: string; moving: string[]; basis: string[] };
-    reframe: { aspect: string; subject?: string; keys: { t: number; cx: number; cy: number }[]; subjectInside: number; basis: string }[];
+    reframe: { aspect: string; subject?: string; /** Crop window centres (source fractions). */ keys: { t: number; cx: number; cy: number }[]; subjectInside: number; basis: string; crop?: { w: number; h: number } }[];
     activities: { track: string; t0: number; t1: number; label: 'gesturing' | 'moving across frame' | 'stationary'; confidence: number; evidence: string[] }[];
     sceneTypes: { shot: string; label: SceneType; confidence: number; evidence: string[] }[];
     duplicates: { a: string; b: string; similarity: number; kind: 'near-duplicate' | 'similar' | 'replay-candidate'; basis: string }[];
@@ -200,6 +200,9 @@ export function findSubjects(tracks: Track[], dur: number): SemanticRecord['infe
  * Crop centre keys that keep a subject in a narrower frame. A dead zone holds the crop still while the
  * subject stays inside its middle 60 %, and every shot starts from the subject's own position.
  */
+/** Renderer crop offset (0..1, the `cx`/`cy`/`follow` convention) that puts a window of relative size `crop` centred on `centre`. */
+export const centreToOffset = (centre: number, crop: number) => (crop >= 0.999 ? 0.5 : Math.round(Math.min(1, Math.max(0, (centre - crop / 2) / (1 - crop))) * 1000) / 1000);
+
 export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }, aspect: [number, number], shots: Pick<Shot, 't0'>[]): SemanticRecord['inferred']['reframe'][number] {
   const label = `${aspect[0]}:${aspect[1]}`;
   const cw = Math.min(1, (src.h * aspect[0]) / aspect[1] / src.w), ch = Math.min(1, (src.w * aspect[1]) / aspect[0] / src.h);
@@ -221,7 +224,7 @@ export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }
     const last = keys.at(-1);
     if (!last || Math.abs(last.cx - cx) > 0.005 || Math.abs(last.cy - cy) > 0.005 || si !== shots.filter((s) => s.t0 <= last.t).length - 1) keys.push({ t: t, cx: r3(cx), cy: r3(cy) });
   }
-  return { aspect: label, subject: tr.id, keys, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame; kept = the crop holds as much of the subject as it can` };
+  return { aspect: label, subject: tr.id, keys, crop: { w: r3(cw), h: r3(ch) }, subjectInside: r3(inside / Math.max(1, tr.boxes.length)), basis: `follows ${tr.id} with a dead zone of 60 % of the crop; crop ${r3(cw)}×${r3(ch)} of the frame; kept = the crop holds as much of the subject as it can` };
 }
 
 /** Activity from pose: wrist travel relative to shoulder width, and whole-body travel. */
