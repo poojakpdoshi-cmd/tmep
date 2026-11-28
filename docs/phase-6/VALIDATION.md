@@ -14,8 +14,8 @@ sherpa-onnx 2.0.3, tesseract 5.3.4.
 ## Gates
 | Gate | Evidence | Result |
 |---|---|---|
-| All tests pass | typecheck; `npm test`; `npm run test:e2e` | typecheck pass; unit **UNIT_RESULT**; e2e **E2E_RESULT** |
-| CI 6/6 | draft PR #33 (ubuntu/windows/macos × Node 22/24) | CI_RESULT |
+| All tests pass | typecheck; `npm test`; `npm run test:e2e` | typecheck pass; unit **261/261**; e2e **83/83** (local, at `eb237bb`) |
+| CI 6/6 | draft PR #33 (ubuntu/windows/macos × Node 22/24) | **6/6 success** at `a6317e9` (run 46167242610; all later commits are docs-only and re-run CI on the head) |
 | Public interfaces | API tests (`tests/phase6-*.test.ts`), MCP `video_plan {mode:"produce"}` (`packages/mcp/test/produce.test.ts`), CLI `tmep produce` | pass |
 | Backward compatibility | Phase 0–5 suites unchanged and passing; MCP tool count 10; `tmep/1`, `.tmep/`, `TMEP_*` aliases; library `verified` field kept for old readers; Phase 4 footage cache keys for faces/ocr unchanged (base key bumped by `FOOTAGE_VERSION 6a.1`, which re-analyses) | pass |
 | Security | production ids `[a-z0-9-]{1,40}`; evidence/library files resolved inside media roots; `inspect` refuses write actions; downloads pinned by SHA-256 | pass |
