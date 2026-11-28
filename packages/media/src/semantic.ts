@@ -118,7 +118,13 @@ const inside = (inner: number[], outer: number[]) => { const [cx, cy] = centre(i
  * Greedy IoU association per label with a one-sample gap tolerance; a fast mover is still matched when
  * its centre moved less than its own size. Shot boundaries end every track.
  */
-export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = []): Track[] {
+/** A pose that faces the camera: nose and both shoulders visible, shoulders reasonably wide. */
+const facing = (f: SemFrame, box: number[]) => (f.poses ?? []).some((p) => iou(p.box, box) > 0.3 && p.kp.nose[2] > 0.5 && p.kp.ls[2] > 0.5 && p.kp.rs[2] > 0.5 && Math.abs(p.kp.ls[0] - p.kp.rs[0]) > 0.06 && p.kp.nose[0] > Math.min(p.kp.ls[0], p.kp.rs[0]) && p.kp.nose[0] < Math.max(p.kp.ls[0], p.kp.rs[0]));
+
+/** Camera velocity (frame widths/s) at time t from the base pass, zero when unknown. */
+const camAt = (camera: { dx: number; dy: number }[] | undefined, t: number) => camera?.[Math.min(camera.length - 1, Math.max(0, Math.floor(t / 0.5)))] ?? { dx: 0, dy: 0 };
+
+export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [], camera?: { dx: number; dy: number }[]): Track[] {
   interface Open { id: number; label: string; last: number; samples: { t: number; box: number[]; score: number; face: boolean }[] }
   const open: Open[] = [], closed: Open[] = [];
   let next = 1;
@@ -145,12 +151,12 @@ export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [
       if (usedO.has(p.o) || usedD.has(p.d)) continue;
       usedO.add(p.o); usedD.add(p.d);
       const d = dets[p.d]!;
-      p.o.samples.push({ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) });
+      p.o.samples.push({ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) || (d.label === 'person' && facing(f, d.box)) });
       p.o.last = f.t;
     }
     dets.forEach((d, k) => {
       if (usedD.has(k)) return;
-      open.push({ id: next++, label: d.label, last: f.t, samples: [{ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) }] });
+      open.push({ id: next++, label: d.label, last: f.t, samples: [{ t: f.t, box: d.box, score: d.score, face: (f.faces ?? []).some((fc) => inside(fc.slice(1), d.box)) || (d.label === 'person' && facing(f, d.box)) }] });
     });
   }
   closed.push(...open);
@@ -160,7 +166,13 @@ export function trackObjects(frames: SemFrame[], fps: number, cuts: number[] = [
     if (s.length < 2 && sc < 0.5) continue; // single weak detections are noise
     const t0 = s[0]!.t, t1 = s.at(-1)!.t;
     const speeds: number[] = [];
-    for (let i = 1; i < s.length; i++) { const [ax, ay] = centre(s[i - 1]!.box), [bx, by] = centre(s[i]!.box); speeds.push(Math.hypot(bx - ax, by - ay) / Math.max(1e-6, s[i]!.t - s[i - 1]!.t)); }
+    // Speed relative to the scene: on-screen velocity minus the camera's (a panned-on subject is moving,
+    // a handheld interviewee is not).
+    for (let i = 1; i < s.length; i++) {
+      const [ax, ay] = centre(s[i - 1]!.box), [bx, by] = centre(s[i]!.box), dt = Math.max(1e-6, s[i]!.t - s[i - 1]!.t);
+      const cam = camAt(camera, (s[i]!.t + s[i - 1]!.t) / 2);
+      speeds.push(Math.hypot((bx - ax) / dt - cam.dx, (by - ay) / dt - cam.dy));
+    }
     const step = Math.max(1, Math.ceil(s.length / 80));
     tracks.push({
       id: `${o.label.replace(/\s+/g, '-')}${tracks.filter((t) => t.label === o.label).length + 1}`, label: o.label, t0: r3(t0), t1: r3(t1), n: s.length, score: r3(sc),
@@ -228,7 +240,7 @@ export function reframeKeys(tr: Track | undefined, src: { w: number; h: number }
 }
 
 /** Activity from pose: wrist travel relative to shoulder width, and whole-body travel. */
-export function poseActivities(frames: SemFrame[], tracks: Track[]): SemanticRecord['inferred']['activities'] {
+export function poseActivities(frames: SemFrame[], tracks: Track[], camera?: { dx: number; dy: number }[]): SemanticRecord['inferred']['activities'] {
   const out: SemanticRecord['inferred']['activities'] = [];
   for (const tr of tracks.filter((t) => t.label === 'person' && t.n >= 3)) {
     const seq: { t: number; kp: Kp }[] = [];
@@ -245,14 +257,17 @@ export function poseActivities(frames: SemFrame[], tracks: Track[]): SemanticRec
       const vis = (k: keyof Kp) => a[k][2] > 0.5 && b[k][2] > 0.5;
       const rel = (k: 'lw' | 'rw', s: 'ls' | 'rs') => (vis(k) && vis(s) ? Math.hypot((b[k][0] - b[s][0]) - (a[k][0] - a[s][0]), (b[k][1] - b[s][1]) - (a[k][1] - a[s][1])) / sw / dt : 0);
       wrist.push(Math.max(rel('lw', 'ls'), rel('rw', 'rs')));
-      const hip = (k: Kp) => [(k.lh[0] + k.rh[0]) / 2, (k.lh[1] + k.rh[1]) / 2];
+      // Body position: hip centre when both hips are visible in both frames, else shoulder centre (close-ups).
+      const hipsSeen = vis('lh') && vis('rh');
+      const hip = (k: Kp) => (hipsSeen ? [(k.lh[0] + k.rh[0]) / 2, (k.lh[1] + k.rh[1]) / 2] : [(k.ls[0] + k.rs[0]) / 2, (k.ls[1] + k.rs[1]) / 2]);
       const [ha, hb] = [hip(a), hip(b)];
-      body.push(Math.hypot(hb[0]! - ha[0]!, hb[1]! - ha[1]!) / dt);
+      const cam = camAt(camera, (seq[i]!.t + seq[i - 1]!.t) / 2);
+      body.push(Math.hypot((hb[0]! - ha[0]!) / dt - cam.dx, (hb[1]! - ha[1]!) / dt - cam.dy));
     }
     const w = median(wrist), b = median(body);
     const label = b >= 0.15 ? 'moving across frame' : w >= 0.8 ? 'gesturing' : 'stationary';
     const confidence = label === 'moving across frame' ? Math.min(1, b / 0.3) : label === 'gesturing' ? Math.min(1, w / 1.6) : Math.min(1, 1 - Math.max(w / 0.8, b / 0.15) * 0.5);
-    out.push({ track: tr.id, t0: tr.t0, t1: tr.t1, label, confidence: r3(Math.max(0.1, confidence)), evidence: [`${seq.length} pose samples`, `median wrist travel ${r3(w)} shoulder-widths/s`, `median hip travel ${r3(b)} frame widths/s`] });
+    out.push({ track: tr.id, t0: tr.t0, t1: tr.t1, label, confidence: r3(Math.max(0.1, confidence)), evidence: [`${seq.length} pose samples`, `median wrist travel ${r3(w)} shoulder-widths/s`, `median hip travel ${r3(b)} frame widths/s${camera ? ' (camera motion removed)' : ''}`] });
   }
   return out;
 }
@@ -422,7 +437,7 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
   const w = Math.min(640, a.asset.w), h = Math.max(2, Math.round((w * a.asset.h) / a.asset.w / 2) * 2);
   const { frames, loadMs, maxRssMB } = await runWorker(av.python!, av.env, ffmpeg, a.asset.file, { fps, w: w - (w % 2), h, maxSeconds: opts.maxSeconds ?? seconds, tasks, signal: opts.signal });
   const cuts = a.observed.shots.slice(1).map((s) => s.t0);
-  const tracks = trackObjects(frames, fps, cuts);
+  const tracks = trackObjects(frames, fps, cuts, a.observed.camera);
   const subjects = findSubjects(tracks, seconds);
   const subj = tracks.find((t) => t.id === subjects.primary);
   const gestures = frames.flatMap((f) => (f.hands ?? []).filter((x) => x[0] !== 'None' && x[1] >= 0.5).map(([label, score, hand, x, y, bw, bh]) => ({ t: f.t, label, score, hand, box: { x: r3(x + bw / 2), y: r3(y + bh / 2), w: bw, h: bh } })));
@@ -433,7 +448,7 @@ export async function analyzeSemantics(ffmpeg: string, a: FootageAnalysis, opts:
     inferred: {
       subjects,
       reframe: [reframeKeys(subj, a.asset, [9, 16], a.observed.shots), reframeKeys(subj, a.asset, [1, 1], a.observed.shots), reframeKeys(subj, a.asset, [4, 5], a.observed.shots)],
-      activities: poseActivities(frames, tracks),
+      activities: poseActivities(frames, tracks, a.observed.camera),
       sceneTypes: sceneTypes(a, frames),
       duplicates: dups,
       textChanges: text.changes,

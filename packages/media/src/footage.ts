@@ -41,6 +41,8 @@ export interface FootageAnalysis {
     /** Audio level (dBFS, RMS) per 0.5 s window; empty without an audio stream. */
     audio: number[];
     silences: { t0: number; t1: number }[];
+    /** Phase 6: global camera motion per 0.5 s window (frame widths / heights per second; + = content moves right/down). */
+    camera?: { dx: number; dy: number }[];
     /** Gradual transitions (dissolve, wipe, fade, graphic); hard cuts are the shot boundaries. */
     transitions?: { t0: number; t1: number; t: number; kind: 'gradual'; score: number }[];
     speech?: { t0: number; t1: number; text: string }[];
@@ -234,8 +236,8 @@ function levelled(A: Float32Array, B: Float32Array): number {
 }
 
 /** Mean-normalized difference of 32×18 thumbnails, unshifted and at the best shift (±4, ±2 cells). */
-export function compensated(a: Float32Array, b: Float32Array): { plain: number; best: number } {
-  let ma = 0, mb = 0;
+export function compensated(a: Float32Array, b: Float32Array): { plain: number; best: number; dx: number; dy: number } {
+  let ma = 0, mb = 0, bx = 0, by = 0;
   for (let i = 0; i < a.length; i++) { ma += a[i]!; mb += b[i]!; }
   ma /= a.length; mb /= b.length;
   let plain = 0, best = Infinity;
@@ -244,9 +246,27 @@ export function compensated(a: Float32Array, b: Float32Array): { plain: number; 
     for (let y = Math.max(0, -dy); y < TH - Math.max(0, dy); y++) for (let x = Math.max(0, -dx); x < TW - Math.max(0, dx); x++) {
       d += Math.abs(a[y * TW + x]! - ma - (b[(y + dy) * TW + x + dx]! - mb)); n++;
     }
-    d /= n; if (dx === 0 && dy === 0) plain = d; if (d < best) best = d;
+    d /= n; if (dx === 0 && dy === 0) plain = d; if (d < best) { best = d; bx = dx; by = dy; }
   }
-  return { plain, best };
+  return { plain, best, dx: bx, dy: by };
+}
+
+/**
+ * Global camera motion: the best-matching shift between thumbnails 0.5 s apart (32×18 grid, ±7/±3 cells),
+ * accepted only when shifting explains the change (best < 0.8 × unshifted); cuts give zero.
+ */
+export function cameraMotion(stats: FrameStat[], fps: number, cuts: number[], seconds: number): { dx: number; dy: number }[] {
+  const out: { dx: number; dy: number }[] = [];
+  const step = Math.max(1, Math.round(fps * WIN));
+  for (let t = 0; t < seconds; t += WIN) {
+    const i = Math.round(t * fps), j = i + step;
+    const a = stats[i], b = stats[j];
+    if (!a?.t32 || !b?.t32 || cuts.some((c) => c > a.t && c <= b.t)) { out.push({ dx: 0, dy: 0 }); continue; }
+    const c = compensated(a.t32, b.t32);
+    const ok = c.best < 0.8 * c.plain && c.plain > 1;
+    out.push(ok ? { dx: r3(c.dx / TW / WIN), dy: r3(c.dy / TH / WIN) } : { dx: 0, dy: 0 });
+  }
+  return out;
 }
 
 /**
@@ -478,6 +498,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
     motion.push(r3(fr.length ? fr.reduce((a, s) => a + s.diff, 0) / fr.length : 0));
   }
   const silences = findSilences(levels);
+  const camera = cameraMotion(stats, fps, cuts.map((c) => c.t), seconds);
   const gridSum = new Array(9).fill(0);
   for (const s of stats) s.grid.forEach((g, i) => (gridSum[i] += g));
   const gmax = Math.max(...gridSum, 1e-9);
@@ -508,7 +529,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
   ];
   if (pr.audio) provenance.push({ analyzer: 'frame.audio-levels', version: FOOTAGE_VERSION, method: 'mono 16 kHz RMS per 0.5 s; silence = 6 dB above an adaptive floor, ≥ 0.6 s', params: {}, ms: tVideo });
 
-  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, transitions: gradual.map((g) => ({ ...g, kind: 'gradual' as const })), quality, gridActivity };
+  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, transitions: gradual.map((g) => ({ ...g, kind: 'gradual' as const })), camera, quality, gridActivity };
   if (opts.words?.length) {
     // Speech segments come from the transcript: consecutive words with gaps < 0.6 s.
     const segs: { t0: number; t1: number; text: string }[] = [];
