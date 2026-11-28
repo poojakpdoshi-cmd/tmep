@@ -62,6 +62,7 @@ import { SFX, SFX_KINDS } from '../../render/src/sfx.ts';
 import { renderTimeline, contactSheet, type RenderOptions } from '../../render/src/render.ts';
 import { runInspector } from '../../render/src/inspector.ts';
 import { footageFindings, sourceToOutput } from '../../render/src/footage-qa.ts';
+import { editorialFindings, type EditorialOptions } from '../../render/src/editorial-qa.ts';
 import { analyzeFootage, FOOTAGE_VERSION, type FootageAnalysis } from '../../media/src/footage.ts';
 import { modelStatus, installModels } from '../../media/src/models.ts';
 import { LIBRARY_SCHEMA, ASSET_KINDS, describeAsset, duplicates as libraryDuplicates, search as librarySearch, recommend as libraryRecommend, similar as librarySimilar, verifyLicence, makeLicence, type Library, type EntryMeta, type AssetKind } from '../../media/src/library.ts';
@@ -821,7 +822,7 @@ function footageSummary(a: FootageAnalysis, cached: boolean, detail: Ctx['detail
   };
 }
 
-export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number; task?: string; faces?: boolean; ocr?: boolean; temporalText?: boolean; semantic?: boolean; gestures?: boolean; force?: boolean; maxSeconds?: number }): Promise<Record<string, unknown>> {
+export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; from?: number; to?: number; find?: string; max?: number; words?: boolean; rev?: number; scene?: string; spec?: unknown; file?: string; targetLufs?: number; task?: string; faces?: boolean; ocr?: boolean; temporalText?: boolean; semantic?: boolean; gestures?: boolean; force?: boolean; maxSeconds?: number; constraints?: EditorialOptions['constraints']; transcript?: EditorialOptions['transcript'] }): Promise<Record<string, unknown>> {
   if (inp.what === 'footage' || inp.what === 'brief') {
     if (!inp.asset) throw new TmepError('E_INPUT', `inspect ${inp.what} needs asset`, 'e.g. {what:"brief", asset:"v1", task:"informative"}');
     const task = (inp.task ?? 'generic') as BriefTask;
@@ -979,9 +980,17 @@ export async function inspect(ctx: Ctx, inp: { what?: string; asset?: string; fr
       const renderedPath = inp.file ? await resolveSafePath(inp.file, p.root, ctx.outRoots ?? [p.root], 'qa file') : undefined;
       const report = await runInspector(tl, words, { renderedPath, targetLufs: inp.targetLufs, assets });
       // Footage-aware advisories from cached analyses (inspect {what:"footage"} creates them).
-      const extra = footageFindings(tl, await cachedFootage(p, tl.clips.map((c) => c.src)));
-      const findings = [...report.findings, ...extra];
-      return { ...report, findings, advisories: report.advisories + extra.length, ok: report.ok ? 1 : 0 };
+      const analyses = await cachedFootage(p, tl.clips.map((c) => c.src));
+      const extra = footageFindings(tl, analyses);
+      // Phase 7.3 editorial checks: objective defects vs advisories vs explicit preferences, with evidence.
+      const sources = await transcriptsFor(p, tl.clips.map((c) => c.src));
+      const lib = (tl.broll.length ? (await readLibrary(p)).entries : []);
+      const assetTerms = new Map<string, string[]>();
+      for (const b of tl.broll) { const as = assets.get(b.src); const e = as && lib.find((x) => path.resolve(x.file) === path.resolve(as.path)); if (e) assetTerms.set(b.src, [...e.tags, ...(e.title ? [e.title] : []), ...(e.description ? [e.description] : []), ...(e.modelTags ?? [])]); }
+      const ed = await editorialFindings(tl, words, analyses, { constraints: inp.constraints, transcript: inp.transcript, sources, assetTerms, renderedPath, ffmpeg: (await ffmpegInfo()).ffmpeg });
+      const findings = [...report.findings, ...extra, ...ed.findings];
+      const objective = report.defects + ed.summary.objective;
+      return { ...report, findings, defects: objective, advisories: report.advisories + extra.length + ed.summary.advisory + ed.summary.preference, ok: objective === 0 ? 1 : 0, editorial: ed.summary };
     }
     default:
       throw new TmepError('E_INPUT', `unknown inspect target "${what}"`, 'what: project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief|library');

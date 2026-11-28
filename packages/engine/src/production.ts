@@ -274,7 +274,7 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
         if (r.state !== 'done') throw new TmepError('E_INTERNAL', `preview render ${r.state}`);
         return { file: path.relative(p.root, out), seconds: r.s };
       }
-      case 'inspect': return { findings: prioritize(await qa()) };
+      case 'inspect': { const f = prioritize(await qa()); return { findings: f, objective: f.filter(objective).length, note: 'no objective findings is not proof of creative quality' }; }
       case 'correct': return correct();
       case 'final': {
         const out = path.join(p.root, 'renders', `${pr.id}.mp4`);
@@ -285,38 +285,91 @@ export async function produce(ctx: api.Ctx, inp: ProductionInput, signal?: Abort
     }
   }
 
-  async function qa(): Promise<Finding[]> {
-    const prev = pr.stages.preview.out?.file as string | undefined;
-    const r = await api.inspect(ctx, { what: 'qa', ...(prev && { file: path.join(p.root, prev) }) }) as { findings: Finding[] };
+  async function qa(file?: string | null): Promise<Finding[]> {
+    const prev = file === null ? undefined : file ?? (pr.stages.preview.out?.file as string | undefined);
+    const r = await api.inspect(ctx, { what: 'qa', ...(prev && { file: path.join(p.root, prev) }), constraints: pr.constraints, transcript: { approx, ...(unverified && { unverified }) } }) as { findings: Finding[] };
     return r.findings;
   }
 
-  /** Bounded, deterministic corrections that never contradict an explicit instruction. */
+  /**
+   * Phase 7.4 verified corrections. Each candidate (the fix ops of one objective finding, or a Phase 6
+   * placement fix) becomes a new revision; the affected range is re-rendered as a preview and the edit is
+   * re-inspected. The candidate is kept only when its finding is gone, no new objective finding appears,
+   * the objective count drops and no explicit instruction is contradicted; otherwise the previous
+   * revision is restored. A finding is tried once, cycles are bounded, and the best verified revision is
+   * what remains. Zero objective findings afterwards is not proof of creative quality.
+   */
   async function correct(): Promise<Record<string, unknown>> {
-    const c = pr.constraints;
-    const applied: string[] = [], refused: string[] = [];
+    const attempts: Record<string, unknown>[] = [];
+    let base = (await p.manifest()).head;
     let findings = prioritize(await qa());
-    let cycles = 0, seen = '';
+    const tried = new Set<string>();
+    let cycles = 0, previewMs = 0;
     while (cycles < MAX_CORRECTION_CYCLES) {
-      const key = findings.map((f) => f.code).sort().join(',');
-      if (!findings.length || key === seen) break; // nothing left, or the same defects persist: stop
-      seen = key; cycles++;
-      const ops: Record<string, unknown>[] = [];
-      for (const f of findings) {
-        if (f.fix && /^reframe /.test(f.fix)) { ops.push(parseOpString(f.fix) as Record<string, unknown>); applied.push(`${f.code}: ${f.fix}`); }
-        else if (f.code === 'captions-over-presenter' && c.captions !== false) { const tl = await p.timeline(); const pos = tl.captions.pos === 'upper' ? 'lower' : 'upper'; ops.push({ op: 'captions', pos }); applied.push(`${f.code}: captions ${pos}`); }
-        else if (f.code === 'repetitive-zoom') refused.push(`${f.code}: ${c.zooms === true ? 'zooms were explicitly requested' : 'zoom count comes from the plan; lower zooms.perMinute or drop moment items'}`);
+      const cands = findings.map((f) => ({ f, ops: fixFor(f) })).filter((x) => x.ops.length && !tried.has(sig(x.f)));
+      if (!cands.length) break;
+      cycles++;
+      let progressed = false;
+      for (const { f, ops } of cands) {
+        tried.add(sig(f));
+        const conflict = conflicts(ops, pr.constraints);
+        if (conflict) { attempts.push({ finding: sig(f), verdict: 'refused', reason: conflict }); continue; }
+        const t0 = Date.now();
+        const r = await api.edit(ctx, { ops, note: `production ${pr.id}: correct ${f.code}` }) as { rev: number };
+        // Incremental check: render only the affected range (plus 0.5 s of context) as a preview.
+        let preview: string | undefined;
+        if (f.at) {
+          const out = path.join(p.root, 'renders', `${pr.id}-fix-${r.rev}.mp4`), tp = Date.now();
+          const rr = await api.render(ctx, { out, preview: true, range: [Math.max(0, f.at[0] - 0.5), f.at[1] + 0.5], wait: 600 }).catch((e: Error) => ({ state: `failed: ${e.message}` })) as { state: string };
+          previewMs += Date.now() - tp;
+          if (rr.state !== 'done') { await api.edit(ctx, { checkout: base }); attempts.push({ finding: sig(f), ops, verdict: 'rejected', reason: `preview of the affected range ${rr.state}` }); continue; }
+          preview = path.relative(p.root, out);
+        }
+        const next = prioritize(await qa(null));
+        const before = new Set(findings.filter(objective).map(sig)), after = new Set(next.filter(objective).map(sig));
+        const introduced = [...after].filter((x) => !before.has(x));
+        const gone = !next.some((x) => sig(x) === sig(f));
+        const ok = gone && !introduced.length && (after.size < before.size || !objective(f));
+        attempts.push({ finding: sig(f), ops, verdict: ok ? 'accepted' : 'rejected', reason: ok ? `objective findings ${before.size} → ${after.size}` : !gone ? 'the finding persists' : introduced.length ? `introduces ${introduced.join(', ')}` : 'no objective improvement', ...(preview && { preview }), ms: Date.now() - t0 });
+        if (ok) { base = r.rev; findings = next; progressed = true; } else await api.edit(ctx, { checkout: base });
       }
-      if (!ops.length) break;
-      await api.edit(ctx, { ops, note: `production ${pr.id}: correction ${cycles}` });
-      findings = prioritize(await qa());
+      if (!progressed) break;
     }
-    const unresolved = findings.filter((f) => f.severity !== 'info').map((f) => `${f.code}: ${f.msg}`.slice(0, 200));
-    return { cycles, applied, refused, unresolved, rev: (await p.manifest()).head };
+    if ((await p.manifest()).head !== base) await api.edit(ctx, { checkout: base });
+    const unresolved = findings.filter((f) => f.severity !== 'info').map((f) => `${f.code}${f.class ? ` [${f.class}]` : ''}: ${f.msg}`.slice(0, 200));
+    return {
+      cycles, attempts, applied: attempts.filter((x) => x.verdict === 'accepted').map((x) => x.finding), refused: attempts.filter((x) => x.verdict === 'refused').map((x) => `${x.finding}: ${x.reason}`),
+      unresolved, objectiveRemaining: findings.filter(objective).length, previewMs, rev: base,
+      note: 'Verified against the Inspector only: no objective findings is not proof of creative quality.',
+    };
   }
 }
 
-interface Finding { code: string; severity: string; msg: string; fix?: string }
+interface Finding { code: string; severity: string; msg: string; fix?: string; class?: string; at?: [number, number]; fixOps?: Record<string, unknown>[]; detail?: Record<string, unknown> }
+const objective = (f: Finding) => f.class === 'objective' || (f.class === undefined && f.severity === 'defect');
+const sig = (f: Finding) => [f.code, f.detail?.clip, f.detail?.edge].filter((x) => x !== undefined).join(':');
+/** Fix ops for a finding: the Inspector's own (objective only), or the Phase 6 placement fixes. */
+function fixFor(f: Finding): Record<string, unknown>[] {
+  if (f.class === 'objective' && f.fixOps?.length) return f.fixOps;
+  if (f.fix && /^reframe /.test(f.fix)) return [parseOpString(f.fix) as Record<string, unknown>];
+  if (f.code === 'captions-over-presenter') return [{ op: 'captions', pos: /upper/.test(f.msg) ? 'lower' : 'upper' }];
+  return [];
+}
+/** A correction may never contradict an explicit instruction (Phase 6 rule, now checked per op). */
+export function conflicts(ops: Record<string, unknown>[], c: Constraints): string | undefined {
+  for (const o of ops) {
+    if (o.op === 'captions' && c.captions === false && o.style !== 'none') return 'captions were declined';
+    if (o.op === 'captions' && c.captions === true && o.style === 'none') return 'captions were requested';
+    if (o.op === 'color' && !o.clear && !c.allowLook) return 'colour looks need authorization';
+    if ((o.op === 'zoom' || o.op === 'punch') && c.zooms === false) return 'zooms were declined';
+    if ((o.op === 'gfx' || o.op === 'scene') && c.graphics === false) return 'graphics were declined';
+    if (o.op === 'transition' && c.transitions === false) return 'transitions were declined';
+    if (o.op === 'format' && c.ratio && o.ratio !== c.ratio) return `ratio ${c.ratio} was requested`;
+    if (o.op === 'fx' && !c.allowBackgroundChange && /chroma|mask/.test(String(o.kind ?? o.type ?? ''))) return 'background changes need authorization';
+  }
+  return undefined;
+}
+
 const SEV: Record<string, number> = { defect: 0, error: 0, advisory: 1, warning: 1, info: 2 };
 /** Defects first, then advisories by kind (subject/legibility before taste). */
 export function prioritize(f: Finding[]): Finding[] {
