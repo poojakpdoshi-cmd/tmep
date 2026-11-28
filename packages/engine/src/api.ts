@@ -468,7 +468,7 @@ export async function compile(ctx: Ctx, input: Record<string, unknown> & { dryRu
   const base = hasTl ? await p.timeline() : emptyTimeline('9:16');
   const assets = await p.assets().catch(() => []);
   const assetHashes = assets.map((a) => `${a.id}:${a.hash}`);
-  const cacheKey = hashOf({ v: '3.5', input, ratio: base.settings.ratio, captionPos: base.captions.pos, assetHashes });
+  const cacheKey = hashOf({ v: '4a.1', input, ratio: base.settings.ratio, captionPos: base.captions.pos, assetHashes });
   const cacheFile = p.cachePath('workflows', `${cacheKey}.json`);
   let compiled = await readJsonOr<ReturnType<typeof compileIntent> | undefined>(cacheFile, undefined);
   const cacheHit = !!compiled;

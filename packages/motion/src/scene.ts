@@ -29,6 +29,7 @@ type Parent = { x: number; y: number; s: number; r: number; opacity: number };
 const origin: Parent = { x: 0, y: 0, s: 1, r: 0, opacity: 1 };
 const require = createRequire(import.meta.url);
 const bad = (message: string): never => { throw new TmepError('E_INPUT', message); };
+const chartFont = (weight?: 'regular' | 'bold' | 'heavy') => { const f = resolveFont(weight ?? 'bold'); return { fontName: f.name, ...(f.file && { fontFile: f.file }) }; };
 
 function byId<T extends { id: string }>(values: T[], name: string): Map<string, T> {
   const map = new Map(values.map((value) => [value.id, value]));
@@ -353,7 +354,7 @@ export function compileScenes(tl: Timeline, words: TlWord[], assets: SceneAssets
               layer: {
                 id: layer.id, kind: 'chart', from, to, keys: fx, draw: layer.draw ?? [],
                 box: [width, height], stroke: 0, glow: 0, color: style?.color ?? '#FFFFFF', cap: 'round',
-                chartSpec: { chartType: layer.chartType, data: layer.data, max: layer.max, unit: layer.unit, accent: layer.accent, trackColor: layer.trackColor },
+                chartSpec: { chartType: layer.chartType, data: layer.data, max: layer.max, unit: layer.unit, accent: layer.accent, trackColor: layer.trackColor, ...chartFont(style?.font) },
                 ...(layer.shadow && { shadow: layer.shadow }), ...(layer.clip && { clip: layer.clip }), ...motionFields,
               },
             });

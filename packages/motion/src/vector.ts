@@ -45,6 +45,9 @@ export interface CanvasChartSpec {
   unit: string;
   accent: string;
   trackColor: string;
+  /** Label font (the scene style's resolved font); generic sans-serif when absent. */
+  fontName?: string;
+  fontFile?: string;
 }
 export interface CanvasTextSpec {
   text: string;
@@ -305,7 +308,12 @@ function traceShape(c: Ctx, kind: 'rect' | 'rrect' | 'ellipse', bw: number, bh: 
   }
 }
 
+/** Grouped integers (18,187) for chart values; deterministic, locale-independent. */
+const fmtNum = (v: number) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
 function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progress: number): void {
+  if (spec.fontName) ensureCanvasFont(spec.fontName, spec.fontFile);
+  const family = spec.fontName ? `"${spec.fontName}"` : 'sans-serif';
   const items = spec.data;
   const maxVal = spec.max ?? Math.max(1, ...items.map((d) => d.value));
   const p = Math.min(1, Math.max(0, progress));
@@ -335,9 +343,9 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     const valSize = Math.max(16, Math.round(radius * 0.44));
-    c.font = `700 ${valSize}px sans-serif`;
-    c.fillText(`${Math.round(d.value * p)}${spec.unit}`, 0, -valSize * 0.14);
-    c.font = `500 ${Math.max(12, Math.round(valSize * 0.42))}px sans-serif`;
+    c.font = `700 ${valSize}px ${family}`;
+    c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, 0, -valSize * 0.14);
+    c.font = `500 ${Math.max(12, Math.round(valSize * 0.42))}px ${family}`;
     c.fillStyle = '#CBD5E1';
     c.fillText(d.label, 0, valSize * 0.55);
     return;
@@ -346,8 +354,9 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
   if (spec.chartType === 'hbar') {
     const rowH = ih / items.length;
     const barH = Math.max(8, Math.min(28, rowH * 0.48));
-    const labelSize = Math.max(12, Math.min(24, Math.round(rowH * 0.34)));
-    c.font = `600 ${labelSize}px sans-serif`;
+    // Labels scale with the chart box (the old 24 px cap was illegible at 1080×1920).
+    const labelSize = Math.max(12, Math.min(Math.round(bh * 0.07), Math.round(rowH * 0.34)));
+    c.font = `600 ${labelSize}px ${family}`;
     for (let i = 0; i < items.length; i++) {
       const d = items[i]!;
       const y = -ih / 2 + i * rowH + rowH * 0.52;
@@ -359,7 +368,7 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
 
       c.fillStyle = '#FFFFFF';
       c.textAlign = 'right';
-      c.fillText(`${Math.round(d.value * p)}${spec.unit}`, bw / 2 - padX, y - barH * 0.2);
+      c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, bw / 2 - padX, y - barH * 0.2);
 
       c.fillStyle = spec.trackColor;
       c.beginPath();
@@ -412,8 +421,8 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
   // Default: vertical 'bar' chart
   const slot = iw / items.length;
   const barW = Math.max(10, slot * 0.58);
-  const labelSize = Math.max(11, Math.min(22, Math.round(slot * 0.22)));
-  c.font = `600 ${labelSize}px sans-serif`;
+  const labelSize = Math.max(11, Math.min(Math.round(bh * 0.06), Math.round(slot * 0.22)));
+  c.font = `600 ${labelSize}px ${family}`;
   for (let i = 0; i < items.length; i++) {
     const d = items[i]!;
     const cx = -iw / 2 + slot * (i + 0.5);
@@ -430,7 +439,7 @@ function paintChart(c: Ctx, spec: CanvasChartSpec, bw: number, bh: number, progr
     c.fillText(d.label, cx, bottom + 8);
     c.fillStyle = '#FFFFFF';
     c.textBaseline = 'bottom';
-    c.fillText(`${Math.round(d.value * p)}${spec.unit}`, cx, bottom - barH - 6);
+    c.fillText(`${fmtNum(Math.round(d.value * p))}${spec.unit}`, cx, bottom - barH - 6);
   }
 }
 

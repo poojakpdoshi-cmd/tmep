@@ -4,6 +4,7 @@ import {
 } from '../../core/src/index.ts';
 import { canvasModule, wrapMeasuredText } from '../../motion/src/vector.ts';
 import { resolveFont } from '../../motion/src/fonts.ts';
+import { compilePreset, PRESET_KINDS } from './presets.ts';
 
 export type Platform = 'reels' | 'shorts' | 'tiktok' | 'youtube' | 'square' | 'default';
 export type ThemeName = 'dark' | 'slate' | 'emerald' | 'light';
@@ -95,7 +96,7 @@ export const compileIntentSchema = obj({
 export type CompileIntent = Infer<typeof compileIntentSchema>;
 
 export interface CompileCorrection {
-  code: 'safe-zone-clamp' | 'font-shrink' | 'presenter-avoidance' | 'caption-avoidance';
+  code: 'safe-zone-clamp' | 'font-shrink' | 'presenter-avoidance' | 'caption-avoidance' | 'placement' | 'font-fit' | 'unavoidable-overlap';
   msg: string;
 }
 
@@ -131,6 +132,12 @@ function fitFontSize(
 
 /** Deterministically compile high-level creative intent into a validated VisualScene op. */
 export function compileIntent(raw: unknown, defaults: { ratio?: Ratio; captionPos?: 'lower' | 'middle' | 'upper' } = {}): CompileResult {
+  // Phase 4A motion presets (lower thirds, callouts, UI demos, diagrams, charts, kinetic titles).
+  const kind = (raw as { kind?: unknown } | null)?.kind;
+  if (typeof kind === 'string' && (PRESET_KINDS as readonly string[]).includes(kind)) {
+    const r = compilePreset(raw, defaults);
+    return { ops: r.ops, spec: r.spec, corrections: r.corrections as CompileCorrection[] };
+  }
   const parsed = compileIntentSchema.parse(raw);
   if (!parsed.ok) {
     throw new TmepError('E_INPUT', `invalid compile intent: ${formatIssues(parsed.issues)}`);
