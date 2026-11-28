@@ -149,6 +149,7 @@ Started after the Phase 4A gate: CI run 46114549838 at `f8f4c7e` — **6/6 succe
 | Resources | 10 min 1080p: 20.0 s, Node 125 MB + decoders 95/56 MB, 18 KB record, no models for core analyzers | measured |
 | Real camera footage | none available; media hosts blocked by network policy | **blocked** |
 | Suites | typecheck pass; unit 240/240; e2e 78/78 (local) | pass |
+| CI | run 46116905008 at `b3532ed`: **6/6 success** (ubuntu/windows/macos × Node 22/24) | pass |
 
 Defects found and fixed during 4B development: frame after a flash reported as a cut (unit test; the
 first evaluation missed it because its 1-frame flash fell between samples); cuts between same-tone shots
