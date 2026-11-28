@@ -7,3 +7,5 @@ transcripts/
 .DS_Store
 Thumbs.db
 examples/voiceover-reel/output/work/
+examples/phase-2-demos/out/
+examples/phase-3-demos/out/
