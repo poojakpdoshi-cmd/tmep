@@ -9,6 +9,7 @@ description: Produce clear, restrained educational explainers, tutorials, and in
 Use for explainers, lessons, product walkthroughs, and commentary where comprehension and legibility come first.
 
 ## How (Supported Operations)
+- **Start from the footage**: `video_inspect {what:"brief", asset, task:"informative"}` (after `video_transcribe`) gives the topic, top statements, candidate trims, stat/list/step cues and free graphic regions. Compile presets with `footage: "<asset>"` so lower thirds and callouts avoid the presenter.
 - `video_script` / `video_storyboard` (`process`, `explanation`, `comparison` scenes) or `video_plan` with `template: "explainer"` / `"cinematic_explainer"` and `zooms: false` when static framing is preferred.
 - `captions` (`clean` or `boxed`) positioned clear of visual diagrams.
 

@@ -110,4 +110,48 @@ the PCM stems and skipping normalization.
 
 ### 4.0.7 Stage 4.0 test suites after fixes
 
-See the table at the end of this file (updated after the final run).
+| Suite | Result |
+|---|---|
+| typecheck | pass |
+| unit | 182/182 (176 + 3 animated-mask + 3 Stage 4.0 regressions) |
+| e2e | 76/76 (73 + 3 media regressions: ramp sync, BT.2020/PQ/HLG, silent audio track) |
+
+Commits: `9da3b7f` (fixes + tests), `08c3d40` (harnesses + evidence).
+
+## Phase 4A — Motion and composition
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Animated concave/bezier masks frame-accurate in complete renders | `animated-mask.test.ts` (decoded frames, unit-boundary continuity, mutation check), `evidence/animated-mask-before-after.png` | pass |
+| Motion engine verified on pixels | `motion4a.test.ts` — 9 tests (easing parity to 1e-9, path/arc geometry, morph area, motion-path positions, word animation pixel-identical to static text, reveal coverage, parallax ratio 0.25±0.05, motion-blur smear) | pass |
+| Motion engine in a complete public-API render | `examples/phase-4/motion-demo.ts`, `evidence/motion-demo-sheet.png` (5.5 s 1080×1920, 4-sample motion blur: 19.9 s) | rendered, frames inspected |
+| Presets valid on every ratio/profile | `presets.test.ts` — 36 preset × ratio × profile combinations with zero validator issues; placement, face avoidance, callout never covers target, type ≥ 80 px, UI cursor timing | pass |
+| Presets in complete public-API renders | `examples/phase-4/presets-demo.ts` (editorial, bold), Inspector 0 defects; `evidence/presets-*-sheet.png` | rendered, frames inspected |
+| Identity migration keeps compatibility | `env-alias.test.ts`; `tmep` bins, MCP key, `.tmep/`, `tmep/1` unchanged | pass |
+| Suites | typecheck pass; unit 234/234; e2e 76/76 (local) | pass |
+
+Frame inspection drove four preset fixes before commit: stranded last words (balanced breaks),
+a lower third floating to mid-frame (lower-band search, width then type step-down), a tap label
+covering the clicked control, and 22–24 px chart labels (now box-relative, scene font, grouped
+numbers, `highlight`). CI on macOS/Windows then exposed platform font-metric clipping; fixed by
+measuring the rendered weight and the font's ascent + descent (`a7f0b4a`).
+
+## Phase 4B — Local footage intelligence
+
+Started after the Phase 4A gate: CI run 46114549838 at `f8f4c7e` — **6/6 success**.
+
+| Gate | Evidence | Result |
+|---|---|---|
+| Analysis on labelled footage | `bench/phase4/footage-eval.ts` → `evidence/footage-eval.json`: cut P/R 1.00/1.00, 0 dissolve/flash/pan false cuts (pan held out), silence IoU 0.83, moment recall 5/5 | pass (synthetic) |
+| Unit tests on pure analysis/brief/QA logic | `packages/media/test/footage.test.ts` — 6 tests (flash rejection on both frames, structural cuts, silences, moments, scenes, crop mapping, all five QA advisories, briefs) | pass |
+| Public API end to end | `tests/footage.test.ts` — labelled cuts/silence/moment, cache hit, layered adapters reuse base passes, briefs, missing-moment advisory; footage-aware compile with a control that QA flags and the footage-aware version that it clears | pass |
+| Optional adapters on real content | face region on a public-domain portrait (OpenCV 4.14; visual check `evidence/face-region-real-photo.png`); OpenCV 5 / absent → `unavailable` with remedy; OCR 5/5 scoreboard tokens (tesseract 5.3.4) | pass |
+| Resources | 10 min 1080p: 20.0 s, Node 125 MB + decoders 95/56 MB, 18 KB record, no models for core analyzers | measured |
+| Real camera footage | none available; media hosts blocked by network policy | **blocked** |
+| Suites | typecheck pass; unit 240/240; e2e 78/78 (local) | pass |
+
+Defects found and fixed during 4B development: frame after a flash reported as a cut (unit test; the
+first evaluation missed it because its 1-frame flash fell between samples); cuts between same-tone shots
+missed (structural cue added); OCR dropping single-digit scores; `run()` resolving on non-zero exit would
+have reported missing adapters as available; OpenCV 5 lacks the Haar cascade; graphics-over-presenter
+used coverage of the presenter only (small graphics on a face went unflagged).

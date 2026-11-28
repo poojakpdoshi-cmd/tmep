@@ -9,7 +9,7 @@ FRAME exposes its editing engine through **MCP** (`bin/tmep-mcp.js` / `frame-mcp
 3. **Transcribe**: `video_transcribe` (single) or `video_transcribe_batch` (multiple files, reuses `faster-whisper` model load) or import `.json`/`.srt`/`.vtt`.
 4. **Plan**: `video_plan` (from transcript/media) or `video_script` / `video_storyboard` (structured scenes).
 5. **Edit**: `video_edit` with compact TMEP op strings (e.g. `cut`, `delete`, `tighten`, `broll`, `gfx`, `scene`, `fx`, `transition`, `zoom`, `music`, `sfx`, `set`, `captions`, `format`, `loudness`). Pass `expectedRev` for optimistic concurrency when multiple agents may edit.
-6. **Inspect**: `video_inspect` (`what: project|assets|timeline|transcript|silence|diff|log|jobs`). Read-only; does not create missing projects.
+6. **Inspect**: `video_inspect` (`what: project|assets|timeline|transcript|silence|diff|log|jobs|scenes|qa|footage|brief`). Read-only; does not create missing projects.
 7. **Render & Poll**: `video_render` (use `quality: "preview"` while iterating, `quality: "final"` for export; `frames: true` for contact sheet). Poll `video_status` or cancel via `notifications/cancelled` / `video_status({ job, cancel: true })`.
 
 ## 2. Implemented vs Future Capabilities
@@ -20,7 +20,8 @@ FRAME exposes its editing engine through **MCP** (`bin/tmep-mcp.js` / `frame-mcp
 - **Motion (Canvas scenes)**: measured text, gradients, shadows, charts, kinetic text (`anim` by char/word/line), path `morph`, `motionPath`, `reveal`, `depth` parallax, scene `mblur` and `focus`; 14 easing curves.
 - **Compiler presets** (`video_plan`/`api.compile` intent): `kinetic_title`, `lower_third`, `callout`, `ui_demo`, `animated_diagram`, `dynamic_chart` with style profiles (`editorial`, `bold`, `minimal`, `documentary`, `sports`, `tech`); placement avoids captions, safe zones and `avoid` regions and reports every correction.
 - **QA**: `video_inspect {what:"qa"}` (A/V sync, loudness, clipping, black/silence, safe zones, collisions).
-- **Not implemented yet** (do not promise): footage understanding (shot/scene detection beyond reference cut analysis, OCR, subject/face regions, event detection), automatic creative direction, pitch-preserving variable-speed audio beyond piecewise `atempo`.
+- **Footage intelligence** (`video_inspect {what:"footage"|"brief", asset, task}`): shots, scenes, motion, quality, audio activity, silences, quiet regions, candidate moments with evidence; faces (OpenCV < 5) and visible text (tesseract) only when installed — otherwise reported `unavailable`. Briefs: `informative|sports|cinematic|product|generic`. Compile presets with `footage: "v1"` to keep graphics off the presenter.
+- **Not implemented yet** (do not promise): event recognition (goals, wickets…), object detection, gesture regions, ASR without an installed engine, automatic creative direction, pitch-preserving variable-speed audio beyond piecewise `atempo`.
 
 ## 3. Token Optimization Rules
 
