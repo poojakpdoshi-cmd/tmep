@@ -19,10 +19,10 @@ import { ffmpegInfo, probe } from './ffmpeg.ts';
 import { run } from './exec.ts';
 
 export const FOOTAGE_SCHEMA = 'frame.footage/1';
-export const FOOTAGE_VERSION = '4b.1';
+export const FOOTAGE_VERSION = '5a.1';
 
 export interface Box { x: number; y: number; w: number; h: number }
-export interface Shot { id: string; t0: number; t1: number; cutScore: number; keyframe: number; luma: number; motion: number; detail: number; signature: number[] }
+export interface Shot { id: string; t0: number; t1: number; cutScore: number; /** How the shot begins (absent on the first shot). */ boundary?: 'cut' | 'gradual'; keyframe: number; luma: number; motion: number; detail: number; signature: number[] }
 export interface Scene { id: string; shots: string[]; t0: number; t1: number; confidence: number; basis: string }
 export interface Moment { id: string; t: number; t0: number; t1: number; score: number; confidence: number; evidence: string[]; signals: Record<string, number> }
 export interface QualityFlag { shot: string; flags: ('dark' | 'overexposed' | 'low-detail' | 'static')[]; luma: number; clipHigh: number; detail: number }
@@ -40,6 +40,8 @@ export interface FootageAnalysis {
     /** Audio level (dBFS, RMS) per 0.5 s window; empty without an audio stream. */
     audio: number[];
     silences: { t0: number; t1: number }[];
+    /** Gradual transitions (dissolve, wipe, fade, graphic); hard cuts are the shot boundaries. */
+    transitions?: { t0: number; t1: number; t: number; kind: 'gradual'; score: number }[];
     speech?: { t0: number; t1: number; text: string }[];
     faces?: { t: number; boxes: (Box & { conf: number })[] }[];
     text?: { t: number; text: string; conf: number }[];
@@ -69,7 +71,7 @@ export interface FootageOptions {
   base?: FootageAnalysis;
 }
 
-const GW = 160, GH = 90, N = GW * GH;
+const GW = 160, GH = 90, N = GW * GH, TW = 32, TH = 18;
 const WIN = 0.5;
 
 /** Adaptive sampling: dense for short media, sparser for long-form, bounded total work. */
@@ -78,7 +80,7 @@ export function samplingFps(seconds: number, nativeFps: number): number {
   return Math.max(1, Math.min(target, Math.round(nativeFps) || target));
 }
 
-interface FrameStat { t: number; luma: number; clipLow: number; clipHigh: number; detail: number; diff: number; hist: Float32Array; grid: number[] }
+interface FrameStat { t: number; luma: number; clipLow: number; clipHigh: number; detail: number; diff: number; hist: Float32Array; grid: number[]; thumb?: number[]; t32?: Float32Array }
 
 function stream(bin: string, args: string[], onData: (b: Buffer) => void, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -98,7 +100,7 @@ function stream(bin: string, args: string[], onData: (b: Buffer) => void, signal
   });
 }
 
-async function videoStats(bin: string, file: string, fps: number, maxSeconds: number, signal?: AbortSignal): Promise<FrameStat[]> {
+export async function videoStats(bin: string, file: string, fps: number, maxSeconds: number, signal?: AbortSignal): Promise<FrameStat[]> {
   const stats: FrameStat[] = [];
   let carry: Buffer = Buffer.alloc(0);
   let prev: Buffer | undefined;
@@ -107,10 +109,14 @@ async function videoStats(bin: string, file: string, fps: number, maxSeconds: nu
     let sum = 0, lo = 0, hi = 0, lap = 0, diff = 0;
     const hist = new Float32Array(16);
     const grid = new Array(9).fill(0);
+    const thumb = new Array(64).fill(0);
+    const t32 = new Float32Array(TW * TH);
     for (let y = 0; y < GH; y++) {
       for (let x = 0; x < GW; x++) {
         const i = y * GW + x, v = fr[i]!;
         sum += v; if (v < 16) lo++; if (v > 235) hi++;
+        thumb[((y * 8 / GH) | 0) * 8 + ((x * 8 / GW) | 0)] += v;
+        t32[((y * TH / GH) | 0) * TW + ((x * TW / GW) | 0)]! += v / (N / (TW * TH));
         hist[v >> 4]! += 1;
         let l = 0;
         if (x > 0 && y > 0 && x < GW - 1 && y < GH - 1) { l = Math.abs(4 * v - fr[i - 1]! - fr[i + 1]! - fr[i - GW]! - fr[i + GW]!); lap += l * l; }
@@ -120,7 +126,7 @@ async function videoStats(bin: string, file: string, fps: number, maxSeconds: nu
       }
     }
     for (let k = 0; k < 16; k++) hist[k]! /= N;
-    stats.push({ t: f / fps, luma: sum / N, clipLow: lo / N, clipHigh: hi / N, detail: Math.sqrt(lap / N), diff: prev ? diff / N : 0, hist, grid: grid.map((g) => g / (N / 9)) });
+    stats.push({ t: f / fps, luma: sum / N, clipLow: lo / N, clipHigh: hi / N, detail: Math.sqrt(lap / N), diff: prev ? diff / N : 0, hist, grid: grid.map((g) => g / (N / 9)), thumb: thumb.map((v) => v / (N / 64)), t32 });
     prev = Buffer.from(fr);
     f++;
   };
@@ -161,12 +167,18 @@ export function detectCuts(stats: FrameStat[], fps: number, minShot = 0.4): { t:
   const d = stats.map((s, i) => (i ? histDist(s.hist, stats[i - 1]!.hist) : 0));
   const cuts: { t: number; score: number }[] = [];
   const W = Math.max(3, Math.round(fps * 1.5));
+  const lv = stats[0]?.t32 ? stats.map((s, i) => (i ? compensated(stats[i - 1]!.t32!, s.t32!).plain : 0)) : undefined;
   for (let i = 1; i < d.length; i++) {
     const local = median(d.slice(Math.max(1, i - W), Math.min(d.length, i + W + 1)).filter((_, k, arr) => arr.length > 0));
     // Structural cue for cuts between shots with similar colour histograms: a frame-difference spike.
     const localDiff = median(stats.slice(Math.max(1, i - W), Math.min(stats.length, i + W + 1)).map((s) => s.diff));
     const structural = stats[i]!.diff > 22 && stats[i]!.diff > 4 * localDiff + 4;
-    const strong = (d[i]! > 0.3 && d[i]! > 3 * local + 0.05) || structural;
+    // Level-normalized 32×18 step (when available): catches cuts between shots of similar tone and
+    // vetoes exposure jumps, which change histograms but not structure.
+    const L = lv ? lv[i]! : undefined;
+    const levelCut = L !== undefined && d[i]! > 0.12 && L > 25 && L > 3 * median(lv!.slice(Math.max(1, i - W), Math.min(lv!.length, i + W + 1))) + 8 && compensated(stats[i - 1]!.t32!, stats[i]!.t32!).best > 0.65 * L;
+    const exposure = L !== undefined && (d[i - 1] ?? 0) < 0.1 && (d[i + 1] ?? 0) < 0.1 && correlation(stats[i - 1]!.t32!, stats[i]!.t32!) > 0.9;
+    const strong = ((d[i]! > 0.3 && d[i]! > 3 * local + 0.05) || structural || levelCut) && !exposure;
     // A flash jumps away and back: frame i differs from i-1, frame i+1 jumps again and looks like i-1.
     // A cut jumps once (the next frame continues the new shot). Histograms alone cannot tell two shots
     // with the same tones from a return, so the second jump must also show in pixel differences.
@@ -178,7 +190,82 @@ export function detectCuts(stats: FrameStat[], fps: number, minShot = 0.4): { t:
   return cuts;
 }
 
-export function buildShots(stats: FrameStat[], cuts: { t: number; score: number }[], dur: number): Shot[] {
+const thumbDist = (a: FrameStat, b: FrameStat) => { let d = 0; for (let i = 0; i < 64; i++) d += Math.abs(a.thumb![i]! - b.thumb![i]!); return d / 64; };
+
+/** Pearson correlation of two thumbnails: high when structure is kept (exposure change), low across a cut. */
+export function correlation(A: Float32Array, B: Float32Array): number {
+  let ma = 0, mb = 0;
+  for (let i = 0; i < A.length; i++) { ma += A[i]!; mb += B[i]!; }
+  ma /= A.length; mb /= B.length;
+  let ab = 0, aa = 0, bb = 0;
+  for (let i = 0; i < A.length; i++) { const x = A[i]! - ma, y = B[i]! - mb; ab += x * y; aa += x * x; bb += y * y; }
+  return ab / Math.sqrt(Math.max(1e-9, aa * bb));
+}
+
+/** Share of the difference between two thumbnails that remains after equalizing their mean level. */
+function levelled(A: Float32Array, B: Float32Array): number {
+  let ma = 0, mb = 0;
+  for (let i = 0; i < A.length; i++) { ma += A[i]!; mb += B[i]!; }
+  ma /= A.length; mb /= B.length;
+  let ab = 0, abn = 0;
+  for (let i = 0; i < A.length; i++) { ab += Math.abs(A[i]! - B[i]!); abn += Math.abs(A[i]! - ma - (B[i]! - mb)); }
+  return abn / Math.max(1e-6, ab);
+}
+
+/** Mean-normalized difference of 32×18 thumbnails, unshifted and at the best shift (±4, ±2 cells). */
+export function compensated(a: Float32Array, b: Float32Array): { plain: number; best: number } {
+  let ma = 0, mb = 0;
+  for (let i = 0; i < a.length; i++) { ma += a[i]!; mb += b[i]!; }
+  ma /= a.length; mb /= b.length;
+  let plain = 0, best = Infinity;
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -7; dx <= 7; dx++) {
+    let d = 0, n = 0;
+    for (let y = Math.max(0, -dy); y < TH - Math.max(0, dy); y++) for (let x = Math.max(0, -dx); x < TW - Math.max(0, dx); x++) {
+      d += Math.abs(a[y * TW + x]! - ma - (b[(y + dy) * TW + x + dx]! - mb)); n++;
+    }
+    d /= n; if (dx === 0 && dy === 0) plain = d; if (d < best) best = d;
+  }
+  return { plain, best };
+}
+
+/**
+ * Gradual transitions (dissolves, wipes, fades, graphic transitions): the picture before and after a
+ * window differs strongly while each side is stable and no single frame step explains the change
+ * (that would be a hard cut). A camera move changes continuously, so its sides are not stable.
+ */
+export function detectGradual(stats: FrameStat[], fps: number, cuts: { t: number }[], opts: { half?: number; min?: number } = {}): { t0: number; t1: number; t: number; score: number }[] {
+  if (!stats.length || !stats[0]!.thumb) return [];
+  const k = Math.max(2, Math.round((opts.half ?? 0.5) * fps)), min = opts.min ?? 22;
+  const cand: { i: number; a: number; ratio: number }[] = [];
+  for (let i = 2 * k; i + 2 * k < stats.length; i++) {
+    const a = thumbDist(stats[i - k]!, stats[i + k]!);
+    if (a < min) continue;
+    const side = Math.max(thumbDist(stats[i - 2 * k]!, stats[i - k]!), thumbDist(stats[i + k]!, stats[i + 2 * k]!));
+    let step = 0;
+    for (let j = i - k + 1; j <= i + k; j++) step = Math.max(step, thumbDist(stats[j - 1]!, stats[j]!));
+    if (side > 0.45 * a || step > 0.55 * a) continue;
+    // Tones must change too: a camera move over one scene keeps its histogram, a new shot does not.
+    if (histDist(stats[i - k]!.hist, stats[i + k]!.hist) < 0.15) continue;
+    // Camera motion is explained by shifting consecutive frames, an exposure change by re-levelling
+    // them; a blend between two shots is explained by neither.
+    if (stats[i]!.t32) {
+      let plain = 0, best = 0;
+      for (let j = i - k + 1; j <= i + k; j++) { const c = compensated(stats[j - 1]!.t32!, stats[j]!.t32!); plain += c.plain; best += c.best; }
+      if (best < 0.9 * plain || levelled(stats[i - k]!.t32!, stats[i + k]!.t32!) < 0.8) continue;
+    }
+    if (cuts.some((c) => Math.abs(c.t - stats[i]!.t) <= (2 * k) / fps)) continue;
+    cand.push({ i, a, ratio: a / Math.max(1, side) });
+  }
+  const out: { t0: number; t1: number; t: number; score: number }[] = [];
+  for (const c of [...cand].sort((x, y) => y.a - x.a)) {
+    const t = stats[c.i]!.t;
+    if (out.some((o) => Math.abs(o.t - t) < 1)) continue;
+    out.push({ t: r3(t), t0: r3(stats[c.i - k]!.t), t1: r3(stats[c.i + k]!.t), score: r3(Math.min(1, c.a / 80)) });
+  }
+  return out.sort((x, y) => x.t - y.t);
+}
+
+export function buildShots(stats: FrameStat[], cuts: { t: number; score: number; kind?: 'cut' | 'gradual' }[], dur: number): Shot[] {
   const bounds = [0, ...cuts.map((c) => c.t), dur];
   const shots: Shot[] = [];
   for (let k = 0; k < bounds.length - 1; k++) {
@@ -188,7 +275,7 @@ export function buildShots(stats: FrameStat[], cuts: { t: number; score: number 
     const sig = new Array(16).fill(0);
     for (const s of fr) for (let i = 0; i < 16; i++) sig[i] += s.hist[i]! / fr.length;
     shots.push({
-      id: `s${shots.length + 1}`, t0: r3(t0), t1: r3(t1), cutScore: k ? cuts[k - 1]!.score : 0,
+      id: `s${shots.length + 1}`, t0: r3(t0), t1: r3(t1), cutScore: k ? cuts[k - 1]!.score : 0, ...(k ? { boundary: cuts[k - 1]!.kind ?? 'cut' } : {}),
       keyframe: r3(fr[Math.floor(fr.length / 2)]!.t),
       luma: r3(fr.reduce((a, s) => a + s.luma, 0) / fr.length),
       motion: r3(median(fr.slice(1).map((s) => s.diff))),
@@ -361,7 +448,9 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
   ]);
   const tVideo = Date.now() - t0;
   const cuts = detectCuts(stats, fps);
-  const shots = buildShots(stats, cuts, seconds);
+  const gradual = detectGradual(stats, fps, cuts);
+  // Shots end at hard cuts and at the middle of gradual transitions.
+  const shots = buildShots(stats, [...cuts, ...gradual.map((g) => ({ t: g.t, score: g.score, kind: 'gradual' as const }))].sort((a, b) => a.t - b.t), seconds);
   const motion: number[] = [];
   for (let t = 0; t < seconds; t += WIN) {
     const fr = stats.filter((s) => s.t >= t && s.t < t + WIN && !cuts.some((c) => Math.abs(c.t - s.t) < 0.5 / fps));
@@ -385,7 +474,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
   }).filter((q) => q.flags.length);
 
   const caps: FootageAnalysis['capabilities'] = {
-    shots: { status: 'ok', tool: 'ffmpeg histogram-change detector' },
+    shots: { status: 'ok', tool: 'histogram + structural cut detector, gradual-transition detector' },
     motion: { status: 'ok', tool: 'ffmpeg frame difference' },
     quality: { status: 'ok', tool: 'luma/clipping/Laplacian statistics' },
     audio: pr.audio ? { status: 'ok', tool: 'ffmpeg PCM RMS' } : { status: 'unavailable', reason: 'no audio stream' },
@@ -394,11 +483,11 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
     text: { status: 'unavailable', reason: 'not requested' },
   };
   const provenance: FootageAnalysis['provenance'] = [
-    { analyzer: 'frame.video-stats', version: FOOTAGE_VERSION, method: `${GW}x${GH} gray @ ${fps} fps: histogram cuts, frame difference, Laplacian detail, 3×3 activity`, params: { fps, maxSeconds }, ms: tVideo },
+    { analyzer: 'frame.video-stats', version: FOOTAGE_VERSION, method: `${GW}x${GH} gray @ ${fps} fps: histogram + level-normalized structural cuts, gradual transitions (blend vs camera-motion test), frame difference, Laplacian detail, 3×3 activity`, params: { fps, maxSeconds }, ms: tVideo },
   ];
   if (pr.audio) provenance.push({ analyzer: 'frame.audio-levels', version: FOOTAGE_VERSION, method: 'mono 16 kHz RMS per 0.5 s; silence = 6 dB above an adaptive floor, ≥ 0.6 s', params: {}, ms: tVideo });
 
-  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, quality, gridActivity };
+  const observed: FootageAnalysis['observed'] = { shots, motion, audio: levels.map(r3), silences, transitions: gradual.map((g) => ({ ...g, kind: 'gradual' as const })), quality, gridActivity };
   if (opts.words?.length) {
     // Speech segments come from the transcript: consecutive words with gaps < 0.6 s.
     const segs: { t0: number; t1: number; text: string }[] = [];
@@ -413,7 +502,7 @@ export async function analyzeFootage(file: string, opts: FootageOptions = {}): P
     moments: findMoments(motion, levels, cuts.map((c) => c.t)),
     quietRegions: quietRegions(gridActivity),
     pacing: (() => {
-      const cpm = seconds > 0 ? (cuts.length / seconds) * 60 : 0;
+      const cpm = seconds > 0 ? ((cuts.length + gradual.length) / seconds) * 60 : 0;
       return { cutsPerMinute: r3(cpm), meanShotSec: r3(shots.length ? seconds / shots.length : seconds), label: cpm >= 20 ? 'high' : cpm >= 6 ? 'medium' : 'low' };
     })(),
   };

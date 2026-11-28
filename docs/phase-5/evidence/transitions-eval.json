@@ -1,0 +1,633 @@
+{
+ "tolerance": 0.5,
+ "clips": 33,
+ "summary": {
+  "dev/cuts": {
+   "tp": 13,
+   "fp": 2,
+   "fn": 0,
+   "precision": 0.87,
+   "recall": 1,
+   "meanLocErr": 0.12
+  },
+  "dev/cuts-phase4": {
+   "tp": 13,
+   "fp": 1,
+   "fn": 0,
+   "precision": 0.93,
+   "recall": 1,
+   "meanLocErr": 0.12
+  },
+  "dev/gradual": {
+   "tp": 3,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1,
+   "recall": 1,
+   "meanLocErr": 0.03
+  },
+  "dev/any-boundary": {
+   "tp": 16,
+   "fp": 2,
+   "fn": 0,
+   "precision": 0.89,
+   "recall": 1,
+   "meanLocErr": 0.1
+  },
+  "all/cuts": {
+   "tp": 34,
+   "fp": 2,
+   "fn": 2,
+   "precision": 0.94,
+   "recall": 0.94,
+   "meanLocErr": 0.11
+  },
+  "all/cuts-phase4": {
+   "tp": 30,
+   "fp": 3,
+   "fn": 6,
+   "precision": 0.91,
+   "recall": 0.83,
+   "meanLocErr": 0.11
+  },
+  "all/gradual": {
+   "tp": 5,
+   "fp": 0,
+   "fn": 1,
+   "precision": 1,
+   "recall": 0.83,
+   "meanLocErr": 0.04
+  },
+  "all/any-boundary": {
+   "tp": 39,
+   "fp": 2,
+   "fn": 3,
+   "precision": 0.95,
+   "recall": 0.93,
+   "meanLocErr": 0.11
+  },
+  "heldout/cuts": {
+   "tp": 21,
+   "fp": 0,
+   "fn": 2,
+   "precision": 1,
+   "recall": 0.91,
+   "meanLocErr": 0.11
+  },
+  "heldout/cuts-phase4": {
+   "tp": 17,
+   "fp": 2,
+   "fn": 6,
+   "precision": 0.89,
+   "recall": 0.74,
+   "meanLocErr": 0.11
+  },
+  "heldout/gradual": {
+   "tp": 2,
+   "fp": 0,
+   "fn": 1,
+   "precision": 1,
+   "recall": 0.67,
+   "meanLocErr": 0.05
+  },
+  "heldout/any-boundary": {
+   "tp": 23,
+   "fp": 0,
+   "fn": 3,
+   "precision": 1,
+   "recall": 0.88,
+   "meanLocErr": 0.11
+  }
+ },
+ "rows": [
+  {
+   "id": "Gaming_360P-0b98",
+   "set": "dev",
+   "ms": 818,
+   "cuts": [
+    3.5,
+    6.7,
+    15.7,
+    18.4
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    3.5,
+    15.8,
+    18.4
+   ],
+   "fpCuts": [
+    6.7
+   ],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "HowTo_360P-041c",
+   "set": "dev",
+   "ms": 375,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "HowTo_360P-0562",
+   "set": "dev",
+   "ms": 529,
+   "cuts": [
+    2.7,
+    11.9
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    2.7,
+    11.9
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Lecture_360P-03bc",
+   "set": "dev",
+   "ms": 418,
+   "cuts": [
+    14.1
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    14.1
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Lecture_360P-051a",
+   "set": "dev",
+   "ms": 222,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "NewsClip_360P-0376",
+   "set": "dev",
+   "ms": 537,
+   "cuts": [],
+   "gradual": [
+    5.2
+   ],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "NewsClip_360P-0ff8",
+   "set": "dev",
+   "ms": 411,
+   "cuts": [
+    3.7,
+    14.7
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    3.7,
+    14.7
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-02c3",
+   "set": "dev",
+   "ms": 668,
+   "cuts": [
+    9.9
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    9.9
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-0c66",
+   "set": "dev",
+   "ms": 911,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-11b7",
+   "set": "dev",
+   "ms": 580,
+   "cuts": [
+    1.4,
+    18.4
+   ],
+   "gradual": [
+    9.6,
+    15.3
+   ],
+   "phase4Cuts": [
+    1.4,
+    18.4
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-1803",
+   "set": "dev",
+   "ms": 829,
+   "cuts": [
+    5.7
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    5.7
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "TelevisionClip_360P-0951",
+   "set": "dev",
+   "ms": 386,
+   "cuts": [
+    2.4,
+    14.8
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    2.4,
+    14.8
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "VerticalVideo_360P-0d29",
+   "set": "dev",
+   "ms": 530,
+   "cuts": [
+    17.4
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    17.4
+   ],
+   "fpCuts": [
+    17.4
+   ],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Vlog_360P-1e5b",
+   "set": "dev",
+   "ms": 677,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Vlog_360P-22a0",
+   "set": "dev",
+   "ms": 760,
+   "cuts": [],
+   "gradual": [
+    14.6
+   ],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Gaming_360P-187a",
+   "set": "heldout",
+   "ms": 432,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Gaming_360P-2330",
+   "set": "heldout",
+   "ms": 714,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Gaming_360P-3794",
+   "set": "heldout",
+   "ms": 701,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "HowTo_360P-06be",
+   "set": "heldout",
+   "ms": 417,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "HowTo_360P-09f8",
+   "set": "heldout",
+   "ms": 413,
+   "cuts": [
+    1.7,
+    13
+   ],
+   "gradual": [
+    11.1
+   ],
+   "phase4Cuts": [
+    1.7,
+    7.3,
+    13
+   ],
+   "fpCuts": [],
+   "fnCuts": [
+    10.8
+   ],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "HowTo_360P-127f",
+   "set": "heldout",
+   "ms": 641,
+   "cuts": [
+    17
+   ],
+   "gradual": [
+    3.5
+   ],
+   "phase4Cuts": [
+    17
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Lecture_360P-114f",
+   "set": "heldout",
+   "ms": 395,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Lecture_360P-20c3",
+   "set": "heldout",
+   "ms": 383,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Lecture_360P-2276",
+   "set": "heldout",
+   "ms": 414,
+   "cuts": [
+    13.3,
+    18.3
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    13.3,
+    18.3
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "NewsClip_360P-1093",
+   "set": "heldout",
+   "ms": 556,
+   "cuts": [
+    8.4,
+    17.4
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    8.4
+   ],
+   "fpCuts": [],
+   "fnCuts": [
+    16.1
+   ],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "NewsClip_360P-1b1c",
+   "set": "heldout",
+   "ms": 742,
+   "cuts": [
+    1.6,
+    3.7,
+    6.7,
+    8.8,
+    11.8,
+    14.1,
+    16.2,
+    18.5
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    6.7,
+    8.8,
+    14.1,
+    16.2,
+    18.5
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": [
+    5.2
+   ]
+  },
+  {
+   "id": "NewsClip_360P-1e1c",
+   "set": "heldout",
+   "ms": 497,
+   "cuts": [
+    0.4,
+    6,
+    10,
+    14.5,
+    18.1
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    0.4,
+    6,
+    10,
+    14.5,
+    18.1
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-1d5c",
+   "set": "heldout",
+   "ms": 987,
+   "cuts": [
+    8.7,
+    15.8
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    8.7,
+    15.8
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-2725",
+   "set": "heldout",
+   "ms": 935,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Sports_360P-27b0",
+   "set": "heldout",
+   "ms": 804,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Vlog_360P-2973",
+   "set": "heldout",
+   "ms": 534,
+   "cuts": [
+    17.7,
+    18.1
+   ],
+   "gradual": [],
+   "phase4Cuts": [
+    6.2,
+    16.2,
+    17.7,
+    18.1
+   ],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Vlog_360P-2e9d",
+   "set": "heldout",
+   "ms": 465,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  },
+  {
+   "id": "Vlog_360P-433e",
+   "set": "heldout",
+   "ms": 576,
+   "cuts": [],
+   "gradual": [],
+   "phase4Cuts": [],
+   "fpCuts": [],
+   "fnCuts": [],
+   "fpGradual": [],
+   "fnGradual": []
+  }
+ ]
+}

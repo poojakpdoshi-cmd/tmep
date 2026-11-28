@@ -1,0 +1,480 @@
+{
+ "schema": "frame.labels/1",
+ "dataset": "YouTube UGC dataset (Google), 20 s audio-removed excerpts, 360p H.264 crf10",
+ "source": "https://storage.googleapis.com/ugc-dataset/",
+ "licence": "CC BY 4.0 per clip (see attribution); dataset attribution file: https://storage.googleapis.com/ugc-dataset/ATTRIBUTION",
+ "annotator": "single annotator (agent) from 2 fps contact sheets, refined with 10 fps strips around every boundary and every detector disagreement; label resolution 0.1-0.5 s",
+ "tolerance": 0.5,
+ "classes": {
+  "cuts": "hard cut or transition shorter than 0.3 s",
+  "gradual": "full-frame dissolve/wipe/graphic transition 0.3-1.5 s",
+  "partialGraphics": "boundaries of animated graphics segments or partial-frame graphic transitions",
+  "screenUi": "UI state changes inside a screen recording"
+ },
+ "notes": [
+  "dev clips were labelled in Phase 5.0 and used to design detectors; heldout clips were labelled before any detector change, but detector thresholds were then revised after inspecting heldout errors, so no untouched test set remains for the revised detector",
+  "Sports_360P-11b7 9.6 was found by the gradual detector and confirmed visually (missed in the first labelling pass); 1.4 is a 0.3 s dissolve, counted as a cut"
+ ],
+ "clips": [
+  {
+   "id": "Gaming_360P-0b98",
+   "set": "dev",
+   "file": "original_videos_h264/Gaming_360P-0b98_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    3.5,
+    15.5
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [
+    [
+     10.0,
+     "inserted frame"
+    ],
+    [
+     18.5,
+     "animated logo"
+    ]
+   ],
+   "attribution": "Gaming_360P-0b98 is an audio-removed excerpt from 'Five Nights at Freddy's Gameplay' by 'Adrian Andrei' licensed under CC BY 4.0"
+  },
+  {
+   "id": "HowTo_360P-041c",
+   "set": "dev",
+   "file": "original_videos_h264/HowTo_360P-041c_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "HowTo_360P-041c is an audio-removed excerpt from 'Woodchat On Air 8-8-2012' by 'Woodchat' licensed under CC BY 4.0"
+  },
+  {
+   "id": "HowTo_360P-0562",
+   "set": "dev",
+   "file": "original_videos_h264/HowTo_360P-0562_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    2.5,
+    12.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "HowTo_360P-0562 is an audio-removed excerpt from 'JewelleryMaker DI LIVE 21/07/15' by 'JewelleryMaker' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Lecture_360P-03bc",
+   "set": "dev",
+   "file": "original_videos_h264/Lecture_360P-03bc_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    14.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Lecture_360P-03bc is an audio-removed excerpt from 'Modified Gravity 2: Phenomenology - lecture 1' by 'ICTP High Energy, Cosmology and Astroparticle Physics' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Lecture_360P-051a",
+   "set": "dev",
+   "file": "original_videos_h264/Lecture_360P-051a_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Lecture_360P-051a is an audio-removed excerpt from 'M.R.V.Chaudron - Software Engineering - Guest Lecture TU Eindhoven' by 'OCWLeiden2011's channel' licensed under CC BY 4.0"
+  },
+  {
+   "id": "NewsClip_360P-0376",
+   "set": "dev",
+   "file": "original_videos_h264/NewsClip_360P-0376_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [
+    2.0,
+    5.0,
+    9.0,
+    12.0,
+    16.5,
+    19.0
+   ],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "NewsClip_360P-0376 is an audio-removed excerpt from 'Free Broadcast News Template AE 14' by 'World Design' licensed under CC BY 4.0"
+  },
+  {
+   "id": "NewsClip_360P-0ff8",
+   "set": "dev",
+   "file": "original_videos_h264/NewsClip_360P-0ff8_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    3.5,
+    14.5
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "NewsClip_360P-0ff8 is an audio-removed excerpt from 'bMT НОВИНИТЕ - 03.12.2016' by 'bmt tv' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-02c3",
+   "set": "dev",
+   "file": "original_videos_h264/Sports_360P-02c3_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    9.9
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-02c3 is an audio-removed excerpt from 'Roskilde Karate Klub opvisning' by 'Roskilde Karateklub' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-0c66",
+   "set": "dev",
+   "file": "original_videos_h264/Sports_360P-0c66_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-0c66 is an audio-removed excerpt from 'RPW Playoff Game 3 2015' by 'RCTV Studios' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-11b7",
+   "set": "dev",
+   "file": "original_videos_h264/Sports_360P-11b7_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    1.4,
+    18.4
+   ],
+   "gradual": [
+    9.6,
+    15.4
+   ],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [
+    [
+     12.4,
+     "whip pan"
+    ]
+   ],
+   "attribution": "Sports_360P-11b7 is an audio-removed excerpt from 'Ceará 3 x 0 Grêmio - Brasileirão 2011' by 'Série A Brasileirão 2011' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-1803",
+   "set": "dev",
+   "file": "original_videos_h264/Sports_360P-1803_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    5.5
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-1803 is an audio-removed excerpt from 'LA FIGHT DE LA LNB  HAZEN vs LUTHI 23.12.2015  Ajoie - Rapperswil' by 'TheCedo13' licensed under CC BY 4.0"
+  },
+  {
+   "id": "TelevisionClip_360P-0951",
+   "set": "dev",
+   "file": "original_videos_h264/TelevisionClip_360P-0951_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    2.5,
+    15.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "TelevisionClip_360P-0951 is an audio-removed excerpt from 'Земля-экодом 14.09.10' by 'Живое ТВ' licensed under CC BY 4.0"
+  },
+  {
+   "id": "VerticalVideo_360P-0d29",
+   "set": "dev",
+   "file": "original_videos_h264/VerticalVideo_360P-0d29_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "VerticalVideo_360P-0d29 is an audio-removed excerpt from 'vlog day 1' by 'iambrendon v.' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Vlog_360P-1e5b",
+   "set": "dev",
+   "file": "original_videos_h264/Vlog_360P-1e5b_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Vlog_360P-1e5b is an audio-removed excerpt from 'FUN TIMES IN THE NEIGHBORHOOD WHERE I GREW UP| FAMILY VLOGS' by 'Life with the Kogers' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Vlog_360P-22a0",
+   "set": "dev",
+   "file": "original_videos_h264/Vlog_360P-22a0_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [
+    14.6
+   ],
+   "partialGraphics": [
+    4.2,
+    9.7
+   ],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Vlog_360P-22a0 is an audio-removed excerpt from 'VLOG MAROC PARTAGE DES MOMENTS DE BONHEUR' by 'The Professional Geek' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Gaming_360P-187a",
+   "set": "heldout",
+   "file": "original_videos_h264/Gaming_360P-187a_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Gaming_360P-187a is an audio-removed excerpt from 'Space Colony HD || Sandbox Mode|| \"ITS BAAAACK!\" Ep01||' by 'Isabelle Reid' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Gaming_360P-2330",
+   "set": "heldout",
+   "file": "original_videos_h264/Gaming_360P-2330_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Gaming_360P-2330 is an audio-removed excerpt from 'Cuchillo epico nunca hables sin saber modern warfare 3 gameplay comentado' by 'chinh phan4' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Gaming_360P-3794",
+   "set": "heldout",
+   "file": "original_videos_h264/Gaming_360P-3794_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Gaming_360P-3794 is an audio-removed excerpt from 'Pro Evolution Soccer-Gameplay-Leauge' by 'mrtitantrons1' licensed under CC BY 4.0"
+  },
+  {
+   "id": "HowTo_360P-06be",
+   "set": "heldout",
+   "file": "original_videos_h264/HowTo_360P-06be_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "HowTo_360P-06be is an audio-removed excerpt from 'How to Draw a Portrait of a Young Girl' by 'Quan Sj' licensed under CC BY 4.0"
+  },
+  {
+   "id": "HowTo_360P-09f8",
+   "set": "heldout",
+   "file": "original_videos_h264/HowTo_360P-09f8_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    10.8,
+    13.0
+   ],
+   "gradual": [
+    11.0
+   ],
+   "partialGraphics": [],
+   "screenUi": [
+    1.2,
+    1.7,
+    3.1,
+    5.0,
+    7.3
+   ],
+   "ambiguous": [],
+   "attribution": "HowTo_360P-09f8 is an audio-removed excerpt from 'Mobile se delete huye photo file or data ko kese wapas laye [Hindi-urdu]' by 'rohit roy' licensed under CC BY 4.0"
+  },
+  {
+   "id": "HowTo_360P-127f",
+   "set": "heldout",
+   "file": "original_videos_h264/HowTo_360P-127f_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    17.0
+   ],
+   "gradual": [
+    3.5
+   ],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "HowTo_360P-127f is an audio-removed excerpt from 'Red Garnet on The Late Show with Ed Mckay (JewelleryMaker) LIVE 16/11/2014' by 'JewelleryMaker' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Lecture_360P-114f",
+   "set": "heldout",
+   "file": "original_videos_h264/Lecture_360P-114f_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Lecture_360P-114f is an audio-removed excerpt from 'Advanced Electromagnetism - Lecture 5 of 15' by 'ICTP Postgraduate Diploma Progamme' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Lecture_360P-20c3",
+   "set": "heldout",
+   "file": "original_videos_h264/Lecture_360P-20c3_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Lecture_360P-20c3 is an audio-removed excerpt from 'Functional Analysis - Lecture 19 - UCCS MathOnline' by 'UCCSMathOnline' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Lecture_360P-2276",
+   "set": "heldout",
+   "file": "original_videos_h264/Lecture_360P-2276_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    13.5,
+    18.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Lecture_360P-2276 is an audio-removed excerpt from 'S-dualities in 4d N=2 supersymmetric theories - Lecture 4' by 'ICTP High Energy, Cosmology and Astroparticle Physics' licensed under CC BY 4.0"
+  },
+  {
+   "id": "NewsClip_360P-1093",
+   "set": "heldout",
+   "file": "original_videos_h264/NewsClip_360P-1093_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    8.5,
+    16.1,
+    17.8
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "NewsClip_360P-1093 is an audio-removed excerpt from '02 03 2016 НОВОСТИ 15 15' by 'tvrgomel by' licensed under CC BY 4.0"
+  },
+  {
+   "id": "NewsClip_360P-1b1c",
+   "set": "heldout",
+   "file": "original_videos_h264/NewsClip_360P-1b1c_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    1.6,
+    3.6,
+    6.5,
+    9.0,
+    11.8,
+    14.2,
+    16.0,
+    18.5
+   ],
+   "gradual": [
+    5.2
+   ],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "NewsClip_360P-1b1c is an audio-removed excerpt from 'resum cap de setmana 19-03-2016' by 'IB3 TELEVISIÓ' licensed under CC BY 4.0"
+  },
+  {
+   "id": "NewsClip_360P-1e1c",
+   "set": "heldout",
+   "file": "original_videos_h264/NewsClip_360P-1e1c_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    0.4,
+    6.0,
+    10.0,
+    14.5,
+    18.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "NewsClip_360P-1e1c is an audio-removed excerpt from '14 06 2016 НОВОСТИ РЕГИОНА 18 40' by 'tvrgomel by' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-1d5c",
+   "set": "heldout",
+   "file": "original_videos_h264/Sports_360P-1d5c_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [
+    8.5,
+    16.0
+   ],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-1d5c is an audio-removed excerpt from 'Savvaļas putnu rehabilitācijas stacija Madonas novadā uzsākusi darbu' by 'MADONARPTV' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-2725",
+   "set": "heldout",
+   "file": "original_videos_h264/Sports_360P-2725_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-2725 is an audio-removed excerpt from 'sparring' by 'viper moreno' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Sports_360P-27b0",
+   "set": "heldout",
+   "file": "original_videos_h264/Sports_360P-27b0_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Sports_360P-27b0 is an audio-removed excerpt from 'trofeo adriatico minimoto ripapersico 9 luglio 2018' by 'MALATO DI MOTORI' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Vlog_360P-2973",
+   "set": "heldout",
+   "file": "original_videos_h264/Vlog_360P-2973_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [
+    [
+     17.9,
+     "camera fades to black and re-exposes"
+    ]
+   ],
+   "attribution": "Vlog_360P-2973 is an audio-removed excerpt from 'Preparativos para 1 milhão de inscritos vlog' by 'hoa tran7' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Vlog_360P-2e9d",
+   "set": "heldout",
+   "file": "original_videos_h264/Vlog_360P-2e9d_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Vlog_360P-2e9d is an audio-removed excerpt from 'The Spoony - Vlog 12.17.12 Hobbit [RUS sub]' by 'TheSpoonyRUS' licensed under CC BY 4.0"
+  },
+  {
+   "id": "Vlog_360P-433e",
+   "set": "heldout",
+   "file": "original_videos_h264/Vlog_360P-433e_crf_10_ss_00_t_20.0.mp4",
+   "cuts": [],
+   "gradual": [],
+   "partialGraphics": [],
+   "screenUi": [],
+   "ambiguous": [],
+   "attribution": "Vlog_360P-433e is an audio-removed excerpt from 'HOW TO TRAIN YOUR DOBERMAN  HARNESS MOMENTUM' by 'panzertoo' licensed under CC BY 4.0"
+  }
+ ]
+}
