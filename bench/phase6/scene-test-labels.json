@@ -1,0 +1,404 @@
+{
+ "schema": "frame.labels/1",
+ "task": "scene classification",
+ "times": [
+  2.5,
+  7.5,
+  12.5,
+  17.5
+ ],
+ "note": "UNTOUCHED TEST SET. Labelled from 4-frame contact sheets before any classifier was run on these clips; null = ambiguous, excluded. Taxonomy in docs/phase-6/PROGRESS.md. Split: seed 6006, 3 clips per UGC category, none used in earlier phases.",
+ "annotator": "single annotator (agent)",
+ "clips": [
+  {
+   "id": "Animation_360P-631c",
+   "file": "original_videos_h264/Animation_360P-631c_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Animation_360P-47cc",
+   "file": "original_videos_h264/Animation_360P-47cc_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "Animation_360P-188f",
+   "file": "original_videos_h264/Animation_360P-188f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "animation",
+    "animation",
+    "animation",
+    "animation"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-6da7",
+   "file": "original_videos_h264/CoverSong_360P-6da7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-0aa2",
+   "file": "original_videos_h264/CoverSong_360P-0aa2_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "CoverSong_360P-0a9d",
+   "file": "original_videos_h264/CoverSong_360P-0a9d_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "Gaming_360P-56fe",
+   "file": "original_videos_h264/Gaming_360P-56fe_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-4f09",
+   "file": "original_videos_h264/Gaming_360P-4f09_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Gaming_360P-6207",
+   "file": "original_videos_h264/Gaming_360P-6207_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-3aa6",
+   "file": "original_videos_h264/HowTo_360P-3aa6_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "HowTo_360P-4276",
+   "file": "original_videos_h264/HowTo_360P-4276_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "close-up",
+    "close-up"
+   ]
+  },
+  {
+   "id": "HowTo_360P-2d35",
+   "file": "original_videos_h264/HowTo_360P-2d35_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-27db",
+   "file": "original_videos_h264/Lecture_360P-27db_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    null,
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-7a57",
+   "file": "original_videos_h264/Lecture_360P-7a57_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "Lecture_360P-44c2",
+   "file": "original_videos_h264/Lecture_360P-44c2_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-7483",
+   "file": "original_videos_h264/LiveMusic_360P-7483_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-54d0",
+   "file": "original_videos_h264/LiveMusic_360P-54d0_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LiveMusic_360P-48d5",
+   "file": "original_videos_h264/LiveMusic_360P-48d5_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "LyricVideo_360P-0ac7",
+   "file": "original_videos_h264/LyricVideo_360P-0ac7_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "LyricVideo_360P-17ce",
+   "file": "original_videos_h264/LyricVideo_360P-17ce_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "LyricVideo_360P-5e87",
+   "file": "original_videos_h264/LyricVideo_360P-5e87_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-7b94",
+   "file": "original_videos_h264/MusicVideo_360P-7b94_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-24b0",
+   "file": "original_videos_h264/MusicVideo_360P-24b0_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "close-up",
+    "close-up",
+    "screen",
+    "close-up"
+   ]
+  },
+  {
+   "id": "MusicVideo_360P-5f07",
+   "file": "original_videos_h264/MusicVideo_360P-5f07_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "performance",
+    "performance",
+    "performance",
+    "performance"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-22ce",
+   "file": "original_videos_h264/NewsClip_360P-22ce_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-274e",
+   "file": "original_videos_h264/NewsClip_360P-274e_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "group"
+   ]
+  },
+  {
+   "id": "NewsClip_360P-3451",
+   "file": "original_videos_h264/NewsClip_360P-3451_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "group",
+    "group",
+    "group",
+    "group"
+   ]
+  },
+  {
+   "id": "Sports_360P-5252",
+   "file": "original_videos_h264/Sports_360P-5252_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    null,
+    null
+   ]
+  },
+  {
+   "id": "Sports_360P-5ded",
+   "file": "original_videos_h264/Sports_360P-5ded_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "talking-head",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "Sports_360P-6c6f",
+   "file": "original_videos_h264/Sports_360P-6c6f_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-7b23",
+   "file": "original_videos_h264/TelevisionClip_360P-7b23_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "group",
+    "group",
+    "group"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-11d5",
+   "file": "original_videos_h264/TelevisionClip_360P-11d5_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "talking-head",
+    "scenery",
+    "scenery",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "TelevisionClip_360P-29f1",
+   "file": "original_videos_h264/TelevisionClip_360P-29f1_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    null,
+    "group"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-2fa3",
+   "file": "original_videos_h264/VerticalVideo_360P-2fa3_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "screen",
+    "screen",
+    "screen",
+    "screen"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-3b4e",
+   "file": "original_videos_h264/VerticalVideo_360P-3b4e_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    null,
+    "talking-head",
+    "talking-head",
+    "talking-head"
+   ]
+  },
+  {
+   "id": "VerticalVideo_360P-1424",
+   "file": "original_videos_h264/VerticalVideo_360P-1424_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Vlog_360P-76ae",
+   "file": "original_videos_h264/Vlog_360P-76ae_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Vlog_360P-4697",
+   "file": "original_videos_h264/Vlog_360P-4697_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "scenery",
+    "scenery",
+    "scenery",
+    "scenery"
+   ]
+  },
+  {
+   "id": "Vlog_360P-7efe",
+   "file": "original_videos_h264/Vlog_360P-7efe_crf_10_ss_00_t_20.0.mp4",
+   "labels": [
+    "sports",
+    "sports",
+    "sports",
+    "sports"
+   ]
+  }
+ ]
+}
